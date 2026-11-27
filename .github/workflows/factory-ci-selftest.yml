@@ -71,6 +71,10 @@ jobs:
       - name: type-check the unit tests
         working-directory: rust-ci-runner
         run: cargo test --locked --lib --no-run
+      # The integration tests, executor.rs included (this runner has docker): a broken one turns the run red.
+      - name: integration tests
+        working-directory: rust-ci-runner
+        run: cargo test --locked --test '*'
       - name: format check and clippy
         working-directory: rust-ci-runner
         run: make lint

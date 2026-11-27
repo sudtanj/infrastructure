@@ -1,6 +1,6 @@
 # Pipeline of the runner itself, started by hand with the factory-monorepo-ci workflow (pipeline = rust-ci-runner).
-# Only the --lib unit tests run: tests/executor.rs and the other integration tests call the real docker binary,
-# which a step container does not have.
+# The --lib unit tests and the integration tests that use the stub docker run. tests/executor.rs calls the real docker binary,
+# which a step container does not have, so the selftest runs it.
 # A step container has --pids-limit 512. The tests of ship, job and ci start mock HTTP servers whose threads never exit,
 # so each group runs in its own process.
 # --locked: Cargo.lock is committed, so a dependency never changes under the pipeline; bump it by a reviewed commit.
@@ -11,5 +11,6 @@ commands = [
   "cargo test --locked --lib ship_tests::",
   "cargo test --locked --lib job_tests::",
   "cargo test --locked --lib ci_tests::",
+  "cargo test --locked --test argv --test cli --test cli_logs --test job_prepare --test job_rules --test no_vendor --test ship_job",
 ]
 timeout = 1800
