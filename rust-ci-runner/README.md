@@ -120,7 +120,7 @@ store, and a private repo on a public B is refused.
 
 B is public, so step output must not appear in its Actions log. Set `FACTORY_CI_LOG_URL`, `FACTORY_CI_LOG_USER` and
 `FACTORY_CI_LOG_TOKEN` (Grafana Cloud Loki: the base URL, the instance user ID and a `logs:write` token) in
-Bitwarden. Jobs ship every output line to Loki, labelled by repo, project, step and stream, with secrets replaced.
+Bitwarden. Jobs ship every output line to Loki, labelled `service_name="factory-ci"` plus repo, project, step and stream, with secrets replaced.
 The Actions log shows only `item N`.
 
 Set the variable `FACTORY_CI_LOG_LINK` to an Explore URL containing `{run_id}`; it becomes the status link. Without it
