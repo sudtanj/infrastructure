@@ -27,14 +27,19 @@ fn a_pending_older_than_7200_s_is_planned_again_with_a_new_pending_post() {
     assert!(rows(&fin)[0].retry);
     let posts = api.posts();
     assert_eq!(posts.len(), 1);
-    assert_eq!((posts[0].state.as_str(), posts[0].description.as_str()), ("pending", "queued (retry)"));
+    assert_eq!(
+        (posts[0].state.as_str(), posts[0].description.as_str()),
+        ("pending", "queued (retry)")
+    );
 }
 
 #[test]
 fn the_next_tick_plans_the_rest_and_nothing_twice() {
     // AS 5.4: 25 items, cap 20; the second tick sees the first tick's pending posts
     let api = fake();
-    let tips: Vec<(String, u32, i64)> = (0..25).map(|i| (format!("b{i:02}"), 100 + i as u32, 1000 - 10 * i as i64)).collect();
+    let tips: Vec<(String, u32, i64)> = (0..25)
+        .map(|i| (format!("b{i:02}"), 100 + i as u32, 1000 - 10 * i as i64))
+        .collect();
     let t: Vec<(&str, u32, i64)> = tips.iter().map(|(b, n, a)| (b.as_str(), *n, *a)).collect();
     add_repo(&api, R, &t, &["."]);
     let list = entries(&[(R, "")]);
@@ -57,7 +62,9 @@ fn every_row_has_its_pending_post_before_the_rows_are_returned() {
     let (_, fin) = plan_all(&api, &entries(&[(R, "")]), &opts());
     let posts = api.posts();
     for r in rows(&fin) {
-        assert!(posts.iter().any(|p| p.sha == r.sha && p.context == r.context && p.state == "pending"));
+        assert!(posts
+            .iter()
+            .any(|p| p.sha == r.sha && p.context == r.context && p.state == "pending"));
     }
     assert_eq!(posts.len(), rows(&fin).len());
 }
@@ -82,7 +89,14 @@ fn a_second_error_marked_retry_stays_done() {
     // I24
     let api = fake();
     add_repo(&api, R, &[("main", 1, 10)], &["."]);
-    api.set_status(R, &sha(1), "factory-ci", "error", 90_000, "clone failed (retry)");
+    api.set_status(
+        R,
+        &sha(1),
+        "factory-ci",
+        "error",
+        90_000,
+        "clone failed (retry)",
+    );
     let (_, fin) = plan_all(&api, &entries(&[(R, "")]), &opts());
     assert!(rows(&fin).is_empty());
     assert_eq!(api.writes(), 0);
@@ -106,9 +120,19 @@ fn an_old_marked_pending_is_closed_with_one_error_post_and_no_row() {
     later.now += 2000;
     let aged = crate::fake::FakeApi::new("ci-bot", later.now);
     add_repo(&aged, R, &[("main", 1, 2010)], &["."]);
-    aged.set_status(R, &sha(1), "factory-ci", "error", 1900, &posts[0].description);
+    aged.set_status(
+        R,
+        &sha(1),
+        "factory-ci",
+        "error",
+        1900,
+        &posts[0].description,
+    );
     let (_, old) = plan_all(&aged, &list, &later);
-    assert!(rows(&old).is_empty(), "a closed item was planned a third time");
+    assert!(
+        rows(&old).is_empty(),
+        "a closed item was planned a third time"
+    );
     assert_eq!(aged.writes(), 0);
     // and the next tick leaves it alone: a fresh error ending in (retry) is final
     let (_, again) = plan_all(&api, &list, &opts());

@@ -17,7 +17,10 @@ fn sha(n: u32) -> String {
 }
 
 fn proj(p: &str) -> Project {
-    Project { path: p.to_string(), context: context(p) }
+    Project {
+        path: p.to_string(),
+        context: context(p),
+    }
 }
 
 fn root() -> Vec<Project> {
@@ -35,7 +38,17 @@ fn api() -> FakeApi {
 /// Commits sha(0) (the tip) to sha(len-1); each has the next as its only parent.
 fn chain(api: &FakeApi, len: u32) {
     let list: Vec<(String, Vec<String>, i64)> = (0..len)
-        .map(|i| (sha(i), if i + 1 < len { vec![sha(i + 1)] } else { vec![] }, 100 * i as i64))
+        .map(|i| {
+            (
+                sha(i),
+                if i + 1 < len {
+                    vec![sha(i + 1)]
+                } else {
+                    vec![]
+                },
+                100 * i as i64,
+            )
+        })
         .collect();
     api.set_commits(R, &sha(0), list);
 }
@@ -45,7 +58,10 @@ fn run(api: &FakeApi, projects: &[Project]) -> Result<Decisions, ApiError> {
 }
 
 fn of(d: &Decisions, ctx: &str) -> Decision {
-    d.by_context.get(ctx).unwrap_or_else(|| panic!("no decision for {ctx}: {:?}", d.by_context)).clone()
+    d.by_context
+        .get(ctx)
+        .unwrap_or_else(|| panic!("no decision for {ctx}: {:?}", d.by_context))
+        .clone()
 }
 
 fn is_run(d: &Decision) -> bool {
@@ -65,7 +81,11 @@ fn any_status_on_the_tip_is_done_and_costs_no_history_call() {
         a.set_status(R, &sha(0), "factory-ci", state, 10, "x");
         let d = run(&a, &root()).unwrap();
         assert_eq!(of(&d, "factory-ci"), Decision::Done, "{state}");
-        assert!(!a.calls().iter().any(|c| c.starts_with("commits")), "{state}: {:?}", a.calls());
+        assert!(
+            !a.calls().iter().any(|c| c.starts_with("commits")),
+            "{state}: {:?}",
+            a.calls()
+        );
     }
 }
 
@@ -104,9 +124,18 @@ fn nearest_success_ancestor_with_untouched_files_is_unchanged() {
     }
     a.set_changed(R, &sha(3), &sha(0), &[("b/x.txt", None)]);
     let d = run(&a, &two()).unwrap();
-    assert_eq!(of(&d, "factory-ci/a"), Decision::Unchanged { since: sha(3) });
+    assert_eq!(
+        of(&d, "factory-ci/a"),
+        Decision::Unchanged { since: sha(3) }
+    );
     // the root owns b/x.txt
-    assert_eq!(of(&d, "factory-ci"), Decision::Run { prev: Some(sha(3)), retry: false });
+    assert_eq!(
+        of(&d, "factory-ci"),
+        Decision::Run {
+            prev: Some(sha(3)),
+            retry: false
+        }
+    );
 }
 
 #[test]
@@ -119,7 +148,13 @@ fn a_touched_file_runs_with_the_ancestor_as_prev_including_renames() {
     }
     a.set_changed(R, &sha(2), &sha(0), &[("b/new", Some("a/old"))]);
     let d = run(&a, &two()).unwrap();
-    assert_eq!(of(&d, "factory-ci/a"), Decision::Run { prev: Some(sha(2)), retry: false });
+    assert_eq!(
+        of(&d, "factory-ci/a"),
+        Decision::Run {
+            prev: Some(sha(2)),
+            retry: false
+        }
+    );
 }
 
 #[test]
@@ -133,19 +168,31 @@ fn zero_changed_files_marks_every_project_unchanged() {
     a.set_changed(R, &sha(1), &sha(0), &[]);
     let d = run(&a, &two()).unwrap();
     assert_eq!(of(&d, "factory-ci"), Decision::Unchanged { since: sha(1) });
-    assert_eq!(of(&d, "factory-ci/a"), Decision::Unchanged { since: sha(1) });
+    assert_eq!(
+        of(&d, "factory-ci/a"),
+        Decision::Unchanged { since: sha(1) }
+    );
 }
 
 #[test]
 fn an_ancestor_that_is_not_a_clean_success_runs() {
     // AS 2.4: failure, error, fresh pending, stale pending
-    for (state, age) in [("failure", 100), ("error", 100), ("error", 9000), ("pending", 100), ("pending", 9000)] {
+    for (state, age) in [
+        ("failure", 100),
+        ("error", 100),
+        ("error", 9000),
+        ("pending", 100),
+        ("pending", 9000),
+    ] {
         let a = api();
         chain(&a, 4);
         a.set_status(R, &sha(2), "factory-ci", state, age, "x");
         a.set_changed(R, &sha(2), &sha(0), &[]);
         let d = of(&run(&a, &root()).unwrap(), "factory-ci");
-        assert!(matches!(d, Decision::Run { retry: false, .. }), "{state} {age}: {d:?}");
+        assert!(
+            matches!(d, Decision::Run { retry: false, .. }),
+            "{state} {age}: {d:?}"
+        );
     }
 }
 
@@ -155,7 +202,13 @@ fn no_ancestor_with_a_status_runs_with_no_prev() {
     let a = api();
     chain(&a, 60);
     let d = of(&run(&a, &root()).unwrap(), "factory-ci");
-    assert_eq!(d, Decision::Run { prev: None, retry: false });
+    assert_eq!(
+        d,
+        Decision::Run {
+            prev: None,
+            retry: false
+        }
+    );
 }
 
 #[test]
@@ -172,7 +225,13 @@ fn a_chain_that_leaves_the_commit_window_runs() {
     // the window answer has 30 commits; the 31st exists only as a parent id
     let a = api();
     chain(&a, 30);
-    a.set_commits(R, &sha(0), (0..30).map(|i| (sha(i), vec![sha(i + 1)], 100 * i as i64)).collect());
+    a.set_commits(
+        R,
+        &sha(0),
+        (0..30)
+            .map(|i| (sha(i), vec![sha(i + 1)], 100 * i as i64))
+            .collect(),
+    );
     a.set_status(R, &sha(35), "factory-ci", "success", 500, "ok");
     a.set_changed(R, &sha(35), &sha(0), &[]);
     assert!(is_run(&of(&run(&a, &root()).unwrap(), "factory-ci")));
@@ -195,11 +254,23 @@ fn only_the_first_parent_is_followed_over_a_merge() {
     a.set_status(R, &sha(9), "factory-ci", "success", 500, "ok");
     a.set_changed(R, &sha(9), &sha(0), &[]);
     let d = of(&run(&a, &root()).unwrap(), "factory-ci");
-    assert_eq!(d, Decision::Run { prev: None, retry: false });
-    assert!(!a.calls().iter().any(|c| c.starts_with(&format!("status {R} {}", sha(9)))));
+    assert_eq!(
+        d,
+        Decision::Run {
+            prev: None,
+            retry: false
+        }
+    );
+    assert!(!a
+        .calls()
+        .iter()
+        .any(|c| c.starts_with(&format!("status {R} {}", sha(9)))));
     a.set_status(R, &sha(2), "factory-ci", "success", 500, "ok");
     a.set_changed(R, &sha(2), &sha(0), &[]);
-    let d = of(&decide(&a, R, &sha(0), &root(), NOW, &mut Cache::new("ci-bot")).unwrap(), "factory-ci");
+    let d = of(
+        &decide(&a, R, &sha(0), &root(), NOW, &mut Cache::new("ci-bot")).unwrap(),
+        "factory-ci",
+    );
     assert_eq!(d, Decision::Unchanged { since: sha(2) });
 }
 
@@ -216,7 +287,11 @@ fn a_compare_that_stays_full_or_fails_runs() {
 #[test]
 fn walk_errors_other_than_rate_limits_make_the_project_run() {
     // FR-011
-    let cases = ["commits".to_string(), format!("status {R} {}", sha(1)), "compare".to_string()];
+    let cases = [
+        "commits".to_string(),
+        format!("status {R} {}", sha(1)),
+        "compare".to_string(),
+    ];
     for prefix in cases {
         let a = api();
         chain(&a, 3);
@@ -231,7 +306,11 @@ fn walk_errors_other_than_rate_limits_make_the_project_run() {
 #[test]
 fn rate_limit_propagates_from_every_walk_call() {
     // I13
-    for prefix in ["commits".to_string(), format!("status {R} {}", sha(1)), "compare".to_string()] {
+    for prefix in [
+        "commits".to_string(),
+        format!("status {R} {}", sha(1)),
+        "compare".to_string(),
+    ] {
         let a = api();
         chain(&a, 3);
         a.set_status(R, &sha(1), "factory-ci", "success", 500, "ok");
@@ -252,7 +331,11 @@ fn statuses_are_cached_per_sha_across_projects_and_tips() {
     a.set_commits(
         R,
         &sha(10),
-        vec![(sha(10), vec![sha(3)], 0), (sha(3), vec![sha(4)], 100), (sha(4), vec![], 200)],
+        vec![
+            (sha(10), vec![sha(3)], 0),
+            (sha(3), vec![sha(4)], 100),
+            (sha(4), vec![], 200),
+        ],
     );
     for ctx in ["factory-ci", "factory-ci/a"] {
         a.set_status(R, &sha(3), ctx, "success", 500, "ok");
@@ -262,7 +345,11 @@ fn statuses_are_cached_per_sha_across_projects_and_tips() {
     let mut cache = Cache::new("ci-bot");
     decide(&a, R, &sha(0), &two(), NOW, &mut cache).unwrap();
     decide(&a, R, &sha(10), &two(), NOW, &mut cache).unwrap();
-    let n = a.calls().iter().filter(|c| **c == format!("status {R} {}", sha(3))).count();
+    let n = a
+        .calls()
+        .iter()
+        .filter(|c| **c == format!("status {R} {}", sha(3)))
+        .count();
     assert_eq!(n, 1, "{:?}", a.calls());
 }
 
@@ -286,22 +373,37 @@ fn tip_decision(state: &str, age: i64, desc: &str) -> Decision {
 #[test]
 fn an_old_unmarked_error_is_retried_once() {
     assert!(retry_of(&tip_decision("error", 1801, "step build failed")));
-    assert_eq!(tip_decision("error", 1801, "clone failed (retry)"), Decision::Done);
+    assert_eq!(
+        tip_decision("error", 1801, "clone failed (retry)"),
+        Decision::Done
+    );
     assert_eq!(tip_decision("error", 1799, "clone failed"), Decision::Done);
     assert_eq!(tip_decision("error", 1800, "clone failed"), Decision::Done);
 }
 
 #[test]
 fn a_failure_is_never_retried() {
-    assert_eq!(tip_decision("failure", 999_999, "step x failed: exit code 1"), Decision::Done);
-    assert_eq!(tip_decision("success", 999_999, "all steps passed"), Decision::Done);
+    assert_eq!(
+        tip_decision("failure", 999_999, "step x failed: exit code 1"),
+        Decision::Done
+    );
+    assert_eq!(
+        tip_decision("success", 999_999, "all steps passed"),
+        Decision::Done
+    );
 }
 
 #[test]
 fn an_old_pending_is_replanned_once_then_closed() {
     assert!(retry_of(&tip_decision("pending", 7201, "queued")));
-    assert_eq!(tip_decision("pending", 7201, "queued (retry)"), Decision::Close);
-    assert_eq!(tip_decision("pending", 7200, "queued (retry)"), Decision::Done);
+    assert_eq!(
+        tip_decision("pending", 7201, "queued (retry)"),
+        Decision::Close
+    );
+    assert_eq!(
+        tip_decision("pending", 7200, "queued (retry)"),
+        Decision::Done
+    );
 }
 
 #[test]
@@ -309,15 +411,32 @@ fn a_status_by_another_creator_is_ignored() {
     // FR-049, I20
     let a = api();
     chain(&a, 3);
-    a.set_status_by(R, &sha(0), "factory-ci", "success", 10, "all steps passed", "mallory");
+    a.set_status_by(
+        R,
+        &sha(0),
+        "factory-ci",
+        "success",
+        10,
+        "all steps passed",
+        "mallory",
+    );
     let d = of(&run(&a, &root()).unwrap(), "factory-ci");
-    assert_eq!(d, Decision::Run { prev: None, retry: false });
+    assert_eq!(
+        d,
+        Decision::Run {
+            prev: None,
+            retry: false
+        }
+    );
 }
 
 struct Lcg(u64);
 impl Lcg {
     fn next(&mut self, m: u64) -> u64 {
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (self.0 >> 33) % m
     }
 }
@@ -344,7 +463,10 @@ fn foreign_statuses_never_change_a_decision() {
             full.set_changed(R, &sha(i), &sha(0), &[]);
             clean.set_changed(R, &sha(i), &sha(0), &[]);
         }
-        assert_eq!(run(&full, &root()).unwrap().by_context, run(&clean, &root()).unwrap().by_context);
+        assert_eq!(
+            run(&full, &root()).unwrap().by_context,
+            run(&clean, &root()).unwrap().by_context
+        );
     }
 }
 
@@ -384,7 +506,13 @@ fn with_no_status_anywhere_every_project_runs() {
         chain(&a, 1 + rng.next(70) as u32);
         let d = run(&a, &two()).unwrap();
         for ctx in ["factory-ci", "factory-ci/a"] {
-            assert_eq!(of(&d, ctx), Decision::Run { prev: None, retry: false });
+            assert_eq!(
+                of(&d, ctx),
+                Decision::Run {
+                    prev: None,
+                    retry: false
+                }
+            );
         }
     }
 }
@@ -404,7 +532,14 @@ fn unchanged_only_when_no_changed_path_is_owned() {
         let changed: Vec<(&str, Option<&str>)> = (0..rng.next(3))
             .map(|_| {
                 let f = files[rng.next(5) as usize];
-                (f, if rng.next(3) == 0 { Some(files[rng.next(5) as usize]) } else { None })
+                (
+                    f,
+                    if rng.next(3) == 0 {
+                        Some(files[rng.next(5) as usize])
+                    } else {
+                        None
+                    },
+                )
             })
             .collect();
         a.set_changed(R, &sha(1), &sha(0), &changed);
@@ -414,7 +549,11 @@ fn unchanged_only_when_no_changed_path_is_owned() {
                 .iter()
                 .any(|(f, prev)| owns(p, f, &set) || prev.is_some_and(|x| owns(p, x, &set)));
             let got = of(&d, &context(p));
-            assert_eq!(matches!(got, Decision::Unchanged { .. }), !touched, "{p} {changed:?} {got:?}");
+            assert_eq!(
+                matches!(got, Decision::Unchanged { .. }),
+                !touched,
+                "{p} {changed:?} {got:?}"
+            );
         }
     }
 }

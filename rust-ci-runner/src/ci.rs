@@ -4,7 +4,9 @@
 //! of lines (`Log` in public mode); every detail goes to the log store only.
 
 use crate::engine::{run_capped, Engine};
-use crate::job::{dind_image, prepare, project_dir, remove_ws, run_env, run_pipeline, with_shipper, MAX_LOG_BYTES};
+use crate::job::{
+    dind_image, prepare, project_dir, remove_ws, run_env, run_pipeline, with_shipper, MAX_LOG_BYTES,
+};
 use crate::log::{Log, LOG_STORE_HINT};
 use crate::pipeline::valid_name;
 use crate::projects::folder_name_ok;
@@ -101,12 +103,15 @@ fn parse_args(args: &[String]) -> Option<Args> {
             return None;
         }
     }
-    let (repos, repo, git_ref, work): (String, String, String, String) = (repos?, repo?, git_ref?, work?);
+    let (repos, repo, git_ref, work): (String, String, String, String) =
+        (repos?, repo?, git_ref?, work?);
     let project = project.unwrap_or_else(|| ".".to_string());
     let ref_ok = (1..=200).contains(&git_ref.len())
         && !git_ref.starts_with('-')
         && !git_ref.contains("..")
-        && git_ref.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'/' | b'-'));
+        && git_ref
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'/' | b'-'));
     // The path must equal its canonical form: the runner builds every mount path under it unchanged.
     let work_ok = work.starts_with('/')
         && !work.contains(':')
@@ -115,7 +120,14 @@ fn parse_args(args: &[String]) -> Option<Args> {
     if !(ref_ok && work_ok && (project == "." || folder_name_ok(&project))) {
         return None;
     }
-    Some(Args { repos, repo, git_ref, project, work, allow_docker })
+    Some(Args {
+        repos,
+        repo,
+        git_ref,
+        project,
+        work,
+        allow_docker,
+    })
 }
 
 /// A writer both logs share: the first log has no redactor yet, the second has no sink yet.
@@ -139,7 +151,9 @@ struct Streams {
 
 impl Streams {
     fn log(&self, red: Redactor, shipper: &Option<Arc<Shipper>>) -> Log {
-        let log = Log::new(Box::new(self.out.clone()), red, MAX_LOG_BYTES).public_events(true).with_err(Box::new(self.err.clone()));
+        let log = Log::new(Box::new(self.out.clone()), red, MAX_LOG_BYTES)
+            .public_events(true)
+            .with_err(Box::new(self.err.clone()));
         with_shipper(log, shipper)
     }
 }
@@ -154,27 +168,47 @@ pub fn run(
     out: Box<dyn Write + Send>,
     err: Box<dyn Write + Send>,
 ) -> i32 {
-    let streams = Streams { out: Shared(Arc::new(Mutex::new(out))), err: Shared(Arc::new(Mutex::new(err))) };
+    let streams = Streams {
+        out: Shared(Arc::new(Mutex::new(out))),
+        err: Shared(Arc::new(Mutex::new(err))),
+    };
     match catch_unwind(AssertUnwindSafe(|| job(args, token, env, seams, &streams))) {
         Ok(code) => code,
         Err(_) => {
-            streams.log(Redactor::new([]), &None).fault("internal error");
+            streams
+                .log(Redactor::new([]), &None)
+                .fault("internal error");
             1
         }
     }
 }
 
-fn job(args: &[String], token: &str, env: &dyn Fn(&str) -> Option<String>, s: &Seams, w: &Streams) -> i32 {
+fn job(
+    args: &[String],
+    token: &str,
+    env: &dyn Fn(&str) -> Option<String>,
+    s: &Seams,
+    w: &Streams,
+) -> i32 {
     let early = w.log(Redactor::new([]), &None);
     let fail = |text: &str| -> i32 {
         early.fault(text);
         1
     };
-    let Some(a) = parse_args(args) else { return fail("bad arguments") };
+    let Some(a) = parse_args(args) else {
+        return fail("bad arguments");
+    };
     let listed = watch::read(Path::new(&a.repos)).ok().and_then(|list| {
-        list.into_iter().find(|e| e.repo == a.repo && e.id.is_some() && e.matches_branch(&a.git_ref) && (!a.allow_docker || e.allow_docker))
+        list.into_iter().find(|e| {
+            e.repo == a.repo
+                && e.id.is_some()
+                && e.matches_branch(&a.git_ref)
+                && (!a.allow_docker || e.allow_docker)
+        })
     });
-    let Some(want_id) = listed.and_then(|e| e.id) else { return fail("repository or ref not in the watch list") };
+    let Some(want_id) = listed.and_then(|e| e.id) else {
+        return fail("repository or ref not in the watch list");
+    };
     if token.is_empty() {
         return fail("BWS_ACCESS_TOKEN is not set");
     }
@@ -191,18 +225,39 @@ fn job(args: &[String], token: &str, env: &dyn Fn(&str) -> Option<String>, s: &S
             _ => None,
         }
     };
-    let Ok(Some(cfg)) = LogConfig::from_env(&settings) else { return fail(LOG_STORE_HINT) };
-    let run_id = env("GITHUB_RUN_ID").filter(|v| valid_name(v)).unwrap_or_else(random_id);
+    let Ok(Some(cfg)) = LogConfig::from_env(&settings) else {
+        return fail(LOG_STORE_HINT);
+    };
+    let run_id = env("GITHUB_RUN_ID")
+        .filter(|v| valid_name(v))
+        .unwrap_or_else(random_id);
     let probed = ship::probe(&cfg, &run_id, s.limits.probe);
     let (Ok(code) | Err(code)) = probed;
     early.event("runner", &format!("log store answered HTTP {code:03}"));
     if probed.is_err() {
-        return fail(if code == 401 || code == 403 { LOG_STORE_HINT } else { "log store check failed" });
+        return fail(if code == 401 || code == 403 {
+            LOG_STORE_HINT
+        } else {
+            "log store check failed"
+        });
     }
-    let labels = Labels { repo: a.repo.clone(), project: a.project.clone() };
-    let meta = Meta { run_id: run_id.clone(), sha: String::new(), branch: a.git_ref.clone() };
+    let labels = Labels {
+        repo: a.repo.clone(),
+        project: a.project.clone(),
+    };
+    let meta = Meta {
+        run_id: run_id.clone(),
+        sha: String::new(),
+        branch: a.git_ref.clone(),
+    };
     let shipper = Shipper::start(cfg, labels, meta);
-    let red = Redactor::new([token.to_string(), sec.token.clone(), sec.log_url.clone(), sec.log_user.clone(), sec.log_token.clone()]);
+    let red = Redactor::new([
+        token.to_string(),
+        sec.token.clone(),
+        sec.log_url.clone(),
+        sec.log_user.clone(),
+        sec.log_token.clone(),
+    ]);
     let log = w.log(red, &Some(shipper.clone()));
     let passed = steps(&a, want_id, &sec.token, &run_id, env, s, &log);
     let delivered = shipper.finish(FLUSH_WINDOW);
@@ -214,7 +269,15 @@ fn job(args: &[String], token: &str, env: &dyn Fn(&str) -> Option<String>, s: &S
 
 /// Engine check, identity check, fetch, pipeline. Faults print their fixed line; the detail goes
 /// to the log store as step `ci`. True when the pipeline passed.
-fn steps(a: &Args, want_id: u64, token: &str, run_id: &str, env: &dyn Fn(&str) -> Option<String>, s: &Seams, log: &Log) -> bool {
+fn steps(
+    a: &Args,
+    want_id: u64,
+    token: &str,
+    run_id: &str,
+    env: &dyn Fn(&str) -> Option<String>,
+    s: &Seams,
+    log: &Log,
+) -> bool {
     let detail = |text: &str| log.out("ci", "stderr", text);
     let engine = Engine::new(&s.engine);
     if let Err(e) = engine.capture(&["version".to_string()], &[], Duration::from_secs(60), None) {
@@ -248,10 +311,20 @@ fn steps(a: &Args, want_id: u64, token: &str, run_id: &str, env: &dyn Fn(&str) -
 
 /// Pipeline checks and the run, on a checkout. Returns whether it passed and a step image that can
 /// remove the directory. Faults print their fixed line; the detail goes to the log store.
-fn run_checkout(a: &Args, src: &Path, sha: &str, run_id: &str, env: &dyn Fn(&str) -> Option<String>, engine: &Engine, log: &Log) -> (bool, Option<String>) {
+fn run_checkout(
+    a: &Args,
+    src: &Path,
+    sha: &str,
+    run_id: &str,
+    env: &dyn Fn(&str) -> Option<String>,
+    engine: &Engine,
+    log: &Log,
+) -> (bool, Option<String>) {
     let detail = |text: &str| log.out("ci", "stderr", text);
     let loaded = project_dir(src, &a.project).and_then(|dir| {
-        prepare(&dir, None, |_| None, true).map(|(p, _)| (dir, p)).map_err(|bad| bad.join("\n"))
+        prepare(&dir, None, |_| None, true)
+            .map(|(p, _)| (dir, p))
+            .map_err(|bad| bad.join("\n"))
     });
     let (dir, p) = match loaded {
         Ok(v) => v,
@@ -265,20 +338,45 @@ fn run_checkout(a: &Args, src: &Path, sha: &str, run_id: &str, env: &dyn Fn(&str
     let dind = match (p.docker_problems(a.allow_docker), dind_image(env, &p)) {
         (bad, Ok(dind)) if bad.is_empty() => dind,
         (bad, dind) => {
-            detail(&bad.into_iter().chain(dind.err()).collect::<Vec<_>>().join(". "));
+            detail(
+                &bad.into_iter()
+                    .chain(dind.err())
+                    .collect::<Vec<_>>()
+                    .join(". "),
+            );
             log.fault("docker steps are refused");
             return (false, image);
         }
     };
     let mut step_env = run_env(run_id, sha, None, &a.git_ref, "manual");
     // The checkout belongs to the runner's user, not to root in the step: let git use it.
-    let safe = [("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "safe.directory"), ("GIT_CONFIG_VALUE_0", "/workspace")];
+    let safe = [
+        ("GIT_CONFIG_COUNT", "1"),
+        ("GIT_CONFIG_KEY_0", "safe.directory"),
+        ("GIT_CONFIG_VALUE_0", "/workspace"),
+    ];
     step_env.extend(safe.map(|(k, v)| (k.to_string(), v.to_string())));
-    let out = run_pipeline(engine, run_id, &dir, &p, step_env, BTreeMap::new(), log, &dind);
+    let out = run_pipeline(
+        engine,
+        run_id,
+        &dir,
+        &p,
+        step_env,
+        BTreeMap::new(),
+        log,
+        &dind,
+    );
     engine.cleanup_run(run_id);
     let passed = match out {
         Ok(o) => {
-            log.event("runner", if o.ok() { "pipeline passed" } else { "pipeline failed" });
+            log.event(
+                "runner",
+                if o.ok() {
+                    "pipeline passed"
+                } else {
+                    "pipeline failed"
+                },
+            );
             o.ok()
         }
         Err(e) => {
@@ -292,18 +390,29 @@ fn run_checkout(a: &Args, src: &Path, sha: &str, run_id: &str, env: &dyn Fn(&str
 
 /// `GET <api>/repos/<repo>`: the numeric id must be the one in the watch entry. Errors are fixed text.
 fn identity(a: &Args, want: u64, token: &str, s: &Seams) -> Result<(), String> {
-    let agent = ureq::AgentBuilder::new().timeout(s.limits.identity).redirects(0).build();
+    let agent = ureq::AgentBuilder::new()
+        .timeout(s.limits.identity)
+        .redirects(0)
+        .build();
     let res = agent
-        .get(&format!("{}/repos/{}", s.api_base.trim_end_matches('/'), a.repo))
+        .get(&format!(
+            "{}/repos/{}",
+            s.api_base.trim_end_matches('/'),
+            a.repo
+        ))
         .set("Authorization", &format!("Bearer {token}"))
         .set("Accept", "application/vnd.github+json")
         .call();
     let body = match res {
-        Ok(r) => r.into_string().map_err(|_| "unreadable answer".to_string())?,
+        Ok(r) => r
+            .into_string()
+            .map_err(|_| "unreadable answer".to_string())?,
         Err(ureq::Error::Status(c, _)) => return Err(format!("HTTP {c}")),
         Err(_) => return Err("no answer".to_string()),
     };
-    let got = serde_json::from_str::<serde_json::Value>(&body).ok().and_then(|v| v["id"].as_u64());
+    let got = serde_json::from_str::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|v| v["id"].as_u64());
     if got == Some(want) {
         Ok(())
     } else {
@@ -324,7 +433,9 @@ fn git(s: &Seams, header: Option<&str>) -> Command {
         c.env("PATH", path);
     }
     if let Some(h) = header {
-        c.env("GIT_CONFIG_COUNT", "1").env("GIT_CONFIG_KEY_0", "http.https://github.com/.extraHeader").env("GIT_CONFIG_VALUE_0", h);
+        c.env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "http.https://github.com/.extraHeader")
+            .env("GIT_CONFIG_VALUE_0", h);
     }
     c
 }
@@ -345,12 +456,36 @@ fn fetch_ref(a: &Args, token: &str, run_id: &str, s: &Seams) -> Result<(PathBuf,
     let dir = format!("{}/ci-{run_id}-{}/src", a.work, random_id());
     let url = format!("{}/{}.git", s.clone_base.trim_end_matches('/'), a.repo);
     let refspec = format!("refs/heads/{}", a.git_ref);
-    let header = format!("Authorization: basic {}", base64(format!("x-access-token:{token}").as_bytes()));
+    let header = format!(
+        "Authorization: basic {}",
+        base64(format!("x-access-token:{token}").as_bytes())
+    );
     let lim = s.limits.fetch;
     git_run(git(s, None), &["init", "-q", &dir], lim)?;
-    git_run(git(s, Some(&header)), &["-C", &dir, "fetch", "-q", "--depth", "1", "--no-tags", "--", &url, &refspec], lim)?;
-    git_run(git(s, None), &["-C", &dir, "checkout", "-q", "--detach", "FETCH_HEAD"], lim)?;
-    let sha = git_run(git(s, None), &["-C", &dir, "rev-parse", "HEAD"], lim)?.trim().to_string();
+    git_run(
+        git(s, Some(&header)),
+        &[
+            "-C",
+            &dir,
+            "fetch",
+            "-q",
+            "--depth",
+            "1",
+            "--no-tags",
+            "--",
+            &url,
+            &refspec,
+        ],
+        lim,
+    )?;
+    git_run(
+        git(s, None),
+        &["-C", &dir, "checkout", "-q", "--detach", "FETCH_HEAD"],
+        lim,
+    )?;
+    let sha = git_run(git(s, None), &["-C", &dir, "rev-parse", "HEAD"], lim)?
+        .trim()
+        .to_string();
     if !crate::github::is_sha(&sha) {
         return Err("git rev-parse did not print a commit id".to_string());
     }

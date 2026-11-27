@@ -23,7 +23,15 @@ fn a_stranger_status_is_ignored_and_the_project_still_runs() {
     // FR-050, I20
     let api = fake();
     add_repo(&api, R, &[("main", 1, 10)], &["."]);
-    api.set_status_by(R, &sha(1), "factory-ci", "success", 10, "all steps passed", "mallory");
+    api.set_status_by(
+        R,
+        &sha(1),
+        "factory-ci",
+        "success",
+        10,
+        "all steps passed",
+        "mallory",
+    );
     let (_, fin) = plan_all(&api, &entries(&[(R, "")]), &opts());
     assert_eq!(rows(&fin).len(), 1);
 }
@@ -35,7 +43,10 @@ fn users_are_looked_up_once_per_token() {
     add_repo(&api, "o/a", &[("main", 1, 10)], &["."]);
     add_repo(&api, "o/b", &[("main", 2, 10)], &["."]);
     plan_all(&api, &entries(&[("o/a", ""), ("o/b", "")]), &opts());
-    assert_eq!(api.calls().iter().filter(|c| c.starts_with("user")).count(), 1);
+    assert_eq!(
+        api.calls().iter().filter(|c| c.starts_with("user")).count(),
+        1
+    );
 }
 
 #[test]
@@ -47,8 +58,15 @@ fn an_entry_id_that_differs_from_the_api_id_skips_the_repo_naming_both() {
     let (_, fin) = plan_all(&api, &entries(&[(R, "id = 123")]), &opts());
     assert!(rows(&fin).is_empty());
     assert_eq!(fin.problems.len(), 1);
-    assert!(fin.problems[0].contains("123") && fin.problems[0].contains("999"), "{:?}", fin.problems);
-    assert!(api.calls().iter().all(|c| !c.starts_with("branches")), "a skipped repo costs only the lookup");
+    assert!(
+        fin.problems[0].contains("123") && fin.problems[0].contains("999"),
+        "{:?}",
+        fin.problems
+    );
+    assert!(
+        api.calls().iter().all(|c| !c.starts_with("branches")),
+        "a skipped repo costs only the lookup"
+    );
 }
 
 #[test]
@@ -87,7 +105,11 @@ fn a_private_repo_on_a_public_b_without_a_log_store_is_dropped_with_a_problem() 
     let api = fake();
     api.set_repo(R, 1, true, "main");
     add_repo(&api, R, &[("main", 1, 10)], &["."]);
-    let o = Opts { b_private: false, log_store: false, ..opts() };
+    let o = Opts {
+        b_private: false,
+        log_store: false,
+        ..opts()
+    };
     let (_, fin) = plan_all(&api, &entries(&[(R, "")]), &o);
     assert!(rows(&fin).is_empty());
     assert_eq!(fin.problems.len(), 1);
@@ -99,18 +121,38 @@ fn with_a_log_store_the_private_row_is_planned_fail_closed() {
     let api = fake();
     api.set_repo(R, 1, true, "main");
     add_repo(&api, R, &[("main", 1, 10)], &["."]);
-    let o = Opts { b_private: false, log_store: true, ..opts() };
+    let o = Opts {
+        b_private: false,
+        log_store: true,
+        ..opts()
+    };
     let (_, fin) = plan_all(&api, &entries(&[(R, "")]), &o);
     assert!(rows(&fin)[0].fail_closed);
     // a public repo is never fail_closed; a private B needs no gate
     let api = fake();
     add_repo(&api, R, &[("main", 1, 10)], &["."]);
-    let (_, fin) = plan_all(&api, &entries(&[(R, "")]), &Opts { b_private: false, log_store: true, ..opts() });
+    let (_, fin) = plan_all(
+        &api,
+        &entries(&[(R, "")]),
+        &Opts {
+            b_private: false,
+            log_store: true,
+            ..opts()
+        },
+    );
     assert!(!rows(&fin)[0].fail_closed);
     let api = fake();
     api.set_repo(R, 1, true, "main");
     add_repo(&api, R, &[("main", 1, 10)], &["."]);
-    let (_, fin) = plan_all(&api, &entries(&[(R, "")]), &Opts { b_private: true, log_store: false, ..opts() });
+    let (_, fin) = plan_all(
+        &api,
+        &entries(&[(R, "")]),
+        &Opts {
+            b_private: true,
+            log_store: false,
+            ..opts()
+        },
+    );
     assert!(!rows(&fin)[0].fail_closed);
 }
 
@@ -120,10 +162,18 @@ fn writes_are_spaced_750_ms_apart() {
     let api = fake();
     add_repo(&api, R, &[("a", 1, 30), ("b", 2, 20), ("c", 3, 10)], &["."]);
     SLEPT_MS.with(|s| s.set(0));
-    let o = Opts { pace_ms: 750, sleep: record_sleep, ..opts() };
+    let o = Opts {
+        pace_ms: 750,
+        sleep: record_sleep,
+        ..opts()
+    };
     plan_all(&api, &entries(&[(R, "")]), &o);
     assert_eq!(api.writes(), 3);
-    assert!(SLEPT_MS.with(Cell::get) >= 2 * 750, "slept {}", SLEPT_MS.with(Cell::get));
+    assert!(
+        SLEPT_MS.with(Cell::get) >= 2 * 750,
+        "slept {}",
+        SLEPT_MS.with(Cell::get)
+    );
 }
 
 /// `n` unchanged branches (a success ancestor, no changed file) plus `k` changed ones.
@@ -138,8 +188,19 @@ fn mixed(api: &FakeApi, changed: u32, unchanged: u32) {
         let (tip, anc) = (2000 + i, 3000 + i);
         api.set_branch(R, &format!("u{i:03}"), &sha(tip));
         api.set_tree(R, &sha(tip), &[(".factory-ci.toml", "blob")]);
-        api.set_commits(R, &sha(tip), vec![(sha(tip), vec![sha(anc)], 10), (sha(anc), vec![], 20)]);
-        api.set_status(R, &sha(anc), "factory-ci", "success", 500, "all steps passed");
+        api.set_commits(
+            R,
+            &sha(tip),
+            vec![(sha(tip), vec![sha(anc)], 10), (sha(anc), vec![], 20)],
+        );
+        api.set_status(
+            R,
+            &sha(anc),
+            "factory-ci",
+            "success",
+            500,
+            "all steps passed",
+        );
         api.set_changed(R, &sha(anc), &sha(tip), &[]);
     }
 }
@@ -176,11 +237,18 @@ fn closing_errors_come_after_pending_and_unchanged() {
     mixed(&api, 2, 2);
     // an invalid folder name on a third tip gives a closing error
     api.set_branch(R, "z-bad", &sha(4000));
-    api.set_tree(R, &sha(4000), &[("a b", "tree"), ("a b/.factory-ci.toml", "blob")]);
+    api.set_tree(
+        R,
+        &sha(4000),
+        &[("a b", "tree"), ("a b/.factory-ci.toml", "blob")],
+    );
     api.set_commits(R, &sha(4000), vec![(sha(4000), vec![], 1)]);
     plan_all(&api, &entries(&[(R, "")]), &opts());
     let states: Vec<String> = api.posts().iter().map(|p| p.state.clone()).collect();
-    assert_eq!(states, ["pending", "pending", "success", "success", "error"]);
+    assert_eq!(
+        states,
+        ["pending", "pending", "success", "success", "error"]
+    );
 }
 
 #[test]
@@ -189,15 +257,34 @@ fn rows_split_by_allow_docker_use_the_docker_token_and_share_unique_numbers() {
     let plain = fake();
     let docker = FakeApi::new("ci-docker-bot", NOW);
     add_repo(&plain, "o/plain", &[("main", 1, 10)], &["."]);
-    add_repo(&docker, "o/dock", &[("main", 2, 10), ("dev", 3, 20)], &["."]);
+    add_repo(
+        &docker,
+        "o/dock",
+        &[("main", 2, 10), ("dev", 3, 20)],
+        &["."],
+    );
     let list = entries(&[("o/plain", ""), ("o/dock", "allow_docker = true")]);
-    let apis = Apis { plain: &plain, docker: &docker };
+    let apis = Apis {
+        plain: &plain,
+        docker: &docker,
+    };
     let fin = finish(&apis, candidates(&apis, &list, &opts()), &opts());
     assert_eq!(fin.matrix.len(), 1);
     assert_eq!(fin.matrix_docker.len(), 2);
-    assert!(fin.matrix_docker.iter().all(|r| r.allow_docker && r.repo == "o/dock"));
-    assert!(plain.calls().iter().all(|c| !c.contains("o/dock")), "{:?}", plain.calls());
-    assert!(docker.calls().iter().all(|c| !c.contains("o/plain")), "{:?}", docker.calls());
+    assert!(fin
+        .matrix_docker
+        .iter()
+        .all(|r| r.allow_docker && r.repo == "o/dock"));
+    assert!(
+        plain.calls().iter().all(|c| !c.contains("o/dock")),
+        "{:?}",
+        plain.calls()
+    );
+    assert!(
+        docker.calls().iter().all(|c| !c.contains("o/plain")),
+        "{:?}",
+        docker.calls()
+    );
     assert!(docker.posts().len() == 2 && plain.posts().len() == 1);
     let mut n: Vec<usize> = rows(&fin).iter().map(|r| r.n as usize).collect();
     n.sort();
@@ -211,9 +298,17 @@ fn summary_lines_name_the_item_and_repo_only() {
     add_repo(&api, R, &[("feature-xyz", 0xabc123, 10)], &["go-invoices"]);
     let (_, fin) = plan_all(&api, &entries(&[(R, "")]), &opts());
     let line = format!("item {}: {R}", rows(&fin)[0].n);
-    assert!(fin.summary.lines().any(|l| l.contains(&line)), "{}", fin.summary);
+    assert!(
+        fin.summary.lines().any(|l| l.contains(&line)),
+        "{}",
+        fin.summary
+    );
     for secret in ["feature-xyz", "go-invoices", "abc123"] {
-        assert!(!fin.summary.contains(secret), "{secret} leaked: {}", fin.summary);
+        assert!(
+            !fin.summary.contains(secret),
+            "{secret} leaked: {}",
+            fin.summary
+        );
     }
 }
 
@@ -222,7 +317,10 @@ fn problems_never_carry_branch_sha_or_project_text() {
     // I26
     let api = fake();
     add_repo(&api, R, &[("feature-xyz", 0xabc123, 10)], &["go-invoices"]);
-    api.fail(&format!("post {R} {}", sha(0xabc123)), crate::github::ApiError::Http(500, "x".into()));
+    api.fail(
+        &format!("post {R} {}", sha(0xabc123)),
+        crate::github::ApiError::Http(500, "x".into()),
+    );
     let (_, fin) = plan_all(&api, &entries(&[(R, "")]), &opts());
     let all = format!("{:?}{}", fin.problems, fin.summary);
     for secret in ["feature-xyz", "go-invoices", "abc123"] {
@@ -246,11 +344,20 @@ fn fail_tick_is_true_only_with_problems_in_the_first_ten_minutes_of_an_hour() {
         let api = fake();
         add_repo(&api, R, &[("main", 1, 10)], &["."]);
         if with_problem {
-            api.fail("branches", crate::github::ApiError::Http(404, "gone".into()));
+            api.fail(
+                "branches",
+                crate::github::ApiError::Http(404, "gone".into()),
+            );
         }
-        let o = Opts { now: hour + offset, ..opts() };
+        let o = Opts {
+            now: hour + offset,
+            ..opts()
+        };
         let (_, fin) = plan_all(&api, &entries(&[(R, "")]), &o);
-        assert_eq!(fin.fail_tick, want, "offset {offset}, problem {with_problem}");
+        assert_eq!(
+            fin.fail_tick, want,
+            "offset {offset}, problem {with_problem}"
+        );
     }
 }
 
@@ -258,7 +365,10 @@ fn fail_tick_is_true_only_with_problems_in_the_first_ten_minutes_of_an_hour() {
 fn unchecked_repos_also_fail_the_tick_in_the_window() {
     let api = fake();
     add_repo(&api, R, &[("main", 1, 10)], &["."]);
-    api.fail("branches", crate::github::ApiError::RateLimited("limit".into()));
+    api.fail(
+        "branches",
+        crate::github::ApiError::RateLimited("limit".into()),
+    );
     let (_, fin) = plan_all(&api, &entries(&[(R, "")]), &opts());
     assert!(!fin.unchecked.is_empty() && fin.fail_tick);
 }
@@ -274,19 +384,35 @@ fn the_loki_heartbeat_is_sent_once_from_phase_c_and_a_failure_is_ignored() {
     });
     let api = fake();
     add_repo(&api, R, &[("main", 1, 10)], &["."]);
-    let o = Opts { log_store: true, heartbeat: Some(hb), ..opts() };
+    let o = Opts {
+        log_store: true,
+        heartbeat: Some(hb),
+        ..opts()
+    };
     plan_all(&api, &entries(&[(R, "")]), &o);
     let lines = sent.lock().unwrap().clone();
     assert_eq!(lines.len(), 1, "{lines:?}");
-    assert!(lines[0].starts_with("run=") && lines[0].contains(" tick items=1 problems=0"), "{}", lines[0]);
+    assert!(
+        lines[0].starts_with("run=") && lines[0].contains(" tick items=1 problems=0"),
+        "{}",
+        lines[0]
+    );
 
     let failing: crate::plan::Heartbeat = Arc::new(|_| Err("loki down".into()));
     let api = fake();
     add_repo(&api, R, &[("main", 1, 10)], &["."]);
-    let o = Opts { log_store: true, heartbeat: Some(failing), ..opts() };
+    let o = Opts {
+        log_store: true,
+        heartbeat: Some(failing),
+        ..opts()
+    };
     let (_, fin) = plan_all(&api, &entries(&[(R, "")]), &o);
     assert_eq!(rows(&fin).len(), 1);
-    assert!(!fin.problems.iter().any(|p| p.contains("loki")), "{:?}", fin.problems);
+    assert!(
+        !fin.problems.iter().any(|p| p.contains("loki")),
+        "{:?}",
+        fin.problems
+    );
 }
 
 #[test]
@@ -299,6 +425,14 @@ fn no_heartbeat_without_log_credentials() {
     });
     let api = fake();
     add_repo(&api, R, &[("main", 1, 10)], &["."]);
-    plan_all(&api, &entries(&[(R, "")]), &Opts { log_store: false, heartbeat: Some(hb), ..opts() });
+    plan_all(
+        &api,
+        &entries(&[(R, "")]),
+        &Opts {
+            log_store: false,
+            heartbeat: Some(hb),
+            ..opts()
+        },
+    );
     assert!(sent.lock().unwrap().is_empty());
 }

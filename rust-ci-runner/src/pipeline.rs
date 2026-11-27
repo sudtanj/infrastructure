@@ -52,7 +52,18 @@ pub fn valid_secret_name(s: &str) -> bool {
         .enumerate()
         .all(|(i, b)| b == b'_' || b.is_ascii_alphabetic() || (i > 0 && b.is_ascii_digit()));
     let u = s.to_ascii_uppercase();
-    let exact = ["PATH", "HOME", "USER", "HOSTNAME", "TMPDIR", "SHELL", "FACTORY_CI_TOKEN", "ENV", "ALL_SECRETS", "NODE_OPTIONS"];
+    let exact = [
+        "PATH",
+        "HOME",
+        "USER",
+        "HOSTNAME",
+        "TMPDIR",
+        "SHELL",
+        "FACTORY_CI_TOKEN",
+        "ENV",
+        "ALL_SECRETS",
+        "NODE_OPTIONS",
+    ];
     let prefixes = [
         "DOCKER_",
         "CONTAINER",
@@ -86,7 +97,9 @@ pub fn read_file(dir: &Path) -> Result<String, String> {
             return Err("no .factory-ci.toml".to_string())
         }
         Err(e) => return Err(format!("cannot read .factory-ci.toml: {e}")),
-        Ok(m) if !m.is_file() => return Err(".factory-ci.toml must be a regular file, not a symlink".to_string()),
+        Ok(m) if !m.is_file() => {
+            return Err(".factory-ci.toml must be a regular file, not a symlink".to_string())
+        }
         Ok(_) => {}
     }
     let mut buf = Vec::new();
@@ -164,7 +177,10 @@ impl Pipeline {
         }
         let cycle = self.cycle();
         if !cycle.is_empty() {
-            bad.push(format!("dependency cycle among steps: {}", cycle.join(", ")));
+            bad.push(format!(
+                "dependency cycle among steps: {}",
+                cycle.join(", ")
+            ));
         }
         bad
     }
@@ -228,7 +244,9 @@ impl Pipeline {
                 if let Some(v) = lookup(sec) {
                     out.insert(sec.clone(), v);
                 } else {
-                    bad.push(format!("step {name} requests secret {sec}, which is not defined"));
+                    bad.push(format!(
+                        "step {name} requests secret {sec}, which is not defined"
+                    ));
                 }
             }
         }
@@ -453,10 +471,15 @@ commands = ["x"]
     #[test]
     fn resolve_secrets_without_fork_resolves_or_reports_not_defined() {
         let p = parse(GOOD).unwrap();
-        let ok = p.resolve_secrets(|n| (n == "TOKEN").then(|| "v".to_string())).unwrap();
+        let ok = p
+            .resolve_secrets(|n| (n == "TOKEN").then(|| "v".to_string()))
+            .unwrap();
         assert_eq!(ok["TOKEN"], "v");
         let e = p.resolve_secrets(|_| None).unwrap_err();
-        assert_eq!(e, ["step build requests secret TOKEN, which is not defined"]);
+        assert_eq!(
+            e,
+            ["step build requests secret TOKEN, which is not defined"]
+        );
     }
 
     #[test]
@@ -464,7 +487,10 @@ commands = ["x"]
         let p = parse("[steps.img]\nimage = \"x\"\ncommands = [\"y\"]\ndocker = true\n").unwrap();
         assert!(p.needs_docker());
         assert!(p.docker_problems(true).is_empty());
-        assert_eq!(p.docker_problems(false), ["step img needs docker but repo does not allow it"]);
+        assert_eq!(
+            p.docker_problems(false),
+            ["step img needs docker but repo does not allow it"]
+        );
         assert!(parse(GOOD).unwrap().docker_problems(false).is_empty());
     }
 

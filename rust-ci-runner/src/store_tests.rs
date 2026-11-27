@@ -14,7 +14,12 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-const KEYS: [&str; 4] = ["FACTORY_CI_TOKEN", "FACTORY_CI_LOG_URL", "FACTORY_CI_LOG_USER", "FACTORY_CI_LOG_TOKEN"];
+const KEYS: [&str; 4] = [
+    "FACTORY_CI_TOKEN",
+    "FACTORY_CI_LOG_URL",
+    "FACTORY_CI_LOG_USER",
+    "FACTORY_CI_LOG_TOKEN",
+];
 const GOOD: [(&str, &str); 4] = [
     ("FACTORY_CI_TOKEN", "ghp_clonetoken_AAAA1"),
     ("FACTORY_CI_LOG_URL", "https://logs.example.com"),
@@ -88,7 +93,10 @@ fn shown(r: Result<crate::store::Secrets, crate::store::StoreError>) -> String {
 }
 
 fn names(env: &str) -> Vec<String> {
-    env.lines().filter_map(|l| l.split_once('=')).map(|(k, _)| k.to_string()).collect()
+    env.lines()
+        .filter_map(|l| l.split_once('='))
+        .map(|(k, _)| k.to_string())
+        .collect()
 }
 
 // ---- engine children (T005): FR-012, I9, I11 ----
@@ -98,16 +106,40 @@ fn command_removes_the_inherited_token() {
     // `env_remove` acts on the inherited environment: no entry with a value may name the token.
     let e = Engine::new("docker");
     let c = e.command(&["version".to_string()], &[]);
-    assert!(!c.get_envs().any(|(k, v)| k == "BWS_ACCESS_TOKEN" && v.is_some()));
+    assert!(!c
+        .get_envs()
+        .any(|(k, v)| k == "BWS_ACCESS_TOKEN" && v.is_some()));
 }
 
 #[test]
 fn explicit_env_entry_still_passes() {
     let e = Engine::new("docker");
-    let c = e.command(&[], &[("BWS_ACCESS_TOKEN".to_string(), "explicit".to_string()), ("FCI_TOKEN".to_string(), "t".to_string())]);
-    let got: Vec<_> = c.get_envs().filter_map(|(k, v)| v.map(|v| (k.to_string_lossy().to_string(), v.to_string_lossy().to_string()))).collect();
-    assert!(got.contains(&("BWS_ACCESS_TOKEN".to_string(), "explicit".to_string())), "{got:?}");
-    assert!(got.contains(&("FCI_TOKEN".to_string(), "t".to_string())), "{got:?}");
+    let c = e.command(
+        &[],
+        &[
+            ("BWS_ACCESS_TOKEN".to_string(), "explicit".to_string()),
+            ("FCI_TOKEN".to_string(), "t".to_string()),
+        ],
+    );
+    let got: Vec<_> = c
+        .get_envs()
+        .filter_map(|(k, v)| {
+            v.map(|v| {
+                (
+                    k.to_string_lossy().to_string(),
+                    v.to_string_lossy().to_string(),
+                )
+            })
+        })
+        .collect();
+    assert!(
+        got.contains(&("BWS_ACCESS_TOKEN".to_string(), "explicit".to_string())),
+        "{got:?}"
+    );
+    assert!(
+        got.contains(&("FCI_TOKEN".to_string(), "t".to_string())),
+        "{got:?}"
+    );
 }
 
 #[test]
@@ -117,16 +149,32 @@ fn engine_child_env_is_the_allowlist() {
     let stub = sb.bws("", "exit 0");
     let e = Engine::new(&stub);
     let args = vec!["ps".to_string()];
-    e.capture(&args, &[("EXPLICIT_ONE".to_string(), "yes".to_string())], LONG, None).unwrap();
+    e.capture(
+        &args,
+        &[("EXPLICIT_ONE".to_string(), "yes".to_string())],
+        LONG,
+        None,
+    )
+    .unwrap();
     let env = sb.env(1);
     assert!(env.lines().any(|l| l == "EXPLICIT_ONE=yes"), "{env}");
     assert!(env.lines().any(|l| l.starts_with("PATH=")), "{env}");
     assert!(!env.contains("CARGO_PKG_NAME"), "{env}");
     assert!(!env.contains("BWS_ACCESS_TOKEN"), "{env}");
     let allowed = [
-        "PATH", "HOME", "DOCKER_HOST", "DOCKER_CONFIG", "DOCKER_CERT_PATH", "DOCKER_TLS_VERIFY", "XDG_RUNTIME_DIR", "EXPLICIT_ONE",
+        "PATH",
+        "HOME",
+        "DOCKER_HOST",
+        "DOCKER_CONFIG",
+        "DOCKER_CERT_PATH",
+        "DOCKER_TLS_VERIFY",
+        "XDG_RUNTIME_DIR",
+        "EXPLICIT_ONE",
         // set by sh itself
-        "PWD", "OLDPWD", "SHLVL", "_",
+        "PWD",
+        "OLDPWD",
+        "SHLVL",
+        "_",
     ];
     for n in names(&env) {
         assert!(allowed.contains(&n.as_str()), "{n} is not on the allowlist");
@@ -154,7 +202,12 @@ fn one_secret_per_key_is_returned() {
 
 #[test]
 fn zero_or_two_matches_name_key_and_count_only() {
-    let without = |k: &str| GOOD.iter().filter(|(n, _)| *n != k).cloned().collect::<Vec<_>>();
+    let without = |k: &str| {
+        GOOD.iter()
+            .filter(|(n, _)| *n != k)
+            .cloned()
+            .collect::<Vec<_>>()
+    };
     for k in KEYS {
         let e = shown(parse_list(&list(&without(k))));
         assert_eq!(e, format!("secret {k}: expected 1, found 0"));
@@ -167,19 +220,41 @@ fn zero_or_two_matches_name_key_and_count_only() {
     // a near match (case, spaces) does not count
     let mut near = without("FACTORY_CI_LOG_USER");
     near.push(("factory_ci_log_user", "123456"));
-    assert_eq!(shown(parse_list(&list(&near))), "secret FACTORY_CI_LOG_USER: expected 1, found 0");
+    assert_eq!(
+        shown(parse_list(&list(&near))),
+        "secret FACTORY_CI_LOG_USER: expected 1, found 0"
+    );
 }
 
 #[test]
 fn value_shapes_are_refused() {
     for k in KEYS {
-        for bad in ["", "abc", "a\nb", "a\rb", "a\0b", " lead-value", "trail-value ", "\tvalue-tab", "line\n"] {
-            let rows: Vec<(&str, &str)> = GOOD.iter().map(|(n, v)| if *n == k { (*n, bad) } else { (*n, *v) }).collect();
+        for bad in [
+            "",
+            "abc",
+            "a\nb",
+            "a\rb",
+            "a\0b",
+            " lead-value",
+            "trail-value ",
+            "\tvalue-tab",
+            "line\n",
+        ] {
+            let rows: Vec<(&str, &str)> = GOOD
+                .iter()
+                .map(|(n, v)| if *n == k { (*n, bad) } else { (*n, *v) })
+                .collect();
             let e = shown(parse_list(&list(&rows)));
             assert_eq!(e, format!("secret {k}: unusable value"), "{bad:?}");
         }
-        let rows: Vec<(&str, &str)> = GOOD.iter().map(|(n, v)| if *n == k { (*n, "abcd") } else { (*n, *v) }).collect();
-        assert!(parse_list(&list(&rows)).is_ok(), "4 characters is enough for {k}");
+        let rows: Vec<(&str, &str)> = GOOD
+            .iter()
+            .map(|(n, v)| if *n == k { (*n, "abcd") } else { (*n, *v) })
+            .collect();
+        assert!(
+            parse_list(&list(&rows)).is_ok(),
+            "4 characters is enough for {k}"
+        );
     }
 }
 
@@ -188,7 +263,9 @@ fn matches_other_than_one_never_return_a_value() {
     // I8: every key count in 0..=3, in random order. Ok only when all four counts are 1.
     let mut x: u64 = 17;
     let mut next = |m: u64| {
-        x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        x = x
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (x >> 33) % m
     };
     for _ in 0..300 {
@@ -208,7 +285,11 @@ fn matches_other_than_one_never_return_a_value() {
             let text = format!("{e} {e:?}");
             assert!(!text.contains("value-1234"), "{text}");
             let bad = KEYS.iter().zip(&counts).find(|(_, c)| **c != 1).unwrap();
-            assert!(format!("{e}").starts_with(&format!("secret {}: expected 1, found {}", bad.0, bad.1)), "{counts:?} {e}");
+            assert!(
+                format!("{e}")
+                    .starts_with(&format!("secret {}: expected 1, found {}", bad.0, bad.1)),
+                "{counts:?} {e}"
+            );
         }
     }
 }
@@ -227,9 +308,17 @@ fn secrets_debug_prints_no_value() {
 #[test]
 fn token_goes_in_env_not_argv() {
     let sb = Sandbox::new();
-    fetch(&sb.ok(), ACCESS, Some("https://vault.bitwarden.eu"), LONG).ok().expect("fetch");
+    fetch(&sb.ok(), ACCESS, Some("https://vault.bitwarden.eu"), LONG)
+        .ok()
+        .expect("fetch");
     assert!(!sb.argv(1).contains(ACCESS), "token in argv");
-    assert!(sb.env(1).lines().any(|l| l == format!("BWS_ACCESS_TOKEN={ACCESS}")), "{}", sb.env(1));
+    assert!(
+        sb.env(1)
+            .lines()
+            .any(|l| l == format!("BWS_ACCESS_TOKEN={ACCESS}")),
+        "{}",
+        sb.env(1)
+    );
 }
 
 #[test]
@@ -237,17 +326,35 @@ fn bws_child_env_is_the_allowlist() {
     let sb = Sandbox::new();
     fetch(&sb.ok(), ACCESS, None, LONG).ok().expect("fetch");
     let env = sb.env(1);
-    assert!(!env.contains("CARGO_PKG_NAME") && !env.contains("BWS_SERVER_URL"), "{env}");
+    assert!(
+        !env.contains("CARGO_PKG_NAME") && !env.contains("BWS_SERVER_URL"),
+        "{env}"
+    );
     assert!(env.lines().any(|l| l.starts_with("PATH=")), "{env}");
-    let allowed = ["PATH", "HOME", "BWS_ACCESS_TOKEN", "BWS_SERVER_URL", "PWD", "OLDPWD", "SHLVL", "_"];
+    let allowed = [
+        "PATH",
+        "HOME",
+        "BWS_ACCESS_TOKEN",
+        "BWS_SERVER_URL",
+        "PWD",
+        "OLDPWD",
+        "SHLVL",
+        "_",
+    ];
     for n in names(&env) {
         assert!(allowed.contains(&n.as_str()), "{n} is not on the allowlist");
     }
     // with a server URL the child gets BWS_SERVER_URL, still nothing else
     let sb = Sandbox::new();
-    fetch(&sb.ok(), ACCESS, Some("https://vault.bitwarden.com"), LONG).ok().expect("fetch");
+    fetch(&sb.ok(), ACCESS, Some("https://vault.bitwarden.com"), LONG)
+        .ok()
+        .expect("fetch");
     let env = sb.env(1);
-    assert!(env.lines().any(|l| l == "BWS_SERVER_URL=https://vault.bitwarden.com"), "{env}");
+    assert!(
+        env.lines()
+            .any(|l| l == "BWS_SERVER_URL=https://vault.bitwarden.com"),
+        "{env}"
+    );
     for n in names(&env) {
         assert!(allowed.contains(&n.as_str()), "{n} is not on the allowlist");
     }
@@ -276,11 +383,17 @@ fn rejected_token_is_not_retried() {
 fn unreachable_is_retried_once() {
     let sb = Sandbox::new();
     let bws = sb.bws("", "echo 'Error: connection refused' >&2; exit 1");
-    assert_eq!(shown(fetch(&bws, ACCESS, None, LONG)), "secret store unreachable");
+    assert_eq!(
+        shown(fetch(&bws, ACCESS, None, LONG)),
+        "secret store unreachable"
+    );
     assert_eq!(sb.calls(), 2);
     // the second attempt can succeed
     let sb = Sandbox::new();
-    let bws = sb.bws(&list(&GOOD), "[ \"$n\" = 1 ] && { echo 'Error: timed out' >&2; exit 1; }\ncat \"$d/out\"");
+    let bws = sb.bws(
+        &list(&GOOD),
+        "[ \"$n\" = 1 ] && { echo 'Error: timed out' >&2; exit 1; }\ncat \"$d/out\"",
+    );
     assert!(fetch(&bws, ACCESS, None, LONG).is_ok());
     assert_eq!(sb.calls(), 2);
     // a missing binary is unreachable too, not a panic
@@ -294,8 +407,15 @@ fn slow_bws_times_out_within_the_limit() {
     // `exec`: the sleep is the child, so the kill at the limit also closes the pipes
     let bws = sb.bws("", "exec sleep 5");
     let start = Instant::now();
-    assert_eq!(shown(fetch(&bws, ACCESS, None, SHORT)), "secret store unreachable");
-    assert!(start.elapsed() < Duration::from_secs(4), "{:?}", start.elapsed());
+    assert_eq!(
+        shown(fetch(&bws, ACCESS, None, SHORT)),
+        "secret store unreachable"
+    );
+    assert!(
+        start.elapsed() < Duration::from_secs(4),
+        "{:?}",
+        start.elapsed()
+    );
     assert_eq!(sb.calls(), 2, "one retry after a timeout");
 }
 
@@ -304,7 +424,12 @@ fn server_url_must_be_https_on_an_allowed_host() {
     for ok in ["https://vault.bitwarden.com", "https://vault.bitwarden.eu"] {
         let sb = Sandbox::new();
         assert!(fetch(&sb.ok(), ACCESS, Some(ok), LONG).is_ok(), "{ok}");
-        assert!(sb.env(1).lines().any(|l| l == format!("BWS_SERVER_URL={ok}")), "{ok}");
+        assert!(
+            sb.env(1)
+                .lines()
+                .any(|l| l == format!("BWS_SERVER_URL={ok}")),
+            "{ok}"
+        );
     }
     for bad in [
         "http://vault.bitwarden.com",
@@ -318,7 +443,11 @@ fn server_url_must_be_https_on_an_allowed_host() {
         "ftp://vault.bitwarden.com",
     ] {
         let sb = Sandbox::new();
-        assert_eq!(shown(fetch(&sb.ok(), ACCESS, Some(bad), LONG)), "secret store unreachable", "{bad}");
+        assert_eq!(
+            shown(fetch(&sb.ok(), ACCESS, Some(bad), LONG)),
+            "secret store unreachable",
+            "{bad}"
+        );
         assert_eq!(sb.calls(), 0, "{bad}: bws was called");
     }
 }
@@ -338,7 +467,10 @@ fn garbage_output_is_unreadable_and_not_echoed() {
         let r = fetch(&bws, ACCESS, None, LONG);
         let e = r.err().expect("an error");
         let text = format!("{e} {e:?}");
-        assert!(!text.contains("LEAK-") && !text.contains("ghp_leak"), "{text}");
+        assert!(
+            !text.contains("LEAK-") && !text.contains("ghp_leak"),
+            "{text}"
+        );
         assert_eq!(format!("{e}"), "secret store unreachable", "{out:?}");
     }
 }
@@ -354,10 +486,18 @@ fn a_backgrounded_child_holding_stdout_does_not_block_run_capped() {
     let start = Instant::now();
     let r = run_capped(std::process::Command::new(&exits), LONG);
     assert!(r.is_some_and(|(ok, _, _)| ok));
-    assert!(start.elapsed() < Duration::from_secs(8), "{:?}", start.elapsed());
+    assert!(
+        start.elapsed() < Duration::from_secs(8),
+        "{:?}",
+        start.elapsed()
+    );
     // the shell waits for it: the limit kills the shell and the call still returns
     let waits = sb.bws("", "sleep 20 &\nwait");
     let start = Instant::now();
     assert!(run_capped(std::process::Command::new(&waits), SHORT).is_none());
-    assert!(start.elapsed() < Duration::from_secs(8), "{:?}", start.elapsed());
+    assert!(
+        start.elapsed() < Duration::from_secs(8),
+        "{:?}",
+        start.elapsed()
+    );
 }

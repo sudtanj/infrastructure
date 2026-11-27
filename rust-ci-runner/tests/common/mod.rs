@@ -14,7 +14,8 @@ use std::time::Duration;
 pub const BIN: &str = env!("CARGO_BIN_EXE_rust-ci-runner");
 pub const SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 pub const RUN_ID: &str = "0123456789abcdef";
-pub const PIN: &str = "registry.example/img@sha256:0000000000000000000000000000000000000000000000000000000000000000";
+pub const PIN: &str =
+    "registry.example/img@sha256:0000000000000000000000000000000000000000000000000000000000000000";
 pub const JOB_TOKEN: &str = "tok-JOB-CRED-1";
 
 /// Records every call (arguments, one per line, calls separated by `--`) and the client
@@ -68,7 +69,12 @@ impl Sandbox {
         let docker = bin.join("docker");
         std::fs::write(&docker, STUB).unwrap();
         std::fs::set_permissions(&docker, std::fs::Permissions::from_mode(0o755)).unwrap();
-        Sandbox { dir, bin, stub, tmp }
+        Sandbox {
+            dir,
+            bin,
+            stub,
+            tmp,
+        }
     }
 
     /// The binary with an empty environment except PATH (stub first), the stub directory and
@@ -123,7 +129,10 @@ impl Sandbox {
     pub fn step_runs(&self) -> Vec<Vec<String>> {
         self.calls()
             .into_iter()
-            .filter(|c| c.first().map(String::as_str) == Some("run") && !c.iter().any(|a| a.ends_with("-clone")))
+            .filter(|c| {
+                c.first().map(String::as_str) == Some("run")
+                    && !c.iter().any(|a| a.ends_with("-clone"))
+            })
             .collect()
     }
 
@@ -180,7 +189,12 @@ impl Fake {
             hang_ms: Arc::default(),
             fail_first: Arc::default(),
         };
-        let (reqs, code, hang, ff) = (f.reqs.clone(), f.code.clone(), f.hang_ms.clone(), f.fail_first.clone());
+        let (reqs, code, hang, ff) = (
+            f.reqs.clone(),
+            f.code.clone(),
+            f.hang_ms.clone(),
+            f.fail_first.clone(),
+        );
         std::thread::spawn(move || {
             for mut rq in server.incoming_requests() {
                 let mut body = String::new();
@@ -226,11 +240,18 @@ impl Fake {
     /// Every `(labels, line)` received on `/loki/api/v1/push`.
     pub fn loki_lines(&self) -> Vec<(serde_json::Value, String)> {
         let mut out = vec![];
-        for r in self.requests().iter().filter(|r| r.url.ends_with("/loki/api/v1/push")) {
+        for r in self
+            .requests()
+            .iter()
+            .filter(|r| r.url.ends_with("/loki/api/v1/push"))
+        {
             let v: serde_json::Value = serde_json::from_str(&r.body).unwrap_or_default();
             for s in v["streams"].as_array().cloned().unwrap_or_default() {
                 for val in s["values"].as_array().cloned().unwrap_or_default() {
-                    out.push((s["stream"].clone(), val[1].as_str().unwrap_or("").to_string()));
+                    out.push((
+                        s["stream"].clone(),
+                        val[1].as_str().unwrap_or("").to_string(),
+                    ));
                 }
             }
         }
@@ -242,7 +263,9 @@ impl Fake {
 pub fn pipeline(steps: &[(&str, &str)]) -> String {
     steps
         .iter()
-        .map(|(n, extra)| format!("[steps.{n}]\nimage = \"alpine\"\ncommands = [\"echo {n}\"]\n{extra}\n"))
+        .map(|(n, extra)| {
+            format!("[steps.{n}]\nimage = \"alpine\"\ncommands = [\"echo {n}\"]\n{extra}\n")
+        })
         .collect()
 }
 
@@ -263,7 +286,17 @@ pub fn log_env(c: &mut Command, url: &str) {
 
 pub fn job_args<'a>(extra: &[&'a str]) -> Vec<&'a str> {
     let mut v = vec![
-        "job", "--repo", "o/r", "--sha", SHA, "--project", ".", "--branch", "main", "--run-id", RUN_ID,
+        "job",
+        "--repo",
+        "o/r",
+        "--sha",
+        SHA,
+        "--project",
+        ".",
+        "--branch",
+        "main",
+        "--run-id",
+        RUN_ID,
     ];
     v.extend_from_slice(extra);
     v

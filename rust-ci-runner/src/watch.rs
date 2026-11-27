@@ -9,7 +9,14 @@ use toml::{Table, Value};
 pub const MAX_BYTES: usize = 64 * 1024;
 const MAX_ENTRIES: usize = 100;
 const MAX_LIST: usize = 20;
-const ENTRY_KEYS: [&str; 6] = ["repo", "id", "branches", "secret_branches", "secrets", "allow_docker"];
+const ENTRY_KEYS: [&str; 6] = [
+    "repo",
+    "id",
+    "branches",
+    "secret_branches",
+    "secrets",
+    "allow_docker",
+];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WatchEntry {
@@ -53,13 +60,19 @@ pub fn glob_match(glob: &str, name: &str) -> bool {
 }
 
 fn valid_repo(r: &str) -> bool {
-    let Some((owner, name)) = r.split_once('/') else { return false };
+    let Some((owner, name)) = r.split_once('/') else {
+        return false;
+    };
     let owner_ok = (1..=39).contains(&owner.len())
-        && owner.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        && owner
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
         && !owner.starts_with('-')
         && !owner.ends_with('-');
     let name_ok = (1..=100).contains(&name.len())
-        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_' || b == b'-')
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_' || b == b'-')
         && name != "."
         && !name.contains("..");
     owner_ok && name_ok
@@ -72,7 +85,9 @@ fn glob_problem(g: &str) -> Option<String> {
     if g.contains("..") {
         return Some("unsupported sequence ..".to_string());
     }
-    let bad = g.chars().find(|c| !c.is_ascii_graphic() || "\\[]{}!^~:".contains(*c))?;
+    let bad = g
+        .chars()
+        .find(|c| !c.is_ascii_graphic() || "\\[]{}!^~:".contains(*c))?;
     Some(format!("unsupported character {}", bad.escape_debug()))
 }
 
@@ -109,7 +124,9 @@ pub fn parse(text: &str) -> Result<Vec<WatchEntry>, Vec<String>> {
     if text.len() > MAX_BYTES {
         return Err(vec![format!("file: larger than {} KB", MAX_BYTES / 1024)]);
     }
-    let root: Table = text.parse().map_err(|e: toml::de::Error| vec![format!("file: {}", e.message().replace('\n', " "))])?;
+    let root: Table = text
+        .parse()
+        .map_err(|e: toml::de::Error| vec![format!("file: {}", e.message().replace('\n', " "))])?;
     let mut bad = Vec::new();
     for k in root.keys().filter(|k| *k != "watch") {
         bad.push(format!("file: unknown key {k:?}"));
@@ -117,7 +134,11 @@ pub fn parse(text: &str) -> Result<Vec<WatchEntry>, Vec<String>> {
     let tables = match root.get("watch") {
         None => &[][..],
         Some(Value::Array(a)) => a.as_slice(),
-        Some(_) => return Err(vec!["file: watch must be a list of [[watch]] tables".to_string()]),
+        Some(_) => {
+            return Err(vec![
+                "file: watch must be a list of [[watch]] tables".to_string()
+            ])
+        }
     };
     if tables.len() > MAX_ENTRIES {
         bad.push(format!("file: more than {MAX_ENTRIES} entries"));
@@ -131,17 +152,27 @@ pub fn parse(text: &str) -> Result<Vec<WatchEntry>, Vec<String>> {
             continue;
         };
         let repo = t.get("repo").and_then(Value::as_str).unwrap_or("");
-        let label = if valid_repo(repo) { repo.to_string() } else { format!("entry {n}") };
+        let label = if valid_repo(repo) {
+            repo.to_string()
+        } else {
+            format!("entry {n}")
+        };
         for k in t.keys().filter(|k| !ENTRY_KEYS.contains(&k.as_str())) {
             bad.push(format!("{label}: unknown key {k:?}"));
         }
         match t.get("repo") {
             None => bad.push(format!("{label}: missing repo")),
             Some(v) if v.as_str().is_none() => bad.push(format!("{label}: repo must be a string")),
-            Some(_) if label != repo => bad.push(format!("{label}: repo {repo:?} is not owner/name")),
+            Some(_) if label != repo => {
+                bad.push(format!("{label}: repo {repo:?} is not owner/name"))
+            }
             Some(_) => {}
         }
-        if let Some((_, first)) = seen.iter().find(|(r, _)| r.eq_ignore_ascii_case(repo)).filter(|_| label == repo) {
+        if let Some((_, first)) = seen
+            .iter()
+            .find(|(r, _)| r.eq_ignore_ascii_case(repo))
+            .filter(|_| label == repo)
+        {
             bad.push(format!("{label}: duplicate of entry {first}"));
         } else if label == repo {
             seen.push((repo.to_string(), n));
@@ -150,7 +181,9 @@ pub fn parse(text: &str) -> Result<Vec<WatchEntry>, Vec<String>> {
             None => None,
             Some(Value::Integer(v)) if *v >= 0 => Some(*v as u64),
             Some(v) => {
-                let shown = v.as_str().map_or_else(|| v.to_string(), |s| format!("{s:?}"));
+                let shown = v
+                    .as_str()
+                    .map_or_else(|| v.to_string(), |s| format!("{s:?}"));
                 bad.push(format!("{label}: id {shown} is not a number"));
                 None
             }
@@ -159,8 +192,12 @@ pub fn parse(text: &str) -> Result<Vec<WatchEntry>, Vec<String>> {
             Some(v) => globs(v, "branches", &label, &mut bad),
             None => vec!["*".to_string()],
         };
-        let secret_branches = t.get("secret_branches").map(|v| globs(v, "secret_branches", &label, &mut bad));
-        let secrets = t.get("secrets").map_or_else(Vec::new, |v| strings(v, "secrets", &label, &mut bad));
+        let secret_branches = t
+            .get("secret_branches")
+            .map(|v| globs(v, "secret_branches", &label, &mut bad));
+        let secrets = t
+            .get("secrets")
+            .map_or_else(Vec::new, |v| strings(v, "secrets", &label, &mut bad));
         for (j, s) in secrets.iter().enumerate() {
             if !valid_secret_name(s) {
                 bad.push(format!("{label}: secret {s:?} is reserved or malformed"));
@@ -176,7 +213,14 @@ pub fn parse(text: &str) -> Result<Vec<WatchEntry>, Vec<String>> {
                 false
             }
         };
-        out.push(WatchEntry { repo: repo.to_string(), id, branches, secret_branches, secrets, allow_docker });
+        out.push(WatchEntry {
+            repo: repo.to_string(),
+            id,
+            branches,
+            secret_branches,
+            secrets,
+            allow_docker,
+        });
     }
     if bad.is_empty() {
         Ok(out)
@@ -189,10 +233,13 @@ pub fn parse(text: &str) -> Result<Vec<WatchEntry>, Vec<String>> {
 pub fn read(path: &Path) -> Result<Vec<WatchEntry>, String> {
     // One byte over the limit is enough for parse to refuse the file without reading all of it.
     let mut buf = Vec::new();
-    let read = std::fs::File::open(path).and_then(|f| f.take(MAX_BYTES as u64 + 1).read_to_end(&mut buf));
+    let read =
+        std::fs::File::open(path).and_then(|f| f.take(MAX_BYTES as u64 + 1).read_to_end(&mut buf));
     if let Err(e) = read {
         return Err(format!("cannot read {}: {e}", path.display()));
     }
-    let Ok(text) = String::from_utf8(buf) else { return Err("watch list is not valid UTF-8".to_string()) };
+    let Ok(text) = String::from_utf8(buf) else {
+        return Err("watch list is not valid UTF-8".to_string());
+    };
     parse(&text).map_err(|p| p.join("\n"))
 }

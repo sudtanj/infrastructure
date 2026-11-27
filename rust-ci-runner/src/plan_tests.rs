@@ -25,12 +25,19 @@ pub(crate) fn fake() -> FakeApi {
 }
 
 pub(crate) fn opts() -> Opts {
-    Opts { pace_ms: 0, now: NOW, ..Default::default() }
+    Opts {
+        pace_ms: 0,
+        now: NOW,
+        ..Default::default()
+    }
 }
 
 /// One `[[watch]]` per `(repo, extra toml lines)`.
 pub(crate) fn entries(list: &[(&str, &str)]) -> Vec<WatchEntry> {
-    let text: String = list.iter().map(|(r, x)| format!("[[watch]]\nrepo = \"{r}\"\n{x}\n")).collect();
+    let text: String = list
+        .iter()
+        .map(|(r, x)| format!("[[watch]]\nrepo = \"{r}\"\n{x}\n"))
+        .collect();
     parse(&text).unwrap_or_else(|p| panic!("bad test list: {p:?}"))
 }
 
@@ -80,14 +87,29 @@ fn a_changed_project_gets_pending_queued_and_one_valid_row() {
     let rows = rows(&fin);
     assert_eq!(rows.len(), 1);
     let r = rows[0];
-    assert_eq!((r.repo.as_str(), r.branch.as_str(), r.project.as_str(), r.context.as_str()), (R, "main", ".", "factory-ci"));
+    assert_eq!(
+        (
+            r.repo.as_str(),
+            r.branch.as_str(),
+            r.project.as_str(),
+            r.context.as_str()
+        ),
+        (R, "main", ".", "factory-ci")
+    );
     assert!(is_hex(&r.sha, 40) && is_hex(&r.run_id, 16), "{r:?}");
     assert_eq!(r.sha, sha(1));
     assert_eq!(r.prev_sha, "");
     assert!(!r.retry && !r.allow_docker && !r.fail_closed);
     let posts = api.posts();
     assert_eq!(posts.len(), 1);
-    assert_eq!((posts[0].state.as_str(), posts[0].context.as_str(), posts[0].description.as_str()), ("pending", "factory-ci", "queued"));
+    assert_eq!(
+        (
+            posts[0].state.as_str(),
+            posts[0].context.as_str(),
+            posts[0].description.as_str()
+        ),
+        ("pending", "factory-ci", "queued")
+    );
     assert_eq!(posts[0].sha, sha(1));
 }
 
@@ -97,7 +119,11 @@ fn prev_sha_is_set_when_an_ancestor_was_found() {
     let api = fake();
     api.set_branch(R, "main", &sha(1));
     api.set_tree(R, &sha(1), &[(".factory-ci.toml", "blob")]);
-    api.set_commits(R, &sha(1), vec![(sha(1), vec![sha(2)], 0), (sha(2), vec![], 100)]);
+    api.set_commits(
+        R,
+        &sha(1),
+        vec![(sha(1), vec![sha(2)], 0), (sha(2), vec![], 100)],
+    );
     api.set_status(R, &sha(2), "factory-ci", "success", 500, "all steps passed");
     api.set_changed(R, &sha(2), &sha(1), &[("README.md", None)]);
     let (_, fin) = plan_all(&api, &entries(&[(R, "")]), &opts());
@@ -122,8 +148,17 @@ fn a_tip_with_a_status_is_not_planned_so_a_second_tick_plans_nothing() {
 fn branch_globs_pick_matching_branches_only() {
     // AS 9.1, FR-005
     let api = fake();
-    add_repo(&api, R, &[("main", 1, 10), ("feature/x", 2, 20), ("release/1", 3, 30)], &["."]);
-    let (_, fin) = plan_all(&api, &entries(&[(R, "branches = [\"main\", \"release/*\"]")]), &opts());
+    add_repo(
+        &api,
+        R,
+        &[("main", 1, 10), ("feature/x", 2, 20), ("release/1", 3, 30)],
+        &["."],
+    );
+    let (_, fin) = plan_all(
+        &api,
+        &entries(&[(R, "branches = [\"main\", \"release/*\"]")]),
+        &opts(),
+    );
     let mut b: Vec<_> = rows(&fin).iter().map(|r| r.branch.clone()).collect();
     b.sort();
     assert_eq!(b, ["main", "release/1"]);
@@ -146,7 +181,12 @@ fn two_branches_at_one_sha_plan_once_with_the_alphabetically_first_name() {
 fn a_shared_sha_goes_to_the_default_branch_when_it_is_among_them() {
     // R2, FR-060
     let api = fake();
-    add_repo(&api, R, &[("main", 1, 10), ("alpha", 1, 10), ("zeta", 1, 10)], &["."]);
+    add_repo(
+        &api,
+        R,
+        &[("main", 1, 10), ("alpha", 1, 10), ("zeta", 1, 10)],
+        &["."],
+    );
     let (_, fin) = plan_all(&api, &entries(&[(R, "")]), &opts());
     let rows = rows(&fin);
     assert_eq!(rows.len(), 1);
@@ -162,7 +202,10 @@ fn a_secret_branch_among_several_at_one_sha_allows_secrets() {
     let list = entries(&[(R, "secret_branches = [\"release/*\"]")]);
     let (_, fin) = plan_all(&api, &list, &opts());
     let rows = rows(&fin);
-    assert_eq!((rows.len(), rows[0].branch.as_str(), rows[0].secrets_ok), (1, "alpha", true));
+    assert_eq!(
+        (rows.len(), rows[0].branch.as_str(), rows[0].secrets_ok),
+        (1, "alpha", true)
+    );
 }
 
 #[test]
@@ -171,11 +214,18 @@ fn three_projects_give_three_independent_items() {
     let api = fake();
     add_repo(&api, R, &[("main", 1, 10)], &[".", "a", "b"]);
     let (_, fin) = plan_all(&api, &entries(&[(R, "")]), &opts());
-    let mut ctx: Vec<_> = rows(&fin).iter().map(|r| (r.context.clone(), r.project.clone())).collect();
+    let mut ctx: Vec<_> = rows(&fin)
+        .iter()
+        .map(|r| (r.context.clone(), r.project.clone()))
+        .collect();
     ctx.sort();
     assert_eq!(
         ctx,
-        [("factory-ci".into(), ".".into()), ("factory-ci/a".into(), "a".into()), ("factory-ci/b".into(), "b".into())]
+        [
+            ("factory-ci".into(), ".".into()),
+            ("factory-ci/a".into(), "a".into()),
+            ("factory-ci/b".into(), "b".into())
+        ]
     );
 }
 
@@ -184,7 +234,10 @@ fn one_failing_item_does_not_touch_the_others_rows() {
     // AS 3.2, I2
     let api = fake();
     add_repo(&api, R, &[("main", 1, 10)], &[".", "a", "b"]);
-    api.fail(&format!("post {R} {} factory-ci/b", sha(1)), crate::github::ApiError::Http(500, "no".into()));
+    api.fail(
+        &format!("post {R} {} factory-ci/b", sha(1)),
+        crate::github::ApiError::Http(500, "no".into()),
+    );
     let (_, fin) = plan_all(&api, &entries(&[(R, "")]), &opts());
     let mut ctx: Vec<_> = rows(&fin).iter().map(|r| r.context.clone()).collect();
     ctx.sort();
@@ -200,7 +253,9 @@ fn the_reference_fleet_costs_120_reads_and_no_writes_when_everything_is_done() {
     let mut list = vec![];
     let names: Vec<String> = (0..10).map(|i| format!("o/r{i}")).collect();
     for (i, name) in names.iter().enumerate() {
-        let tips: Vec<(String, u32, i64)> = (0..5).map(|t| (format!("b{t}"), (i * 10 + t) as u32, 10)).collect();
+        let tips: Vec<(String, u32, i64)> = (0..5)
+            .map(|t| (format!("b{t}"), (i * 10 + t) as u32, 10))
+            .collect();
         let t: Vec<(&str, u32, i64)> = tips.iter().map(|(b, n, a)| (b.as_str(), *n, *a)).collect();
         add_repo(&api, name, &t, &[".", "a", "b"]);
         for (_, n, _) in &tips {
@@ -244,7 +299,12 @@ fn a_truncated_tree_is_not_an_error() {
     // FR-008 edge case
     let api = fake();
     api.set_branch(R, "main", &sha(1));
-    api.set_tree_truncated(R, &sha(1), &[(".factory-ci.toml", "blob", "b0"), ("a", "tree", "t1")], &[("t1", &[(".factory-ci.toml", "blob")])]);
+    api.set_tree_truncated(
+        R,
+        &sha(1),
+        &[(".factory-ci.toml", "blob", "b0"), ("a", "tree", "t1")],
+        &[("t1", &[(".factory-ci.toml", "blob")])],
+    );
     api.set_commits(R, &sha(1), vec![(sha(1), vec![], 10)]);
     let (_, fin) = plan_all(&api, &entries(&[(R, "")]), &opts());
     assert!(fin.problems.is_empty(), "{:?}", fin.problems);
@@ -256,14 +316,22 @@ fn an_invalid_folder_name_gets_an_error_status_and_no_row() {
     // data-model.md Project: "invalid project folder name"
     let api = fake();
     api.set_branch(R, "main", &sha(1));
-    api.set_tree(R, &sha(1), &[("a b", "tree"), ("a b/.factory-ci.toml", "blob")]);
+    api.set_tree(
+        R,
+        &sha(1),
+        &[("a b", "tree"), ("a b/.factory-ci.toml", "blob")],
+    );
     api.set_commits(R, &sha(1), vec![(sha(1), vec![], 10)]);
     let (_, fin) = plan_all(&api, &entries(&[(R, "")]), &opts());
     assert!(rows(&fin).is_empty());
     let p = api.posts();
     assert_eq!(p.len(), 1);
     assert_eq!(p[0].state, "error");
-    assert!(p[0].description.contains("invalid project folder name"), "{}", p[0].description);
+    assert!(
+        p[0].description.contains("invalid project folder name"),
+        "{}",
+        p[0].description
+    );
 }
 
 #[test]
@@ -271,12 +339,16 @@ fn rows_hold_valid_fields_for_random_fleets() {
     // I14
     let mut x: u64 = 17;
     let mut next = |m: u64| {
-        x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        x = x
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (x >> 33) % m
     };
     for round in 0..20 {
         let api = fake();
-        let tips: Vec<(String, u32, i64)> = (0..1 + next(6)).map(|t| (format!("b{t}"), t as u32 + 100 * round, next(5000) as i64)).collect();
+        let tips: Vec<(String, u32, i64)> = (0..1 + next(6))
+            .map(|t| (format!("b{t}"), t as u32 + 100 * round, next(5000) as i64))
+            .collect();
         let t: Vec<(&str, u32, i64)> = tips.iter().map(|(b, n, a)| (b.as_str(), *n, *a)).collect();
         add_repo(&api, R, &t, &[".", "a"]);
         let (_, fin) = plan_all(&api, &entries(&[(R, "")]), &opts());

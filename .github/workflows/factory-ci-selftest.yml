@@ -71,9 +71,9 @@ jobs:
       - name: type-check the unit tests
         working-directory: rust-ci-runner
         run: cargo test --locked --lib --no-run
-      - name: clippy
+      - name: format check and clippy
         working-directory: rust-ci-runner
-        run: cargo clippy --locked -- -D warnings
+        run: make lint
       - name: check the watch list
         working-directory: rust-ci-runner
         run: cargo run --locked -q -- plan --repos ../.github/factory-ci-repos.toml --check

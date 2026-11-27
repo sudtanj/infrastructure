@@ -15,8 +15,13 @@ pub enum Decision {
     Done,
     /// A stale `pending` that already used its retry: the plan closes it with an `error` post.
     Close,
-    Unchanged { since: String },
-    Run { prev: Option<String>, retry: bool },
+    Unchanged {
+        since: String,
+    },
+    Run {
+        prev: Option<String>,
+        retry: bool,
+    },
 }
 
 #[derive(Debug)]
@@ -35,18 +40,32 @@ pub struct Cache {
 
 impl Cache {
     pub fn new(user: &str) -> Cache {
-        Cache { user: user.to_string(), statuses: HashMap::new(), changed: HashMap::new() }
+        Cache {
+            user: user.to_string(),
+            statuses: HashMap::new(),
+            changed: HashMap::new(),
+        }
     }
 }
 
 /// The latest status of `context` on `sha` made by the cache's user, if any.
-fn own(api: &dyn Api, repo: &str, sha: &str, ctx: &str, cache: &mut Cache) -> Result<Option<StatusEntry>, ApiError> {
+fn own(
+    api: &dyn Api,
+    repo: &str,
+    sha: &str,
+    ctx: &str,
+    cache: &mut Cache,
+) -> Result<Option<StatusEntry>, ApiError> {
     let k = (repo.to_string(), sha.to_string());
     if !cache.statuses.contains_key(&k) {
         let v = api.status(repo, sha)?;
         cache.statuses.insert(k.clone(), v);
     }
-    Ok(cache.statuses[&k].iter().rev().find(|s| s.context == ctx && s.creator_login == cache.user).cloned())
+    Ok(cache.statuses[&k]
+        .iter()
+        .rev()
+        .find(|s| s.context == ctx && s.creator_login == cache.user)
+        .cloned())
 }
 
 /// Changed files `base...head`; `None` when the compare stayed full and the set is unknown.
@@ -70,7 +89,10 @@ fn changed<'a>(
 fn at_tip(s: &StatusEntry, now: i64) -> Decision {
     let age = parse_rfc3339(&s.updated_at).map(|t| now - t);
     let marked = s.description.ends_with(MARK);
-    let retry = Decision::Run { prev: None, retry: true };
+    let retry = Decision::Run {
+        prev: None,
+        retry: true,
+    };
     match s.state.as_str() {
         "pending" if age.is_none_or(|a| a > STALE_PENDING) => {
             if marked {
@@ -85,7 +107,10 @@ fn at_tip(s: &StatusEntry, now: i64) -> Decision {
 }
 
 fn run(prev: Option<&str>) -> Decision {
-    Decision::Run { prev: prev.map(str::to_string), retry: false }
+    Decision::Run {
+        prev: prev.map(str::to_string),
+        retry: false,
+    }
 }
 
 /// Decides every project of one (repo, tip). `RateLimited` is returned; any other API error
@@ -112,9 +137,15 @@ pub fn decide(
             }
         }
     }
-    let needs_row = !open.is_empty() || by_context.values().any(|d| !matches!(d, Decision::Done | Decision::Close));
+    let needs_row = !open.is_empty()
+        || by_context
+            .values()
+            .any(|d| !matches!(d, Decision::Done | Decision::Close));
     if !needs_row {
-        return Ok(Decisions { by_context, tip_date: None });
+        return Ok(Decisions {
+            by_context,
+            tip_date: None,
+        });
     }
     let commits = match api.commits(repo, tip) {
         Ok(c) => c,
@@ -123,16 +154,24 @@ pub fn decide(
             for p in &open {
                 by_context.insert(p.context.clone(), run(None));
             }
-            return Ok(Decisions { by_context, tip_date: None });
+            return Ok(Decisions {
+                by_context,
+                tip_date: None,
+            });
         }
     };
-    let tip_date = commits.iter().find(|c| c.sha == tip).and_then(|c| parse_rfc3339(&c.date));
+    let tip_date = commits
+        .iter()
+        .find(|c| c.sha == tip)
+        .and_then(|c| parse_rfc3339(&c.date));
     // First-parent chain inside the window, at most MAX_STEPS ancestors, no recursion.
     let by_sha: HashMap<&str, _> = commits.iter().map(|c| (c.sha.as_str(), c)).collect();
     let mut chain: Vec<&str> = Vec::new();
     let mut cur = tip;
     while chain.len() < MAX_STEPS {
-        let Some(parent) = by_sha.get(cur).and_then(|c| c.parents.first()) else { break };
+        let Some(parent) = by_sha.get(cur).and_then(|c| c.parents.first()) else {
+            break;
+        };
         chain.push(parent);
         cur = parent;
     }
@@ -141,7 +180,10 @@ pub fn decide(
         let d = walk_one(api, repo, tip, p, &chain, &set, cache)?;
         by_context.insert(p.context.clone(), d);
     }
-    Ok(Decisions { by_context, tip_date })
+    Ok(Decisions {
+        by_context,
+        tip_date,
+    })
 }
 
 fn walk_one(
@@ -167,9 +209,17 @@ fn walk_one(
             Ok(Some(files)) => {
                 let touched = files.iter().any(|f| {
                     owns(&p.path, &f.filename, set)
-                        || f.previous_filename.as_deref().is_some_and(|x| owns(&p.path, x, set))
+                        || f.previous_filename
+                            .as_deref()
+                            .is_some_and(|x| owns(&p.path, x, set))
                 });
-                Ok(if touched { run(Some(anc)) } else { Decision::Unchanged { since: anc.to_string() } })
+                Ok(if touched {
+                    run(Some(anc))
+                } else {
+                    Decision::Unchanged {
+                        since: anc.to_string(),
+                    }
+                })
             }
             Ok(None) => Ok(run(Some(anc))),
             Err(e @ ApiError::RateLimited(_)) => Err(e),

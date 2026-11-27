@@ -5,7 +5,13 @@
 pub fn sanitize(s: &str, max: usize) -> String {
     let mut out: String = s
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || " _.:/-".contains(c) { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || " _.:/-".contains(c) {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     if out.starts_with("::") {
         out.insert(0, '_');

@@ -27,30 +27,56 @@ pub const FAULTS: &[&str] = &[
 /// Printed when the log store answers 401 or 403 to the probe.
 pub const LOG_STORE_HINT: &str = "log store check failed: check FACTORY_CI_LOG_URL (host only, e.g. https://logs-prod-xxx.grafana.net), FACTORY_CI_LOG_USER (numeric user id) and FACTORY_CI_LOG_TOKEN (needs logs:write)";
 
-const SECRET_KEYS: [&str; 4] = ["FACTORY_CI_TOKEN", "FACTORY_CI_LOG_URL", "FACTORY_CI_LOG_USER", "FACTORY_CI_LOG_TOKEN"];
+const SECRET_KEYS: [&str; 4] = [
+    "FACTORY_CI_TOKEN",
+    "FACTORY_CI_LOG_URL",
+    "FACTORY_CI_LOG_USER",
+    "FACTORY_CI_LOG_TOKEN",
+];
 
 fn is_fault(text: &str) -> bool {
     if FAULTS.contains(&text) {
         return true;
     }
-    let Some((key, rest)) = text.strip_prefix("secret ").and_then(|r| r.split_once(": ")) else {
+    let Some((key, rest)) = text
+        .strip_prefix("secret ")
+        .and_then(|r| r.split_once(": "))
+    else {
         return false;
     };
     SECRET_KEYS.contains(&key)
-        && (rest == "unusable value" || rest.strip_prefix("expected 1, found ").is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())))
+        && (rest == "unusable value"
+            || rest
+                .strip_prefix("expected 1, found ")
+                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())))
 }
 
 /// The one place the public output grammar lives (FR-018): the line to print, or `None`. The reason
 /// after `failed in Ns` and `skipped` is cut; `runner` alone says the pipeline and log store lines.
 pub fn public_form(who: &str, text: &str) -> Option<String> {
-    if !(1..=64).contains(&who.len()) || !who.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+    if !(1..=64).contains(&who.len())
+        || !who
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
         return None;
     }
     let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
-    let secs = |s: &str, p: &str| s.strip_prefix(p).and_then(|r| r.strip_suffix('s')).is_some_and(digits);
+    let secs = |s: &str, p: &str| {
+        s.strip_prefix(p)
+            .and_then(|r| r.strip_suffix('s'))
+            .is_some_and(digits)
+    };
     if who == "runner" {
-        let ok = ["pipeline passed", "pipeline failed", "log lines were dropped"].contains(&text)
-            || text.strip_prefix("log store answered HTTP ").is_some_and(|c| c.len() == 3 && digits(c));
+        let ok = [
+            "pipeline passed",
+            "pipeline failed",
+            "log lines were dropped",
+        ]
+        .contains(&text)
+            || text
+                .strip_prefix("log store answered HTTP ")
+                .is_some_and(|c| c.len() == 3 && digits(c));
         return ok.then(|| format!("[runner] {text}"));
     }
     let head = text.split_once(':').map_or(text, |(h, _)| h);
@@ -155,7 +181,10 @@ impl Log {
         // Control characters other than tab could rewrite a terminal line or forge a log line (R7).
         let text = self.red.apply(text.trim_end_matches(['\r', '\n']));
         let bad = |c: char| c.is_control() && c != '\t';
-        let text: String = text.chars().map(|c| if bad(c) { '\u{fffd}' } else { c }).collect();
+        let text: String = text
+            .chars()
+            .map(|c| if bad(c) { '\u{fffd}' } else { c })
+            .collect();
         let Ok(mut g) = self.inner.lock() else {
             return;
         };
@@ -198,7 +227,11 @@ impl Log {
             g.left -= msg.len() as u64;
         }
         if print {
-            let shown = if self.public { public_form(who, piece).map(|l| l + "\n") } else { Some(msg) };
+            let shown = if self.public {
+                public_form(who, piece).map(|l| l + "\n")
+            } else {
+                Some(msg)
+            };
             if let Some(m) = shown {
                 let _ = g.out.write_all(m.as_bytes());
                 let _ = g.out.flush();
@@ -290,7 +323,10 @@ pub mod tests {
         let (log, buf, rec) = with_rec(&[], 1000);
         log.out("build", "stderr", "oops\r\n");
         assert_eq!(buf.text(), "[build] oops\n");
-        assert_eq!(pushed(&rec), [("build".into(), "stderr".into(), "oops".into())]);
+        assert_eq!(
+            pushed(&rec),
+            [("build".into(), "stderr".into(), "oops".into())]
+        );
     }
 
     #[test]
@@ -299,7 +335,11 @@ pub mod tests {
         let (log, buf, rec) = with_rec(&["hunter2"], 1000);
         log.out("s", "stdout", "pw=hunter2");
         log.event("s", "started");
-        let all: String = pushed(&rec).iter().map(|p| p.2.clone()).collect::<Vec<_>>().join("|");
+        let all: String = pushed(&rec)
+            .iter()
+            .map(|p| p.2.clone())
+            .collect::<Vec<_>>()
+            .join("|");
         assert!(!all.contains("hunter2") && all.contains("pw=***"), "{all}");
         assert!(!buf.text().contains("hunter2"));
     }
@@ -366,7 +406,10 @@ pub mod tests {
         for _ in 0..3 {
             log.out("a", "stdout", "0123456789");
         }
-        assert_eq!(buf.text().matches("log cut off at the size limit").count(), 1);
+        assert_eq!(
+            buf.text().matches("log cut off at the size limit").count(),
+            1
+        );
         let marks = pushed(&rec)
             .iter()
             .filter(|p| p.2.contains("log cut off at the size limit"))
@@ -394,13 +437,31 @@ pub mod tests {
             return false;
         };
         let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
-        let name_ok = (1..=64).contains(&name.len()) && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+        let name_ok = (1..=64).contains(&name.len())
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
         let step = name_ok && name != "runner";
-        let secs = |w: &str| rest.strip_prefix(w).and_then(|r| r.strip_suffix('s')).is_some_and(digits);
-        (step && (rest == "started" || rest == "skipped" || secs("success in ") || secs("failed in ")))
+        let secs = |w: &str| {
+            rest.strip_prefix(w)
+                .and_then(|r| r.strip_suffix('s'))
+                .is_some_and(digits)
+        };
+        (step
+            && (rest == "started"
+                || rest == "skipped"
+                || secs("success in ")
+                || secs("failed in ")))
             || (name == "runner"
-                && (["pipeline passed", "pipeline failed", "log lines were dropped"].contains(&rest)
-                    || rest.strip_prefix("log store answered HTTP ").is_some_and(|c| c.len() == 3 && digits(c))))
+                && ([
+                    "pipeline passed",
+                    "pipeline failed",
+                    "log lines were dropped",
+                ]
+                .contains(&rest)
+                    || rest
+                        .strip_prefix("log store answered HTTP ")
+                        .is_some_and(|c| c.len() == 3 && digits(c))))
     }
 
     #[test]
@@ -438,12 +499,28 @@ pub mod tests {
         log.event("a", "failed in 3s: exit code 1");
         log.event("b", "skipped: dependency a did not succeed");
         log.event("c", "failed in 4s:");
-        assert_eq!(out.text(), "[a] failed in 3s\n[b] skipped\n[c] failed in 4s\n");
-        assert_eq!(public_form("a", "failed in 3s: secret-ish reason"), Some("[a] failed in 3s".to_string()));
-        assert_eq!(public_form("a", "skipped: why"), Some("[a] skipped".to_string()));
+        assert_eq!(
+            out.text(),
+            "[a] failed in 3s\n[b] skipped\n[c] failed in 4s\n"
+        );
+        assert_eq!(
+            public_form("a", "failed in 3s: secret-ish reason"),
+            Some("[a] failed in 3s".to_string())
+        );
+        assert_eq!(
+            public_form("a", "skipped: why"),
+            Some("[a] skipped".to_string())
+        );
         assert_eq!(public_form("a", "started"), Some("[a] started".to_string()));
-        assert_eq!(public_form("runner", "pipeline failed"), Some("[runner] pipeline failed".to_string()));
-        assert_eq!(public_form("a", "pipeline passed"), None, "only `runner` may say it");
+        assert_eq!(
+            public_form("runner", "pipeline failed"),
+            Some("[runner] pipeline failed".to_string())
+        );
+        assert_eq!(
+            public_form("a", "pipeline passed"),
+            None,
+            "only `runner` may say it"
+        );
         assert_eq!(public_form("a", "log store answered HTTP 204"), None);
         assert_eq!(public_form("runner", "log store answered HTTP 2040"), None);
         assert_eq!(public_form("runner", "log store answered HTTP abc"), None);
@@ -456,15 +533,32 @@ pub mod tests {
         log.event("a", "failed in 3s: exit code 1 hunter2");
         log.out("a", "stdout", "step says hunter2");
         let got = pushed(&rec);
-        assert_eq!(got[0], ("a".into(), "stdout".into(), "failed in 3s: exit code 1 ***".into()));
-        assert_eq!(got[1], ("a".into(), "stdout".into(), "step says ***".into()));
+        assert_eq!(
+            got[0],
+            (
+                "a".into(),
+                "stdout".into(),
+                "failed in 3s: exit code 1 ***".into()
+            )
+        );
+        assert_eq!(
+            got[1],
+            ("a".into(), "stdout".into(), "step says ***".into())
+        );
     }
 
     #[test]
     fn public_mode_refuses_a_bad_name() {
         let (log, out, _err, _rec) = public(&[]);
         let long = "n".repeat(65);
-        for who in ["", "a b", "a]x", "a\n[runner] pipeline passed", "é", long.as_str()] {
+        for who in [
+            "",
+            "a b",
+            "a]x",
+            "a\n[runner] pipeline passed",
+            "é",
+            long.as_str(),
+        ] {
             log.event(who, "started");
         }
         assert_eq!(out.text(), "");
@@ -503,7 +597,12 @@ pub mod tests {
         }
         assert!(FAULTS.iter().any(|f| f.starts_with("log store check failed: check FACTORY_CI_LOG_URL (host only, e.g. https://logs-prod-xxx.grafana.net), FACTORY_CI_LOG_USER (numeric user id) and FACTORY_CI_LOG_TOKEN (needs logs:write)")));
         let (log, _out, err, _rec) = public(&[]);
-        for k in ["FACTORY_CI_TOKEN", "FACTORY_CI_LOG_URL", "FACTORY_CI_LOG_USER", "FACTORY_CI_LOG_TOKEN"] {
+        for k in [
+            "FACTORY_CI_TOKEN",
+            "FACTORY_CI_LOG_URL",
+            "FACTORY_CI_LOG_USER",
+            "FACTORY_CI_LOG_TOKEN",
+        ] {
             log.fault(&format!("secret {k}: expected 1, found 0"));
             log.fault(&format!("secret {k}: expected 1, found 2"));
             log.fault(&format!("secret {k}: unusable value"));
@@ -529,11 +628,26 @@ pub mod tests {
         // I1 over a generated mix of names and texts.
         let (log, out, err, _rec) = public(&["tok-1234"]);
         let names = ["a", "runner", "x y", "::", "é", "ok-1", ""];
-        let texts = ["started", "skipped: tok-1234", "failed in 1s: ::error::x", "pipeline passed", "::add-mask::x", "success in 9s", "\u{1b}[2J", "tok-1234", "log lines were dropped"];
+        let texts = [
+            "started",
+            "skipped: tok-1234",
+            "failed in 1s: ::error::x",
+            "pipeline passed",
+            "::add-mask::x",
+            "success in 9s",
+            "\u{1b}[2J",
+            "tok-1234",
+            "log lines were dropped",
+        ];
         let mut x: u64 = 3;
         for _ in 0..500 {
-            x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-            let (n, t) = (names[((x >> 33) % 7) as usize], texts[((x >> 20) % 9) as usize]);
+            x = x
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            let (n, t) = (
+                names[((x >> 33) % 7) as usize],
+                texts[((x >> 20) % 9) as usize],
+            );
             match (x >> 8) % 3 {
                 0 => log.event(n, t),
                 1 => log.out(n, "stdout", t),
@@ -566,7 +680,17 @@ pub mod tests {
         assert_eq!(out.text(), "[a] failed in 3s\n[runner] pipeline failed\n");
         assert_eq!(err.text(), "[runner] runner fault\n");
         let shipped = pushed(&rec);
-        assert!(shipped.iter().any(|p| p.2 == "pipeline failed"), "{shipped:?}");
-        assert!(shipped.iter().filter(|p| p.0 == "a" && p.2.len() == 60).count() < 10, "step output is still cut");
+        assert!(
+            shipped.iter().any(|p| p.2 == "pipeline failed"),
+            "{shipped:?}"
+        );
+        assert!(
+            shipped
+                .iter()
+                .filter(|p| p.0 == "a" && p.2.len() == 60)
+                .count()
+                < 10,
+            "step output is still cut"
+        );
     }
 }

@@ -19,7 +19,15 @@ pub const DIND_IMAGE: &str = "docker:27.5.1-dind";
 pub const SPAWN_FAIL: &str = "cannot run ";
 
 /// The only variables an engine child inherits (FR-012).
-const ENGINE_ENV: [&str; 7] = ["PATH", "HOME", "DOCKER_HOST", "DOCKER_CONFIG", "DOCKER_CERT_PATH", "DOCKER_TLS_VERIFY", "XDG_RUNTIME_DIR"];
+const ENGINE_ENV: [&str; 7] = [
+    "PATH",
+    "HOME",
+    "DOCKER_HOST",
+    "DOCKER_CONFIG",
+    "DOCKER_CERT_PATH",
+    "DOCKER_TLS_VERIFY",
+    "XDG_RUNTIME_DIR",
+];
 
 /// Memory limit of a step container; swap is capped at the same value so it cannot grow past it.
 const MEMORY: &str = "5g";
@@ -75,7 +83,9 @@ pub(crate) fn read_capped(r: impl Read, cap: u64) -> String {
 /// environment; stdin is null and both output streams are piped and capped. `None` when the
 /// child cannot start or the limit passes (it is killed).
 pub(crate) fn run_capped(mut c: Command, limit: Duration) -> Option<(bool, String, String)> {
-    c.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    c.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     let mut child = c.spawn().ok()?;
     let (out, err) = (child.stdout.take(), child.stderr.take());
     let end = Instant::now() + limit;
@@ -101,7 +111,10 @@ pub(crate) fn run_capped(mut c: Command, limit: Duration) -> Option<(bool, Strin
     };
     // After the child exits the pipes close unless a grandchild holds them: wait a little, then give up.
     let grace = Duration::from_secs(2);
-    let (o, e) = (o_rx.recv_timeout(grace).unwrap_or_default(), e_rx.recv_timeout(grace).unwrap_or_default());
+    let (o, e) = (
+        o_rx.recv_timeout(grace).unwrap_or_default(),
+        e_rx.recv_timeout(grace).unwrap_or_default(),
+    );
     Some((status.success(), o, e))
 }
 
@@ -209,7 +222,10 @@ impl Engine {
     /// Deletes `parent/name` as root inside a container: files that steps created as root
     /// cannot be removed by the runner's own user.
     pub fn remove_dir(&self, image: &str, parent: &Path, name: &str) -> Result<(), String> {
-        let p = parent.to_str().filter(|p| !p.contains(':')).ok_or("unusable path")?;
+        let p = parent
+            .to_str()
+            .filter(|p| !p.contains(':'))
+            .ok_or("unusable path")?;
         let mount = format!("{p}:/w");
         let target = format!("/w/{name}");
         let args: [&str; 9] = [
@@ -367,10 +383,13 @@ impl Sidecar {
             format!("factory-ci-{id}-dind"),
         );
         let label = format!("{LABEL}={id}");
-        ctx.log.out("runner", "stdout", "starting the docker sidecar");
+        ctx.log
+            .out("runner", "stdout", "starting the docker sidecar");
         let fail = |m: String| format!("cannot start the docker sidecar: {m}");
-        e.quick(&["network", "create", "--label", &label, &net]).map_err(fail)?;
-        e.quick(&["volume", "create", "--label", &label, &vol]).map_err(fail)?;
+        e.quick(&["network", "create", "--label", &label, &net])
+            .map_err(fail)?;
+        e.quick(&["volume", "create", "--label", &label, &vol])
+            .map_err(fail)?;
         // Plain TCP on the private network: the sidecar is reachable only from this run's
         // steps, so TLS would add certificate plumbing and no isolation.
         let data = format!("{vol}:/var/lib/docker");
@@ -417,8 +436,20 @@ fn run_step(ctx: &RunCtx, name: &str, step: &Step, side: Option<&Sidecar>) -> St
     let container = format!("factory-ci-{}-{name}", ctx.run_id);
     let label = format!("{LABEL}={}", ctx.run_id);
     let mut a = strs(&["run", "--rm", "--name", &container, "--label", &label]);
-    a.extend(strs(&["--pids-limit", "512", "--security-opt", "no-new-privileges"]));
-    a.extend(strs(&["--cap-drop", "NET_RAW", "--cap-drop", "MKNOD", "--cap-drop", "SETFCAP"]));
+    a.extend(strs(&[
+        "--pids-limit",
+        "512",
+        "--security-opt",
+        "no-new-privileges",
+    ]));
+    a.extend(strs(&[
+        "--cap-drop",
+        "NET_RAW",
+        "--cap-drop",
+        "MKNOD",
+        "--cap-drop",
+        "SETFCAP",
+    ]));
     a.extend(strs(&["--memory", MEMORY, "--memory-swap", MEMORY]));
     a.extend(strs(&["-v", &mount, "-w", "/workspace"]));
     let plain = format!("factory-ci-{}", ctx.run_id);
@@ -446,19 +477,25 @@ fn run_step(ctx: &RunCtx, name: &str, step: &Step, side: Option<&Sidecar>) -> St
     // One shell, stopping at the first failing command.
     let script = format!("set -e\n{}", step.commands.join("\n"));
     a.extend([s(&step.image), s("sh"), s("-c"), script]);
-    let own = step.timeout.map(|t| (Instant::now() + Duration::from_secs(t), t));
+    let own = step
+        .timeout
+        .map(|t| (Instant::now() + Duration::from_secs(t), t));
     let (end, msg) = match own {
         Some((at, t)) if at < ctx.deadline => (at, format!("timed out after {t}s")),
         _ => (ctx.deadline, s("run timed out")),
     };
-    ctx.engine.run_logged(&a, &env, name, &container, ctx.log, end, &msg)
+    ctx.engine
+        .run_logged(&a, &env, name, &container, ctx.log, end, &msg)
 }
 
 fn blocked(p: &Pipeline, states: &BTreeMap<String, State>, name: &str) -> Option<String> {
-    p.steps[name].depends_on.iter().find_map(|d| match states.get(d) {
-        Some(State::Failed(_)) | Some(State::Skipped(_)) => Some(d.clone()),
-        _ => None,
-    })
+    p.steps[name]
+        .depends_on
+        .iter()
+        .find_map(|d| match states.get(d) {
+            Some(State::Failed(_)) | Some(State::Skipped(_)) => Some(d.clone()),
+            _ => None,
+        })
 }
 
 /// Runs the graph: a step starts when its dependencies succeeded, up to `max_parallel` at

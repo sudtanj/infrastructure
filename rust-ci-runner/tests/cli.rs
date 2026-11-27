@@ -12,7 +12,10 @@ fn run_ok(sb: &Sandbox, args: &[&str]) -> std::process::Output {
 #[test]
 fn check_accepts_a_valid_list_without_token_or_network() {
     let sb = Sandbox::new();
-    let f = sb.write("list.toml", "[[watch]]\nrepo = \"o/r\"\nbranches = [\"main\"]\n");
+    let f = sb.write(
+        "list.toml",
+        "[[watch]]\nrepo = \"o/r\"\nbranches = [\"main\"]\n",
+    );
     let mut c = sb.cmd(&["plan", "--repos", dir_str(&f), "--check"]);
     c.env("GITHUB_API_URL", "http://127.0.0.1:1");
     let o = c.output().unwrap();
@@ -24,7 +27,9 @@ fn check_accepts_a_valid_list_without_token_or_network() {
 fn check_accepts_an_empty_list() {
     let sb = Sandbox::new();
     let f = sb.write("list.toml", "");
-    assert!(run_ok(&sb, &["plan", "--repos", dir_str(&f), "--check"]).status.success());
+    assert!(run_ok(&sb, &["plan", "--repos", dir_str(&f), "--check"])
+        .status
+        .success());
 }
 
 #[test]
@@ -43,7 +48,10 @@ fn check_names_every_problem_and_exits_1() {
 #[test]
 fn check_fails_on_a_missing_file() {
     let sb = Sandbox::new();
-    let o = run_ok(&sb, &["plan", "--repos", "/nonexistent/list.toml", "--check"]);
+    let o = run_ok(
+        &sb,
+        &["plan", "--repos", "/nonexistent/list.toml", "--check"],
+    );
     assert_eq!(o.status.code(), Some(1));
     assert!(!stderr(&o).is_empty());
 }
@@ -58,7 +66,10 @@ fn check_with_a_partial_log_environment_names_the_missing_variables() {
     let o = c.output().unwrap();
     assert_eq!(o.status.code(), Some(1));
     let e = stderr(&o);
-    assert!(e.contains("FACTORY_CI_LOG_USER") && e.contains("FACTORY_CI_LOG_TOKEN"), "{e}");
+    assert!(
+        e.contains("FACTORY_CI_LOG_USER") && e.contains("FACTORY_CI_LOG_TOKEN"),
+        "{e}"
+    );
     assert!(!e.contains("127.0.0.1"), "the URL must not be echoed: {e}");
 }
 
@@ -86,7 +97,11 @@ fn local(sb: &Sandbox, toml: &str, extra: &[&str]) -> std::process::Output {
 fn run_exits_0_when_every_step_succeeds() {
     // AS 8.1
     let sb = Sandbox::new();
-    let o = local(&sb, &pipeline(&[("a", ""), ("b", "depends_on = [\"a\"]")]), &[]);
+    let o = local(
+        &sb,
+        &pipeline(&[("a", ""), ("b", "depends_on = [\"a\"]")]),
+        &[],
+    );
     assert!(o.status.success(), "{}", out_text(&o));
     assert!(sb.step_runs().len() >= 2);
 }
@@ -98,8 +113,13 @@ fn run_exits_non_zero_when_a_step_fails() {
     let mut c = sb.cmd(&[]);
     let d = sb.dir.join("proj");
     std::fs::create_dir_all(&d).unwrap();
-    std::fs::write(d.join(".factory-ci.toml"), pipeline(&[("ok", ""), ("bad", "")])).unwrap();
-    c.args(["run", "--dir", dir_str(&d)]).env("STUB_FAIL", "-bad");
+    std::fs::write(
+        d.join(".factory-ci.toml"),
+        pipeline(&[("ok", ""), ("bad", "")]),
+    )
+    .unwrap();
+    c.args(["run", "--dir", dir_str(&d)])
+        .env("STUB_FAIL", "-bad");
     let o = c.output().unwrap();
     assert!(!o.status.success(), "{}", out_text(&o));
     assert!(out_text(&o).contains("bad"));
@@ -121,13 +141,19 @@ fn run_passes_a_listed_secret_by_name_only() {
     let sb = Sandbox::new();
     let d = sb.dir.join("proj");
     std::fs::create_dir_all(&d).unwrap();
-    std::fs::write(d.join(".factory-ci.toml"), pipeline(&[("deploy", "secrets = [\"NPM_TOKEN\"]")])).unwrap();
+    std::fs::write(
+        d.join(".factory-ci.toml"),
+        pipeline(&[("deploy", "secrets = [\"NPM_TOKEN\"]")]),
+    )
+    .unwrap();
     let mut c = sb.cmd(&["run", "--dir", dir_str(&d)]);
     c.env("NPM_TOKEN", "npm-value-9999");
     let o = c.output().unwrap();
     assert!(o.status.success(), "{}", out_text(&o));
     let runs = sb.step_runs();
-    assert!(runs.iter().all(|r| !r.join("\n").contains("npm-value-9999")));
+    assert!(runs
+        .iter()
+        .all(|r| !r.join("\n").contains("npm-value-9999")));
     assert!(runs.iter().any(|r| r.iter().any(|a| a == "NPM_TOKEN")));
 }
 
@@ -167,15 +193,23 @@ fn a_docker_entry_without_the_docker_token_is_a_problem_and_never_uses_the_plain
     let out = sb.dir.join("cand.json");
     let fake = Fake::start();
     let mut c = sb.cmd(&["plan", "--repos", dir_str(&f), "--rows-out", dir_str(&out)]);
-    c.env("FACTORY_CI_TOKEN", JOB_TOKEN).env("GITHUB_API_URL", &fake.url);
+    c.env("FACTORY_CI_TOKEN", JOB_TOKEN)
+        .env("GITHUB_API_URL", &fake.url);
     let o = c.output().unwrap();
     assert!(o.status.success(), "{}", out_text(&o));
-    let cand: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    let cand: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
     let problems = cand["problems"].to_string();
-    assert!(problems.contains("o/d: FACTORY_CI_TOKEN_DOCKER is not set"), "{problems}");
+    assert!(
+        problems.contains("o/d: FACTORY_CI_TOKEN_DOCKER is not set"),
+        "{problems}"
+    );
     assert!(cand["rows"].as_array().unwrap().is_empty());
     let urls: Vec<String> = fake.requests().iter().map(|r| r.url.clone()).collect();
-    assert!(urls.is_empty(), "the plain token was used for the docker entry: {urls:?}");
+    assert!(
+        urls.is_empty(),
+        "the plain token was used for the docker entry: {urls:?}"
+    );
 }
 
 #[test]
@@ -197,16 +231,32 @@ fn phase_c_drops_a_docker_row_without_the_docker_token_and_keeps_the_plain_row()
     let (rows, summary) = (sb.dir.join("rows.json"), sb.dir.join("summary.md"));
     let fake = Fake::start();
     let mut c = sb.cmd(&[
-        "plan", "--rows-in", dir_str(&input), "--rows-out", dir_str(&rows), "--summary", dir_str(&summary),
+        "plan",
+        "--rows-in",
+        dir_str(&input),
+        "--rows-out",
+        dir_str(&rows),
+        "--summary",
+        dir_str(&summary),
     ]);
-    c.env("FACTORY_CI_TOKEN", JOB_TOKEN).env("GITHUB_API_URL", &fake.url);
+    c.env("FACTORY_CI_TOKEN", JOB_TOKEN)
+        .env("GITHUB_API_URL", &fake.url);
     let o = c.output().unwrap();
     assert!(o.status.success(), "{}", out_text(&o));
-    let out: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rows).unwrap()).unwrap();
-    let repos: Vec<&str> = out.as_array().unwrap().iter().map(|r| r["repo"].as_str().unwrap()).collect();
+    let out: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&rows).unwrap()).unwrap();
+    let repos: Vec<&str> = out
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["repo"].as_str().unwrap())
+        .collect();
     assert_eq!(repos, ["o/p"]);
     let text = std::fs::read_to_string(&summary).unwrap();
-    assert!(text.contains("o/d: FACTORY_CI_TOKEN_DOCKER is not set"), "{text}");
+    assert!(
+        text.contains("o/d: FACTORY_CI_TOKEN_DOCKER is not set"),
+        "{text}"
+    );
     let urls: Vec<String> = fake.requests().iter().map(|r| r.url.clone()).collect();
     assert!(urls.iter().any(|u| u.contains("o/p")), "{urls:?}");
     assert!(urls.iter().all(|u| !u.contains("o/d")), "{urls:?}");
@@ -232,12 +282,23 @@ fn phase_c_posts_nothing_for_docker_unchanged_and_invalid_entries_without_the_do
     let (rows, summary) = (sb.dir.join("rows.json"), sb.dir.join("summary.md"));
     let fake = Fake::start();
     let mut c = sb.cmd(&[
-        "plan", "--rows-in", dir_str(&input), "--rows-out", dir_str(&rows), "--summary", dir_str(&summary),
+        "plan",
+        "--rows-in",
+        dir_str(&input),
+        "--rows-out",
+        dir_str(&rows),
+        "--summary",
+        dir_str(&summary),
     ]);
-    c.env("FACTORY_CI_TOKEN", JOB_TOKEN).env("GITHUB_API_URL", &fake.url);
+    c.env("FACTORY_CI_TOKEN", JOB_TOKEN)
+        .env("GITHUB_API_URL", &fake.url);
     let o = c.output().unwrap();
     assert!(o.status.success(), "{}", out_text(&o));
     let urls: Vec<String> = fake.requests().iter().map(|r| r.url.clone()).collect();
-    assert_eq!(urls.iter().filter(|u| u.contains("o/p")).count(), 2, "{urls:?}");
+    assert_eq!(
+        urls.iter().filter(|u| u.contains("o/p")).count(),
+        2,
+        "{urls:?}"
+    );
     assert!(urls.iter().all(|u| !u.contains("o/d")), "{urls:?}");
 }

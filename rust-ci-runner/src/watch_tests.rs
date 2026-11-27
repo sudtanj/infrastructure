@@ -56,8 +56,21 @@ fn malformed_repo_names_are_refused() {
     // FR-004, data-model.md WatchEntry.repo
     let owner40 = format!("{}/x", "a".repeat(40));
     let bad = [
-        "a/b/c", "a", "../x", "x/..", "é/x", "a\\nb/c", "ab-/x", "-ab/x", owner40.as_str(), "*", "[a-z]",
-        "a b/c", "a/b c", "a/b..c", "",
+        "a/b/c",
+        "a",
+        "../x",
+        "x/..",
+        "é/x",
+        "a\\nb/c",
+        "ab-/x",
+        "-ab/x",
+        owner40.as_str(),
+        "*",
+        "[a-z]",
+        "a b/c",
+        "a/b c",
+        "a/b..c",
+        "",
     ];
     for repo in bad {
         let text = format!("[[watch]]\nrepo = \"{repo}\"\n");
@@ -86,7 +99,20 @@ fn duplicates_compare_case_insensitively() {
 fn malformed_globs_are_refused() {
     // data-model.md WatchEntry.branches
     let long = "a".repeat(101);
-    for g in ["", "feat[", "a]b", "{a,b}", "a b", "a..b", "a\\\\b", "!x", "^x", "~x", "a:b", long.as_str()] {
+    for g in [
+        "",
+        "feat[",
+        "a]b",
+        "{a,b}",
+        "a b",
+        "a..b",
+        "a\\\\b",
+        "!x",
+        "^x",
+        "~x",
+        "a:b",
+        long.as_str(),
+    ] {
         let p = problems(&one(&format!("branches = [{g:?}]")));
         assert!(!p.is_empty(), "glob {g:?} accepted");
     }
@@ -130,8 +156,15 @@ fn matches_branch_uses_any_of_the_globs() {
 fn reserved_secret_names_are_refused() {
     // FR-005 / FR-019, T048: BWS_ACCESS_TOKEN
     for n in [
-        "FACTORY_CI_LOG_URL", "FACTORY_CI_LOG_USER", "FACTORY_CI_LOG_TOKEN", "GITHUB_X", "DOCKER_HOST",
-        "BWS_ACCESS_TOKEN", "PATH", "1BAD", "A-B",
+        "FACTORY_CI_LOG_URL",
+        "FACTORY_CI_LOG_USER",
+        "FACTORY_CI_LOG_TOKEN",
+        "GITHUB_X",
+        "DOCKER_HOST",
+        "BWS_ACCESS_TOKEN",
+        "PATH",
+        "1BAD",
+        "A-B",
     ] {
         let p = problems(&one(&format!("secrets = [{n:?}]")));
         assert!(mentions(&p, n), "{n}: {p:?}");
@@ -153,13 +186,20 @@ fn id_must_be_a_number() {
     // data-model.md WatchEntry.id; contract line `id "abc" is not a number`
     let p = problems(&one("id = \"abc\""));
     assert!(!p.is_empty(), "{p:?}");
-    assert_eq!(parse(&one("id = 123456789")).unwrap()[0].id, Some(123_456_789));
+    assert_eq!(
+        parse(&one("id = 123456789")).unwrap()[0].id,
+        Some(123_456_789)
+    );
 }
 
 #[test]
 fn limits_on_entries_and_file_size() {
     // data-model.md: 100 entries, 64 KB
-    let n = |k: usize| (0..k).map(|i| format!("[[watch]]\nrepo = \"o/r{i}\"\n")).collect::<String>();
+    let n = |k: usize| {
+        (0..k)
+            .map(|i| format!("[[watch]]\nrepo = \"o/r{i}\"\n"))
+            .collect::<String>()
+    };
     assert_eq!(parse(&n(100)).unwrap().len(), 100);
     assert!(!problems(&n(101)).is_empty());
     let big = format!("{}\n{}", "# pad".repeat(14_000), n(1));
@@ -176,8 +216,16 @@ fn every_problem_is_reported_at_once_one_per_line() {
     assert!(p.len() >= 4, "{p:?}");
     assert!(p.iter().all(|l| !l.contains('\n')), "{p:?}");
     assert!(p.iter().any(|l| l.starts_with("entry 1:")), "{p:?}");
-    assert!(p.iter().any(|l| l.starts_with("x/y:") && l.contains("GITHUB_X")), "{p:?}");
-    assert!(p.iter().any(|l| l.starts_with("x/y:") && l.contains("duplicate of entry 2")), "{p:?}");
+    assert!(
+        p.iter()
+            .any(|l| l.starts_with("x/y:") && l.contains("GITHUB_X")),
+        "{p:?}"
+    );
+    assert!(
+        p.iter()
+            .any(|l| l.starts_with("x/y:") && l.contains("duplicate of entry 2")),
+        "{p:?}"
+    );
 }
 
 #[test]
@@ -189,7 +237,10 @@ fn malformed_toml_is_one_problem_not_a_panic() {
 struct Lcg(u64);
 impl Lcg {
     fn next(&mut self, m: u64) -> u64 {
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (self.0 >> 33) % m
     }
 }
@@ -253,7 +304,10 @@ fn read_helper_parses_and_caps_like_the_old_load_list() {
     assert!(e.starts_with("cannot read "), "{e}");
     // not UTF-8
     let u = temp_file(&[b'#', 0xff, 0xfe, b'\n']);
-    assert_eq!(crate::watch::read(&u).unwrap_err(), "watch list is not valid UTF-8");
+    assert_eq!(
+        crate::watch::read(&u).unwrap_err(),
+        "watch list is not valid UTF-8"
+    );
     // one byte over the cap is refused, at the cap it is read
     let big = temp_file(&vec![b'#'; crate::watch::MAX_BYTES + 1]);
     let e = crate::watch::read(&big).unwrap_err();
@@ -273,5 +327,9 @@ fn entries_without_branches_match_every_ref() {
         assert!(v[0].matches_branch(r), "{r}");
     }
     let v = parse(&one("branches = [\"main\"]")).unwrap();
-    assert!(v[0].matches_branch("main") && !v[0].matches_branch("main2") && !v[0].matches_branch("feat/main"));
+    assert!(
+        v[0].matches_branch("main")
+            && !v[0].matches_branch("main2")
+            && !v[0].matches_branch("feat/main")
+    );
 }

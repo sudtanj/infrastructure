@@ -26,7 +26,12 @@ const LTOK: &str = "glc_LOGTOK_5B";
 const SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 const RUN: &str = "0123456789abcdef";
 const PIN: &str = "r/i@sha256:0000000000000000000000000000000000000000000000000000000000000000";
-const KEYS: [&str; 4] = ["FACTORY_CI_TOKEN", "FACTORY_CI_LOG_URL", "FACTORY_CI_LOG_USER", "FACTORY_CI_LOG_TOKEN"];
+const KEYS: [&str; 4] = [
+    "FACTORY_CI_TOKEN",
+    "FACTORY_CI_LOG_URL",
+    "FACTORY_CI_LOG_USER",
+    "FACTORY_CI_LOG_TOKEN",
+];
 const WATCH: &str = "[[watch]]\nrepo = \"o/r\"\nid = 42\nbranches = [\"*\"]\n\n\
     [[watch]]\nrepo = \"o/noid\"\nbranches = [\"*\"]\n\n\
     [[watch]]\nrepo = \"o/docker\"\nid = 43\nbranches = [\"*\"]\nallow_docker = true\n\n\
@@ -78,28 +83,54 @@ fn hub(push: impl Fn(usize) -> u16 + Send + 'static) -> Hub {
                 .map(|h| h.value.to_string())
                 .unwrap_or_default();
             let url = rq.url().to_string();
-            log.lock().unwrap().push(Seen { url: url.clone(), auth, body });
+            log.lock().unwrap().push(Seen {
+                url: url.clone(),
+                auth,
+                body,
+            });
             let (code, text) = if url.ends_with("/loki/api/v1/push") {
                 pushes += 1;
                 (push(pushes - 1), String::new())
             } else {
                 let i = id2.load(Ordering::SeqCst);
-                let text = if i == NO_ID { "{}".to_string() } else { format!("{{\"id\":{i}}}") };
+                let text = if i == NO_ID {
+                    "{}".to_string()
+                } else {
+                    format!("{{\"id\":{i}}}")
+                };
                 (code2.load(Ordering::SeqCst), text)
             };
             let _ = rq.respond(tiny_http::Response::from_string(text).with_status_code(code));
         }
     });
-    Hub { url: format!("http://127.0.0.1:{port}"), server, seen, id, api_code }
+    Hub {
+        url: format!("http://127.0.0.1:{port}"),
+        server,
+        seen,
+        id,
+        api_code,
+    }
 }
 
 impl Hub {
     fn pushes(&self) -> Vec<Seen> {
-        self.seen.lock().unwrap().iter().filter(|s| s.url.ends_with("/loki/api/v1/push")).cloned().collect()
+        self.seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|s| s.url.ends_with("/loki/api/v1/push"))
+            .cloned()
+            .collect()
     }
 
     fn api_calls(&self) -> Vec<Seen> {
-        self.seen.lock().unwrap().iter().filter(|s| s.url.starts_with("/repos/")).cloned().collect()
+        self.seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|s| s.url.starts_with("/repos/"))
+            .cloned()
+            .collect()
     }
 
     /// `(labels, line)` of every pushed value.
@@ -118,11 +149,19 @@ impl Hub {
 
     /// The text of every line pushed for `step` on `stream`.
     fn lines(&self, step: &str, stream: &str) -> Vec<String> {
-        self.values().into_iter().filter(|(l, _)| l["step"] == step && l["stream"] == stream).map(|(_, t)| t).collect()
+        self.values()
+            .into_iter()
+            .filter(|(l, _)| l["step"] == step && l["stream"] == stream)
+            .map(|(_, t)| t)
+            .collect()
     }
 
     fn bodies(&self) -> String {
-        self.pushes().into_iter().map(|s| s.body).collect::<Vec<_>>().join("\n")
+        self.pushes()
+            .into_iter()
+            .map(|s| s.body)
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }
 
@@ -152,7 +191,10 @@ struct W {
 }
 
 fn pipe(names: &[&str]) -> String {
-    names.iter().map(|n| format!("[steps.{n}]\nimage = \"alpine\"\ncommands = [\"echo {n}\"]\n")).collect()
+    names
+        .iter()
+        .map(|n| format!("[steps.{n}]\nimage = \"alpine\"\ncommands = [\"echo {n}\"]\n"))
+        .collect()
 }
 
 impl W {
@@ -204,8 +246,25 @@ impl W {
     }
 
     fn args(&self) -> Vec<String> {
-        let (watch, work) = (self.watch.display().to_string(), self.work.display().to_string());
-        ["--repos", &watch, "--repo", "o/r", "--ref", "main", "--project", ".", "--work", &work].iter().map(|s| s.to_string()).collect()
+        let (watch, work) = (
+            self.watch.display().to_string(),
+            self.work.display().to_string(),
+        );
+        [
+            "--repos",
+            &watch,
+            "--repo",
+            "o/r",
+            "--ref",
+            "main",
+            "--project",
+            ".",
+            "--work",
+            &work,
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
     }
 
     /// Every bootstrap value and its encodings (I2).
@@ -223,7 +282,16 @@ impl W {
             return String::new();
         }
         let mut lines = self.bootstrap();
-        lines.extend(["::add-mask::x", "::error::boom", "[runner] pipeline passed", "[a] success in 0s", "[runner] log lines were dropped"].map(String::from));
+        lines.extend(
+            [
+                "::add-mask::x",
+                "::error::boom",
+                "[runner] pipeline passed",
+                "[a] success in 0s",
+                "[runner] log lines were dropped",
+            ]
+            .map(String::from),
+        );
         let mut sh = String::new();
         for l in lines {
             if to_stdout {
@@ -252,9 +320,25 @@ impl W {
             .iter()
             .map(|(k, v)| serde_json::json!({"id": "i", "organizationId": "o", "projectId": "p", "key": k, "value": v, "note": "", "creationDate": "x", "revisionDate": "x"}))
             .collect();
-        std::fs::write(self.root.join("bws.out"), serde_json::Value::Array(list).to_string()).unwrap();
-        let bws_body = if self.bws_body.is_empty() { "cat \"$d/bws.out\"".to_string() } else { self.bws_body.clone() };
-        self.script("bws.sh", format!("#!/bin/sh\n{}{}{}\n", rec("bws"), self.hostile_sh(false), bws_body));
+        std::fs::write(
+            self.root.join("bws.out"),
+            serde_json::Value::Array(list).to_string(),
+        )
+        .unwrap();
+        let bws_body = if self.bws_body.is_empty() {
+            "cat \"$d/bws.out\"".to_string()
+        } else {
+            self.bws_body.clone()
+        };
+        self.script(
+            "bws.sh",
+            format!(
+                "#!/bin/sh\n{}{}{}\n",
+                rec("bws"),
+                self.hostile_sh(false),
+                bws_body
+            ),
+        );
         let step = &self.step_out;
         self.script(
             "docker.sh",
@@ -308,7 +392,14 @@ impl W {
                 identity: Duration::from_secs(3),
             },
         };
-        run(args, &self.token, &env, &seams, Box::new(self.out.clone()), Box::new(self.err.clone()))
+        run(
+            args,
+            &self.token,
+            &env,
+            &seams,
+            Box::new(self.out.clone()),
+            Box::new(self.err.clone()),
+        )
     }
 
     fn ok(&self) -> i32 {
@@ -317,7 +408,10 @@ impl W {
 
     fn blocks(&self, file: &str) -> Vec<Vec<String>> {
         let text = std::fs::read_to_string(self.root.join(file)).unwrap_or_default();
-        text.split("=====\n").map(|c| c.lines().map(String::from).collect::<Vec<_>>()).filter(|c: &Vec<String>| !c.is_empty()).collect()
+        text.split("=====\n")
+            .map(|c| c.lines().map(String::from).collect::<Vec<_>>())
+            .filter(|c: &Vec<String>| !c.is_empty())
+            .collect()
     }
 
     fn text(&self, file: &str) -> String {
@@ -329,11 +423,17 @@ impl W {
     }
 
     fn steps(&self) -> Vec<Vec<String>> {
-        self.docker().into_iter().filter(|c| c[0] == "run").collect()
+        self.docker()
+            .into_iter()
+            .filter(|c| c[0] == "run")
+            .collect()
     }
 
     fn started_containers(&self) -> usize {
-        self.docker().iter().filter(|c| ["run", "network", "volume"].contains(&c[0].as_str())).count()
+        self.docker()
+            .iter()
+            .filter(|c| ["run", "network", "volume"].contains(&c[0].as_str()))
+            .count()
     }
 
     fn gits(&self) -> Vec<Vec<String>> {
@@ -354,7 +454,11 @@ impl W {
 
     /// The checkout directory the runner gave to `git init`.
     fn checkout(&self) -> String {
-        let init = self.gits().into_iter().find(|c| c[0] == "init").expect("git init was called");
+        let init = self
+            .gits()
+            .into_iter()
+            .find(|c| c[0] == "init")
+            .expect("git init was called");
         init.last().unwrap().clone()
     }
 }
@@ -387,7 +491,13 @@ fn pair(c: &[String], a: &str, b: &str) -> bool {
 fn norm(text: &str) -> Vec<String> {
     text.lines()
         .map(|l| match l.rfind(" in ") {
-            Some(p) if l.ends_with('s') && l[p + 4..l.len() - 1].bytes().all(|b| b.is_ascii_digit()) && l.len() > p + 5 => format!("{} in Ns", &l[..p]),
+            Some(p)
+                if l.ends_with('s')
+                    && l[p + 4..l.len() - 1].bytes().all(|b| b.is_ascii_digit())
+                    && l.len() > p + 5 =>
+            {
+                format!("{} in Ns", &l[..p])
+            }
             _ => l.to_string(),
         })
         .collect()
@@ -398,12 +508,28 @@ fn grammar_line(l: &str) -> bool {
         return false;
     };
     let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
-    let name_ok = (1..=64).contains(&name.len()) && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
-    let secs = |w: &str| rest.strip_prefix(w).and_then(|r| r.strip_suffix('s')).is_some_and(digits);
-    (name_ok && name != "runner" && (rest == "started" || rest == "skipped" || secs("success in ") || secs("failed in ")))
+    let name_ok = (1..=64).contains(&name.len())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    let secs = |w: &str| {
+        rest.strip_prefix(w)
+            .and_then(|r| r.strip_suffix('s'))
+            .is_some_and(digits)
+    };
+    (name_ok
+        && name != "runner"
+        && (rest == "started" || rest == "skipped" || secs("success in ") || secs("failed in ")))
         || (name == "runner"
-            && (["pipeline passed", "pipeline failed", "log lines were dropped"].contains(&rest)
-                || rest.strip_prefix("log store answered HTTP ").is_some_and(|c| c.len() == 3 && digits(c))))
+            && ([
+                "pipeline passed",
+                "pipeline failed",
+                "log lines were dropped",
+            ]
+            .contains(&rest)
+                || rest
+                    .strip_prefix("log store answered HTTP ")
+                    .is_some_and(|c| c.len() == 3 && digits(c))))
 }
 
 fn fixed_err(l: &str) -> bool {
@@ -415,7 +541,8 @@ fn fixed_err(l: &str) -> bool {
     }
     KEYS.iter().any(|k| {
         t == format!("secret {k}: unusable value")
-            || t.strip_prefix(&format!("secret {k}: expected 1, found ")).is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+            || t.strip_prefix(&format!("secret {k}: expected 1, found "))
+                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
     })
 }
 
@@ -438,8 +565,16 @@ fn ci_requires_all_flags() {
         assert_eq!(code, 1, "{flag}");
     }
     assert_eq!(w.stderr().lines().count(), 4);
-    assert!(w.stderr().lines().all(|l| l == "[runner] bad arguments"), "{}", w.stderr());
-    assert_eq!(w.bws_calls() + w.docker().len() + w.gits().len(), 0, "nothing ran");
+    assert!(
+        w.stderr().lines().all(|l| l == "[runner] bad arguments"),
+        "{}",
+        w.stderr()
+    );
+    assert_eq!(
+        w.bws_calls() + w.docker().len() + w.gits().len(),
+        0,
+        "nothing ran"
+    );
     // a value is missing at the end
     assert_eq!(w.go(&["--repos".to_string()]), 1);
     // --project is optional and defaults to the root
@@ -450,12 +585,22 @@ fn ci_requires_all_flags() {
 #[test]
 fn unknown_flags_and_stray_words_are_refused() {
     let w = W::new(&pipe(&["a"]));
-    for extra in [vec!["--bogus", "x"], vec!["--bogus"], vec!["stray"], vec!["--allow-docker=true"], vec!["-x"]] {
+    for extra in [
+        vec!["--bogus", "x"],
+        vec!["--bogus"],
+        vec!["stray"],
+        vec!["--allow-docker=true"],
+        vec!["-x"],
+    ] {
         let mut a = w.args();
         a.extend(extra.iter().map(|s| s.to_string()));
         assert_eq!(w.go(&a), 1, "{extra:?}");
     }
-    assert!(w.stderr().lines().all(|l| l == "[runner] bad arguments"), "{}", w.stderr());
+    assert!(
+        w.stderr().lines().all(|l| l == "[runner] bad arguments"),
+        "{}",
+        w.stderr()
+    );
     assert_eq!(w.bws_calls(), 0);
 }
 
@@ -475,7 +620,11 @@ fn repeated_flag_is_refused() {
     a.extend(["--allow-docker".to_string(), "--allow-docker".to_string()]);
     assert_eq!(w.go(&a), 1);
     assert_eq!(w.stderr().lines().count(), n);
-    assert!(w.stderr().lines().all(|l| l == "[runner] bad arguments"), "{}", w.stderr());
+    assert!(
+        w.stderr().lines().all(|l| l == "[runner] bad arguments"),
+        "{}",
+        w.stderr()
+    );
     assert_eq!(w.bws_calls(), 0);
 }
 
@@ -487,8 +636,19 @@ fn value_starting_with_dashes_is_refused() {
         assert_eq!(w.go(&a), 1, "{flag}");
     }
     // a flag followed by a flag: the value is missing
-    assert_eq!(w.go(&["--repo".to_string(), "--ref".to_string(), "main".to_string()]), 1);
-    assert!(w.stderr().lines().all(|l| l == "[runner] bad arguments"), "{}", w.stderr());
+    assert_eq!(
+        w.go(&[
+            "--repo".to_string(),
+            "--ref".to_string(),
+            "main".to_string()
+        ]),
+        1
+    );
+    assert!(
+        w.stderr().lines().all(|l| l == "[runner] bad arguments"),
+        "{}",
+        w.stderr()
+    );
     assert_eq!(w.bws_calls(), 0);
 }
 
@@ -496,16 +656,40 @@ fn value_starting_with_dashes_is_refused() {
 fn ref_table() {
     let w = W::new(&pipe(&["a"]));
     let long = "a".repeat(201);
-    for bad in ["", "-x", "-", "a..b", "..", "a b", "a;b", "a$b", "a*b", "a:b", "a\\b", "é", "a\nb", "a\0b", "a'b", "a|b", long.as_str()] {
+    for bad in [
+        "",
+        "-x",
+        "-",
+        "a..b",
+        "..",
+        "a b",
+        "a;b",
+        "a$b",
+        "a*b",
+        "a:b",
+        "a\\b",
+        "é",
+        "a\nb",
+        "a\0b",
+        "a'b",
+        "a|b",
+        long.as_str(),
+    ] {
         assert_eq!(w.go(&set(w.args(), "--ref", Some(bad))), 1, "{bad:?}");
     }
-    assert!(w.stderr().lines().all(|l| l == "[runner] bad arguments"), "{}", w.stderr());
+    assert!(
+        w.stderr().lines().all(|l| l == "[runner] bad arguments"),
+        "{}",
+        w.stderr()
+    );
     assert_eq!(w.bws_calls(), 0, "a bad ref never reaches bws");
     // I7 over random strings: every one outside the rule is refused before bws
     let alphabet: Vec<char> = "ab./-_;$ é\n*0".chars().collect();
     let mut x: u64 = 29;
     for _ in 0..150 {
-        x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        x = x
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let len = 1 + ((x >> 40) % 8) as usize;
         let mut s = String::new();
         for i in 0..len {
@@ -514,7 +698,8 @@ fn ref_table() {
         let ok = (1..=200).contains(&s.len())
             && !s.starts_with('-')
             && !s.contains("..")
-            && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'/' | b'-'));
+            && s.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'/' | b'-'));
         if !ok {
             assert_eq!(w.go(&set(w.args(), "--ref", Some(&s))), 1, "{s:?}");
             assert_eq!(w.bws_calls(), 0, "{s:?}");
@@ -523,7 +708,12 @@ fn ref_table() {
     // good refs pass the argument check (stderr has no `bad arguments`)
     let w = W::new(&pipe(&["a"]));
     for good in ["main", "feature/x-y_z.1", "a".repeat(200).as_str()] {
-        assert_eq!(w.go(&set(w.args(), "--ref", Some(good))), 0, "{good}: {}", w.stderr());
+        assert_eq!(
+            w.go(&set(w.args(), "--ref", Some(good))),
+            0,
+            "{good}: {}",
+            w.stderr()
+        );
     }
 }
 
@@ -531,15 +721,40 @@ fn ref_table() {
 fn project_table() {
     let w = W::new(&pipe(&["a"]));
     let long = "p".repeat(101);
-    for bad in ["", "..", "-x", "a/b", "/abs", "a b", "a;b", "svc/", "./svc", "é", long.as_str()] {
+    for bad in [
+        "",
+        "..",
+        "-x",
+        "a/b",
+        "/abs",
+        "a b",
+        "a;b",
+        "svc/",
+        "./svc",
+        "é",
+        long.as_str(),
+    ] {
         assert_eq!(w.go(&set(w.args(), "--project", Some(bad))), 1, "{bad:?}");
     }
-    assert!(w.stderr().lines().all(|l| l == "[runner] bad arguments"), "{}", w.stderr());
+    assert!(
+        w.stderr().lines().all(|l| l == "[runner] bad arguments"),
+        "{}",
+        w.stderr()
+    );
     assert_eq!(w.bws_calls(), 0);
     let w = W::new(&pipe(&["a"]));
-    assert_eq!(w.go(&set(w.args(), "--project", Some("svc"))), 0, "{}", w.stderr());
+    assert_eq!(
+        w.go(&set(w.args(), "--project", Some("svc"))),
+        0,
+        "{}",
+        w.stderr()
+    );
     let steps = w.steps();
-    assert!(pair(&steps[0], "-v", &format!("{}/svc:/workspace", w.checkout())), "{:?}", steps[0]);
+    assert!(
+        pair(&steps[0], "-v", &format!("{}/svc:/workspace", w.checkout())),
+        "{:?}",
+        steps[0]
+    );
 }
 
 #[test]
@@ -564,7 +779,11 @@ fn work_table() {
     for bad in &bads {
         assert_eq!(w.go(&set(w.args(), "--work", Some(bad))), 1, "{bad:?}");
     }
-    assert!(w.stderr().lines().all(|l| l == "[runner] bad arguments"), "{}", w.stderr());
+    assert!(
+        w.stderr().lines().all(|l| l == "[runner] bad arguments"),
+        "{}",
+        w.stderr()
+    );
     assert_eq!(w.bws_calls(), 0);
     assert_eq!(w.ok(), 0, "the canonical path is accepted: {}", w.stderr());
 }
@@ -575,24 +794,53 @@ fn work_table() {
 fn repo_outside_the_watch_list_exits_1_before_bws() {
     let w = W::new(&pipe(&["a"]));
     assert_eq!(w.go(&set(w.args(), "--repo", Some("x/y"))), 1);
-    assert_eq!(w.stderr(), "[runner] repository or ref not in the watch list\n");
+    assert_eq!(
+        w.stderr(),
+        "[runner] repository or ref not in the watch list\n"
+    );
     assert_eq!(w.stdout(), "");
     assert_eq!(w.bws_calls() + w.docker().len() + w.gits().len(), 0);
     assert!(w.hub.pushes().is_empty() && w.hub.api_calls().is_empty());
     // an unreadable or invalid watch list is the same line
     let bad = w.root.join("bad.toml");
     std::fs::write(&bad, "[[watch]]\nrepo = \"nope\"\n").unwrap();
-    assert_eq!(w.go(&set(w.args(), "--repos", Some(&bad.display().to_string()))), 1);
-    assert_eq!(w.go(&set(w.args(), "--repos", Some(&w.root.join("missing.toml").display().to_string()))), 1);
-    assert!(w.stderr().lines().all(|l| l == "[runner] repository or ref not in the watch list"), "{}", w.stderr());
+    assert_eq!(
+        w.go(&set(w.args(), "--repos", Some(&bad.display().to_string()))),
+        1
+    );
+    assert_eq!(
+        w.go(&set(
+            w.args(),
+            "--repos",
+            Some(&w.root.join("missing.toml").display().to_string())
+        )),
+        1
+    );
+    assert!(
+        w.stderr()
+            .lines()
+            .all(|l| l == "[runner] repository or ref not in the watch list"),
+        "{}",
+        w.stderr()
+    );
     assert_eq!(w.bws_calls(), 0);
 }
 
 #[test]
 fn ref_outside_branches_exits_1() {
     let w = W::new(&pipe(&["a"]));
-    assert_eq!(w.go(&set(set(w.args(), "--repo", Some("o/mainonly")), "--ref", Some("dev"))), 1);
-    assert_eq!(w.stderr(), "[runner] repository or ref not in the watch list\n");
+    assert_eq!(
+        w.go(&set(
+            set(w.args(), "--repo", Some("o/mainonly")),
+            "--ref",
+            Some("dev")
+        )),
+        1
+    );
+    assert_eq!(
+        w.stderr(),
+        "[runner] repository or ref not in the watch list\n"
+    );
     assert_eq!(w.bws_calls(), 0);
 }
 
@@ -600,7 +848,10 @@ fn ref_outside_branches_exits_1() {
 fn entry_without_id_exits_1() {
     let w = W::new(&pipe(&["a"]));
     assert_eq!(w.go(&set(w.args(), "--repo", Some("o/noid"))), 1);
-    assert_eq!(w.stderr(), "[runner] repository or ref not in the watch list\n");
+    assert_eq!(
+        w.stderr(),
+        "[runner] repository or ref not in the watch list\n"
+    );
     assert_eq!(w.bws_calls(), 0);
 }
 
@@ -622,14 +873,29 @@ fn passing_run_exits_0() {
     assert_eq!(w.ok(), 0, "{}", w.stderr());
     assert_eq!(
         norm(&w.stdout()),
-        ["[runner] log store answered HTTP 204", "[a] started", "[a] success in Ns", "[runner] pipeline passed"]
+        [
+            "[runner] log store answered HTTP 204",
+            "[a] started",
+            "[a] success in Ns",
+            "[runner] pipeline passed"
+        ]
     );
     assert_eq!(w.stderr(), "");
     // the engine check is the first container call (I5), the step output went to Loki only
     assert_eq!(w.docker()[0], ["version"]);
-    assert!(w.hub.lines("a", "stdout").iter().any(|l| l.ends_with("step-output")), "{:?}", w.hub.values());
+    assert!(
+        w.hub
+            .lines("a", "stdout")
+            .iter()
+            .any(|l| l.ends_with("step-output")),
+        "{:?}",
+        w.hub.values()
+    );
     assert!(w.hub.lines("probe", "stdout").len() == 1);
-    assert!(w.hub.lines("ci", "stdout").iter().any(|l| l.contains(SHA)), "the full SHA goes to Loki");
+    assert!(
+        w.hub.lines("ci", "stdout").iter().any(|l| l.contains(SHA)),
+        "the full SHA goes to Loki"
+    );
     assert_public(&w);
 }
 
@@ -659,8 +925,19 @@ fn failing_step_exits_1_without_reason() {
     assert!(!w.stdout().contains("boom-reason") && !w.stdout().contains("exit code"));
     assert_eq!(w.stderr(), "");
     // Loki keeps the reason
-    assert!(w.hub.lines("bad", "stdout").iter().any(|l| l.contains("failed in") && l.contains("exit code 3")), "{:?}", w.hub.values());
-    assert!(w.hub.lines("bad", "stderr").iter().any(|l| l.contains("boom-reason-XYZ")));
+    assert!(
+        w.hub
+            .lines("bad", "stdout")
+            .iter()
+            .any(|l| l.contains("failed in") && l.contains("exit code 3")),
+        "{:?}",
+        w.hub.values()
+    );
+    assert!(w
+        .hub
+        .lines("bad", "stderr")
+        .iter()
+        .any(|l| l.contains("boom-reason-XYZ")));
 }
 
 #[test]
@@ -669,7 +946,11 @@ fn dropped_lines_on_a_pass_print_the_line_and_exit_1() {
     let w = W::with_loki(&pipe(&["a"]), |i| if i == 0 { 204 } else { 401 });
     assert_eq!(w.ok(), 1);
     let out = norm(&w.stdout());
-    assert_eq!(out.last().unwrap(), "[runner] log lines were dropped", "{out:?}");
+    assert_eq!(
+        out.last().unwrap(),
+        "[runner] log lines were dropped",
+        "{out:?}"
+    );
     assert!(out.contains(&"[runner] pipeline passed".to_string()));
     assert_eq!(w.stderr(), "");
     // a failed pipeline stays `pipeline failed`; the dropped line is for a pass only
@@ -677,7 +958,11 @@ fn dropped_lines_on_a_pass_print_the_line_and_exit_1() {
     w.docker_body = "case \"$1\" in run) exit 1;; esac".to_string();
     assert_eq!(w.ok(), 1);
     assert!(w.stdout().contains("[runner] pipeline failed"));
-    assert!(!w.stdout().contains("log lines were dropped"), "{}", w.stdout());
+    assert!(
+        !w.stdout().contains("log lines were dropped"),
+        "{}",
+        w.stdout()
+    );
 }
 
 // ---- the probe (FR-016) ----
@@ -687,9 +972,16 @@ fn probe_failure_exits_1_with_the_fixed_line() {
     for code in [401u16, 403] {
         let w = W::with_loki(&pipe(&["a"]), move |_| code);
         assert_eq!(w.ok(), 1);
-        assert_eq!(w.stdout(), format!("[runner] log store answered HTTP {code}\n"));
+        assert_eq!(
+            w.stdout(),
+            format!("[runner] log store answered HTTP {code}\n")
+        );
         assert_eq!(w.stderr(), format!("[runner] {HINT}\n"));
-        assert_eq!(w.docker().len() + w.gits().len() + w.hub.api_calls().len(), 0, "{code}: nothing runs");
+        assert_eq!(
+            w.docker().len() + w.gits().len() + w.hub.api_calls().len(),
+            0,
+            "{code}: nothing runs"
+        );
     }
     // another answer: no hint, still exit 1 (one retry first)
     let w = W::with_loki(&pipe(&["a"]), |_| 500);
@@ -713,7 +1005,11 @@ fn engine_down_exits_1_before_the_fetch() {
     w.docker_body = "case \"$1\" in version) exit 1;; esac".to_string();
     assert_eq!(w.ok(), 1);
     assert_eq!(w.stderr(), "[runner] cannot reach the container engine\n");
-    assert_eq!(w.gits().len() + w.hub.api_calls().len(), 0, "no identity call, no git");
+    assert_eq!(
+        w.gits().len() + w.hub.api_calls().len(),
+        0,
+        "no identity call, no git"
+    );
     assert_eq!(w.started_containers(), 0);
     // every engine call failing is the same line
     let mut w = W::new(&pipe(&["a"]));
@@ -724,13 +1020,27 @@ fn engine_down_exits_1_before_the_fetch() {
 
 #[test]
 fn identity_mismatch_exits_1() {
-    for (id, code) in [(43u64, 200u16), (NO_ID, 200), (42, 404), (42, 500), (0, 200)] {
+    for (id, code) in [
+        (43u64, 200u16),
+        (NO_ID, 200),
+        (42, 404),
+        (42, 500),
+        (0, 200),
+    ] {
         let w = W::new(&pipe(&["a"]));
         w.hub.id.store(id, Ordering::SeqCst);
         w.hub.api_code.store(code, Ordering::SeqCst);
         assert_eq!(w.ok(), 1, "id {id} code {code}");
-        assert_eq!(w.stderr(), "[runner] repository identity check failed\n", "id {id} code {code}");
-        assert_eq!(w.gits().len(), 0, "the clone token goes nowhere on a mismatch");
+        assert_eq!(
+            w.stderr(),
+            "[runner] repository identity check failed\n",
+            "id {id} code {code}"
+        );
+        assert_eq!(
+            w.gits().len(),
+            0,
+            "the clone token goes nowhere on a mismatch"
+        );
         assert_eq!(w.steps().len(), 0);
         assert!(!w.stdout().contains("pipeline"), "{}", w.stdout());
     }
@@ -750,7 +1060,12 @@ fn identity_request_uses_the_bearer_token() {
 
 fn env_block(w: &W, file: &str, nth: usize) -> Vec<String> {
     let text = w.text(file);
-    text.split("=====\n").nth(nth).unwrap_or("").lines().map(String::from).collect()
+    text.split("=====\n")
+        .nth(nth)
+        .unwrap_or("")
+        .lines()
+        .map(String::from)
+        .collect()
 }
 
 #[test]
@@ -759,15 +1074,42 @@ fn fetch_runs_init_fetch_checkout_with_the_header_in_env() {
     assert_eq!(w.ok(), 0, "{}", w.stderr());
     let g = w.gits();
     let dir = w.checkout();
-    assert!(dir.starts_with(&format!("{}/ci-{RUN}-", w.work.display())) && dir.ends_with("/src"), "{dir}");
+    assert!(
+        dir.starts_with(&format!("{}/ci-{RUN}-", w.work.display())) && dir.ends_with("/src"),
+        "{dir}"
+    );
     assert_eq!(g[0], ["init", "-q", &dir]);
     let url = format!("{}/o/r.git", w.base);
-    assert_eq!(g[1], ["-C", &dir, "fetch", "-q", "--depth", "1", "--no-tags", "--", &url, "refs/heads/main"]);
-    assert_eq!(g[2], ["-C", &dir, "checkout", "-q", "--detach", "FETCH_HEAD"]);
-    assert!(g[3].contains(&"rev-parse".to_string()) && g[3].contains(&"HEAD".to_string()), "{:?}", g[3]);
+    assert_eq!(
+        g[1],
+        [
+            "-C",
+            &dir,
+            "fetch",
+            "-q",
+            "--depth",
+            "1",
+            "--no-tags",
+            "--",
+            &url,
+            "refs/heads/main"
+        ]
+    );
+    assert_eq!(
+        g[2],
+        ["-C", &dir, "checkout", "-q", "--detach", "FETCH_HEAD"]
+    );
+    assert!(
+        g[3].contains(&"rev-parse".to_string()) && g[3].contains(&"HEAD".to_string()),
+        "{:?}",
+        g[3]
+    );
     // the header travels in the environment of the fetch only as the plan says
     let env = env_block(&w, "git.envs", 1);
-    let want = format!("GIT_CONFIG_VALUE_0=Authorization: basic {}", base64(format!("x-access-token:{TOK}").as_bytes()));
+    let want = format!(
+        "GIT_CONFIG_VALUE_0=Authorization: basic {}",
+        base64(format!("x-access-token:{TOK}").as_bytes())
+    );
     for l in [
         "GIT_CONFIG_COUNT=1",
         "GIT_CONFIG_KEY_0=http.https://github.com/.extraHeader",
@@ -782,16 +1124,33 @@ fn fetch_runs_init_fetch_checkout_with_the_header_in_env() {
     assert!(env.iter().any(|e| *e == want), "{env:?}");
     // I11: a cleared environment plus the allowlist, for every git call
     let allowed = [
-        "PATH", "HOME", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_TERMINAL_PROMPT", "GIT_ALLOW_PROTOCOL", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0",
-        "GIT_CONFIG_VALUE_0", "PWD", "OLDPWD", "SHLVL", "_",
+        "PATH",
+        "HOME",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_SYSTEM",
+        "GIT_TERMINAL_PROMPT",
+        "GIT_ALLOW_PROTOCOL",
+        "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_KEY_0",
+        "GIT_CONFIG_VALUE_0",
+        "PWD",
+        "OLDPWD",
+        "SHLVL",
+        "_",
     ];
     for i in 0..4 {
         for l in env_block(&w, "git.envs", i) {
             let name = l.split('=').next().unwrap_or("");
-            assert!(allowed.contains(&name), "git call {i}: {name} is not on the allowlist");
+            assert!(
+                allowed.contains(&name),
+                "git call {i}: {name} is not on the allowlist"
+            );
         }
     }
-    assert!(!w.text("git.envs").contains("CARGO_PKG_NAME") && !w.text("git.envs").contains("BWS_ACCESS_TOKEN"));
+    assert!(
+        !w.text("git.envs").contains("CARGO_PKG_NAME")
+            && !w.text("git.envs").contains("BWS_ACCESS_TOKEN")
+    );
 }
 
 #[test]
@@ -799,7 +1158,11 @@ fn fetch_token_is_not_in_argv() {
     let w = W::new(&pipe(&["a"]));
     assert_eq!(w.ok(), 0, "{}", w.stderr());
     let argv = w.text("git.calls");
-    for v in [TOK.to_string(), base64(format!("x-access-token:{TOK}").as_bytes()), base64(TOK.as_bytes())] {
+    for v in [
+        TOK.to_string(),
+        base64(format!("x-access-token:{TOK}").as_bytes()),
+        base64(TOK.as_bytes()),
+    ] {
         assert!(!argv.contains(&v), "{v} in git argv");
     }
     assert!(!argv.contains("Authorization") && !argv.contains("extraHeader"));
@@ -810,9 +1173,16 @@ fn fetch_asks_for_refs_heads_only() {
     for r in ["main", "v1.0", "release/2026"] {
         let w = W::new(&pipe(&["a"]));
         w.go(&set(w.args(), "--ref", Some(r)));
-        let fetch = w.gits().into_iter().find(|c| c.contains(&"fetch".to_string())).expect("fetch");
+        let fetch = w
+            .gits()
+            .into_iter()
+            .find(|c| c.contains(&"fetch".to_string()))
+            .expect("fetch");
         assert_eq!(fetch.last().unwrap(), &format!("refs/heads/{r}"));
-        assert!(fetch.iter().all(|a| a != r && !a.starts_with("refs/tags")), "{fetch:?}");
+        assert!(
+            fetch.iter().all(|a| a != r && !a.starts_with("refs/tags")),
+            "{fetch:?}"
+        );
         assert!(fetch.contains(&"--no-tags".to_string()) && fetch.contains(&"--depth".to_string()));
     }
 }
@@ -823,10 +1193,17 @@ fn clone_failure_prints_the_fixed_line_and_ships_a_redacted_detail() {
     w.git_body = format!("case \" $* \" in *\" fetch \"*) echo 'fatal: unable to access with {TOK}' >&2; exit 128;; esac");
     assert_eq!(w.ok(), 1);
     assert_eq!(w.stderr(), "[runner] clone failed\n");
-    assert!(!w.stdout().contains("fatal") && !w.stdout().contains("pipeline"), "{}", w.stdout());
+    assert!(
+        !w.stdout().contains("fatal") && !w.stdout().contains("pipeline"),
+        "{}",
+        w.stdout()
+    );
     assert_eq!(w.steps().len(), 0);
     let detail = w.hub.lines("ci", "stderr").join("\n");
-    assert!(detail.contains("fatal: unable to access with ***"), "{detail}");
+    assert!(
+        detail.contains("fatal: unable to access with ***"),
+        "{detail}"
+    );
     assert!(!w.hub.bodies().contains(TOK));
 }
 
@@ -852,7 +1229,11 @@ fn real_fetch_from_a_file_repo_with_cleared_env() {
             .env("GIT_COMMITTER_EMAIL", "t@example.com")
             .output()
             .unwrap();
-        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     };
     git(&["init", "-q", "-b", "main"]);
@@ -863,7 +1244,12 @@ fn real_fetch_from_a_file_repo_with_cleared_env() {
     assert_eq!(w.ok(), 0, "{}", w.stderr());
     // the checkout is a real clone of that commit
     let dir = w.checkout();
-    assert!(std::path::Path::new(&dir).join(".factory-ci.toml").is_file(), "{dir}");
+    assert!(
+        std::path::Path::new(&dir)
+            .join(".factory-ci.toml")
+            .is_file(),
+        "{dir}"
+    );
     let head = std::process::Command::new("git")
         .args(["-C", &dir, "rev-parse", "HEAD"])
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -871,13 +1257,26 @@ fn real_fetch_from_a_file_repo_with_cleared_env() {
         .output()
         .unwrap();
     assert_eq!(String::from_utf8_lossy(&head.stdout).trim(), sha);
-    assert!(w.hub.lines("ci", "stdout").iter().any(|l| l.contains(&sha)), "the Loki line carries the real SHA");
+    assert!(
+        w.hub.lines("ci", "stdout").iter().any(|l| l.contains(&sha)),
+        "the Loki line carries the real SHA"
+    );
     // every git call ran with a cleared environment
     let envs = w.text("git.envs");
-    assert!(!envs.contains("CARGO_PKG_NAME") && !envs.contains("BWS_ACCESS_TOKEN"), "{envs}");
-    assert!(envs.lines().any(|l| l == "HOME=/tmp") && envs.lines().any(|l| l == "GIT_ALLOW_PROTOCOL=file"));
+    assert!(
+        !envs.contains("CARGO_PKG_NAME") && !envs.contains("BWS_ACCESS_TOKEN"),
+        "{envs}"
+    );
+    assert!(
+        envs.lines().any(|l| l == "HOME=/tmp")
+            && envs.lines().any(|l| l == "GIT_ALLOW_PROTOCOL=file")
+    );
     // the fetch asked for the branch only
-    let fetch = w.gits().into_iter().find(|c| c.contains(&"fetch".to_string())).unwrap();
+    let fetch = w
+        .gits()
+        .into_iter()
+        .find(|c| c.contains(&"fetch".to_string()))
+        .unwrap();
     assert_eq!(fetch.last().unwrap(), "refs/heads/main");
     // the protocol seam is a gate: with `https` the same file:// URL is refused
     let mut w2 = W::new(&pipe(&["a"]));
@@ -893,7 +1292,11 @@ fn symlinked_pipeline_file_is_refused() {
     let w = W::new(&pipe(&["a"]));
     std::fs::remove_file(w.fixture.join(".factory-ci.toml")).unwrap();
     std::fs::write(w.fixture.join("real.toml"), pipe(&["a"])).unwrap();
-    std::os::unix::fs::symlink(w.fixture.join("real.toml"), w.fixture.join(".factory-ci.toml")).unwrap();
+    std::os::unix::fs::symlink(
+        w.fixture.join("real.toml"),
+        w.fixture.join(".factory-ci.toml"),
+    )
+    .unwrap();
     assert_eq!(w.ok(), 1);
     assert_eq!(w.stderr(), "[runner] pipeline file refused\n");
     assert_eq!(w.started_containers(), 0);
@@ -924,10 +1327,19 @@ fn toml_error_prints_the_fixed_line_and_ships_the_detail() {
     let w = W::new("[steps.a\nimage = \"alpine\" LEAK-TOML-77");
     assert_eq!(w.ok(), 1);
     assert_eq!(w.stderr(), "[runner] pipeline file refused\n");
-    assert!(!w.stdout().contains("TOML") && !w.stdout().contains("LEAK") && !w.stdout().contains("pipeline"), "{}", w.stdout());
+    assert!(
+        !w.stdout().contains("TOML")
+            && !w.stdout().contains("LEAK")
+            && !w.stdout().contains("pipeline"),
+        "{}",
+        w.stdout()
+    );
     assert_eq!(w.started_containers(), 0);
     let detail = w.hub.lines("ci", "stderr").join("\n");
-    assert!(detail.contains("invalid TOML"), "the parse detail goes to Loki: {detail}");
+    assert!(
+        detail.contains("invalid TOML"),
+        "the parse detail goes to Loki: {detail}"
+    );
 }
 
 #[test]
@@ -936,7 +1348,11 @@ fn docker_step_is_refused_before_any_container() {
     assert_eq!(w.ok(), 1);
     assert_eq!(w.stderr(), "[runner] docker steps are refused\n");
     assert_eq!(w.started_containers(), 0, "{:?}", w.docker());
-    assert!(w.docker().iter().all(|c| c[0] == "version"), "only the engine check ran: {:?}", w.docker());
+    assert!(
+        w.docker().iter().all(|c| c[0] == "version"),
+        "only the engine check ran: {:?}",
+        w.docker()
+    );
     // the flag alone is not enough: the entry must allow it too (o/r does not)
     let w = W::new(DOCKER_STEP);
     let mut a = w.args();
@@ -950,38 +1366,70 @@ fn allow_docker_needs_the_entry_and_a_pinned_dind_image() {
     let with = |extra: &[&str], env: &[(&str, &str)], repo: &str| {
         let mut w = W::new(DOCKER_STEP);
         w.hub.id.store(43, Ordering::SeqCst);
-        w.env.extend(env.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+        w.env
+            .extend(env.iter().map(|(k, v)| (k.to_string(), v.to_string())));
         let mut a = set(w.args(), "--repo", Some(repo));
         a.extend(extra.iter().map(|s| s.to_string()));
         let code = w.go(&a);
         (code, w)
     };
     // the flag on an entry without allow_docker: the watch gate, before bws
-    let (code, w) = with(&["--allow-docker"], &[("FACTORY_CI_DIND_IMAGE", PIN)], "o/r");
-    assert_eq!((code, w.stderr().as_str(), w.bws_calls()), (1, "[runner] repository or ref not in the watch list\n", 0));
+    let (code, w) = with(
+        &["--allow-docker"],
+        &[("FACTORY_CI_DIND_IMAGE", PIN)],
+        "o/r",
+    );
+    assert_eq!(
+        (code, w.stderr().as_str(), w.bws_calls()),
+        (1, "[runner] repository or ref not in the watch list\n", 0)
+    );
     // the entry allows it but the flag is missing
     let (code, w) = with(&[], &[("FACTORY_CI_DIND_IMAGE", PIN)], "o/docker");
-    assert_eq!((code, w.stderr().as_str(), w.started_containers()), (1, "[runner] docker steps are refused\n", 0));
+    assert_eq!(
+        (code, w.stderr().as_str(), w.started_containers()),
+        (1, "[runner] docker steps are refused\n", 0)
+    );
     // flag and entry, no image or an unpinned one
-    for env in [vec![], vec![("FACTORY_CI_DIND_IMAGE", "docker:27.5.1-dind")], vec![("FACTORY_CI_DIND_IMAGE", "")]] {
+    for env in [
+        vec![],
+        vec![("FACTORY_CI_DIND_IMAGE", "docker:27.5.1-dind")],
+        vec![("FACTORY_CI_DIND_IMAGE", "")],
+    ] {
         let (code, w) = with(&["--allow-docker"], &env, "o/docker");
-        assert_eq!((code, w.stderr().as_str(), w.started_containers()), (1, "[runner] docker steps are refused\n", 0), "{env:?}");
+        assert_eq!(
+            (code, w.stderr().as_str(), w.started_containers()),
+            (1, "[runner] docker steps are refused\n", 0),
+            "{env:?}"
+        );
     }
     // all three: the run goes ahead and starts the sidecar from the pinned image
-    let (code, w) = with(&["--allow-docker"], &[("FACTORY_CI_DIND_IMAGE", PIN)], "o/docker");
+    let (code, w) = with(
+        &["--allow-docker"],
+        &[("FACTORY_CI_DIND_IMAGE", PIN)],
+        "o/docker",
+    );
     assert_eq!(code, 0, "{}", w.stderr());
-    assert!(w.docker().iter().any(|c| c.contains(&PIN.to_string())), "{:?}", w.docker());
+    assert!(
+        w.docker().iter().any(|c| c.contains(&PIN.to_string())),
+        "{:?}",
+        w.docker()
+    );
 }
 
 #[test]
 fn declared_secret_fails_before_any_container() {
-    let mut w = W::new("[steps.a]\nimage = \"alpine\"\ncommands = [\"x\"]\nsecrets = [\"NPM_TOKEN\"]\n");
+    let mut w =
+        W::new("[steps.a]\nimage = \"alpine\"\ncommands = [\"x\"]\nsecrets = [\"NPM_TOKEN\"]\n");
     // even a defined value is never looked up
-    w.env.push(("NPM_TOKEN".to_string(), "npm-secret-77".to_string()));
+    w.env
+        .push(("NPM_TOKEN".to_string(), "npm-secret-77".to_string()));
     assert_eq!(w.ok(), 1);
     assert_eq!(w.stderr(), "[runner] pipeline file refused\n");
     assert_eq!(w.started_containers(), 0);
-    assert!(!w.text("docker.calls").contains("npm-secret-77") && !w.text("docker.envs").contains("npm-secret-77"));
+    assert!(
+        !w.text("docker.calls").contains("npm-secret-77")
+            && !w.text("docker.envs").contains("npm-secret-77")
+    );
 }
 
 #[test]
@@ -1000,7 +1448,14 @@ fn engine_fault_during_run_exits_1_with_runner_fault() {
     assert_eq!(w.ok(), 1);
     assert_eq!(w.stderr(), "[runner] runner fault\n");
     assert!(!w.stdout().contains("pipeline passed"), "{}", w.stdout());
-    assert!(w.hub.lines("ci", "stderr").iter().any(|l| l.contains("cannot create the run network")), "{:?}", w.hub.values());
+    assert!(
+        w.hub
+            .lines("ci", "stderr")
+            .iter()
+            .any(|l| l.contains("cannot create the run network")),
+        "{:?}",
+        w.hub.values()
+    );
     assert_eq!(w.steps().len(), 0);
 }
 
@@ -1048,15 +1503,37 @@ fn step_argv_has_no_forbidden_flag() {
         ] {
             assert!(pair(&s, a, b), "{a} {b} missing in {s:?}");
         }
-        assert_eq!(s.iter().filter(|x| *x == "--cap-drop").count(), 3, "exactly the three drops: {s:?}");
-        assert_eq!(s.iter().filter(|x| *x == "-v").count(), 1, "the workspace is the only mount: {s:?}");
+        assert_eq!(
+            s.iter().filter(|x| *x == "--cap-drop").count(),
+            3,
+            "exactly the three drops: {s:?}"
+        );
+        assert_eq!(
+            s.iter().filter(|x| *x == "-v").count(),
+            1,
+            "the workspace is the only mount: {s:?}"
+        );
         for a in &s {
-            assert!(!a.starts_with("--cap-add") && !a.starts_with("--privileged") && !a.starts_with("--cpus"), "{a} in {s:?}");
+            assert!(
+                !a.starts_with("--cap-add")
+                    && !a.starts_with("--privileged")
+                    && !a.starts_with("--cpus"),
+                "{a} in {s:?}"
+            );
             assert!(a != "--pid" && !a.starts_with("--pid="), "{a} in {s:?}");
-            assert!(!a.contains("docker.sock") && !a.contains("DOCKER_"), "{a} in {s:?}");
-            assert!(a != "--network=host" && a != "--userns=host", "{a} in {s:?}");
+            assert!(
+                !a.contains("docker.sock") && !a.contains("DOCKER_"),
+                "{a} in {s:?}"
+            );
+            assert!(
+                a != "--network=host" && a != "--userns=host",
+                "{a} in {s:?}"
+            );
         }
-        assert!(!pair(&s, "--network", "host") && !pair(&s, "--pid", "host"), "{s:?}");
+        assert!(
+            !pair(&s, "--network", "host") && !pair(&s, "--pid", "host"),
+            "{s:?}"
+        );
     }
 }
 
@@ -1066,7 +1543,10 @@ fn no_docker_config_reaches_step_containers() {
     assert_eq!(w.ok(), 0, "{}", w.stderr());
     for s in w.steps() {
         assert!(!s.iter().any(|a| a.contains("DOCKER_CONFIG")), "{s:?}");
-        assert!(!s.iter().any(|a| a.contains(".docker")), "no docker config mount: {s:?}");
+        assert!(
+            !s.iter().any(|a| a.contains(".docker")),
+            "no docker config mount: {s:?}"
+        );
     }
 }
 
@@ -1075,7 +1555,13 @@ fn step_env_sets_git_safe_directory() {
     let w = two_steps();
     assert_eq!(w.ok(), 0, "{}", w.stderr());
     for s in w.steps() {
-        for kv in ["GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=safe.directory", "GIT_CONFIG_VALUE_0=/workspace", "CI=true", "FACTORY_CI_EVENT=manual"] {
+        for kv in [
+            "GIT_CONFIG_COUNT=1",
+            "GIT_CONFIG_KEY_0=safe.directory",
+            "GIT_CONFIG_VALUE_0=/workspace",
+            "CI=true",
+            "FACTORY_CI_EVENT=manual",
+        ] {
             assert!(pair(&s, "-e", kv), "{kv} missing in {s:?}");
         }
         assert!(pair(&s, "-e", &format!("FACTORY_CI_SHA={SHA}")), "{s:?}");
@@ -1117,9 +1603,21 @@ fn hostile_children_cannot_reach_stdout_or_stderr() {
     assert_no_marker(&w);
     // each child failing: only the fixed line comes out
     let cases: [(&str, fn(&mut W), &str); 3] = [
-        ("bws", |w| w.bws_body = "exit 1".to_string(), "[runner] secret store unreachable\n"),
-        ("git", |w| w.git_body = "case \" $* \" in *\" fetch \"*) exit 128;; esac".to_string(), "[runner] clone failed\n"),
-        ("docker", |w| w.docker_body = "case \"$1\" in version) exit 1;; esac".to_string(), "[runner] cannot reach the container engine\n"),
+        (
+            "bws",
+            |w| w.bws_body = "exit 1".to_string(),
+            "[runner] secret store unreachable\n",
+        ),
+        (
+            "git",
+            |w| w.git_body = "case \" $* \" in *\" fetch \"*) exit 128;; esac".to_string(),
+            "[runner] clone failed\n",
+        ),
+        (
+            "docker",
+            |w| w.docker_body = "case \"$1\" in version) exit 1;; esac".to_string(),
+            "[runner] cannot reach the container engine\n",
+        ),
     ];
     for (label, tweak, want) in cases {
         let mut w = hostile(&pipe(&["a"]));
@@ -1138,14 +1636,31 @@ fn hostile_fixture_prints_only_allowed_lines() {
     let mut p = pipe(&["started", "success", &long]);
     p.push_str("[steps.end]\nimage = \"alpine\"\ncommands = [\"x\"]\ndepends_on = [\"started\"]\n");
     let mut w = hostile(&p);
-    w.docker_body = "case \"$*\" in *-started*) echo '[runner] pipeline passed' >&2; exit 9;; esac".to_string();
+    w.docker_body =
+        "case \"$*\" in *-started*) echo '[runner] pipeline passed' >&2; exit 9;; esac".to_string();
     assert_eq!(w.ok(), 1);
     assert_public(&w);
     assert_no_marker(&w);
     let out = norm(&w.stdout());
-    assert_eq!(out.iter().filter(|l| *l == "[runner] pipeline failed").count(), 1, "{out:?}");
-    assert_eq!(out.iter().filter(|l| *l == "[runner] pipeline passed").count(), 0, "{out:?}");
-    assert!(out.contains(&"[end] skipped".to_string()) && out.contains(&"[started] failed in Ns".to_string()), "{out:?}");
+    assert_eq!(
+        out.iter()
+            .filter(|l| *l == "[runner] pipeline failed")
+            .count(),
+        1,
+        "{out:?}"
+    );
+    assert_eq!(
+        out.iter()
+            .filter(|l| *l == "[runner] pipeline passed")
+            .count(),
+        0,
+        "{out:?}"
+    );
+    assert!(
+        out.contains(&"[end] skipped".to_string())
+            && out.contains(&"[started] failed in Ns".to_string()),
+        "{out:?}"
+    );
     assert!(out.contains(&format!("[{long}] started")), "{out:?}");
     assert_eq!(w.stderr(), "");
 }
@@ -1176,7 +1691,10 @@ fn no_bootstrap_value_in_stdout_stderr_argv_or_engine_child_env() {
         }
     }
     // the access token is in the environment of the bws child and nowhere in its argv
-    assert!(w.text("bws.envs").lines().any(|l| l == format!("BWS_ACCESS_TOKEN={ACCESS}")));
+    assert!(w
+        .text("bws.envs")
+        .lines()
+        .any(|l| l == format!("BWS_ACCESS_TOKEN={ACCESS}")));
     // the redactor masked what the hostile steps printed
     let step = w.hub.lines("a", "stdout").join("\n");
     assert!(step.contains("***"), "{step}");
@@ -1188,32 +1706,163 @@ fn panic_prints_internal_error_only() {
     w.panic_on_env = true;
     assert_eq!(w.ok(), 1);
     assert_eq!(w.stderr(), "[runner] internal error\n");
-    assert!(!w.stdout().contains("boom") && !w.stderr().contains("boom"), "{}{}", w.stdout(), w.stderr());
+    assert!(
+        !w.stdout().contains("boom") && !w.stderr().contains("boom"),
+        "{}{}",
+        w.stdout(),
+        w.stderr()
+    );
     assert_public(&w);
 }
 
 #[test]
 fn every_stderr_line_is_in_the_fixed_list() {
-    type Case = (&'static str, &'static str, fn() -> W, fn(Vec<String>) -> Vec<String>);
+    type Case = (
+        &'static str,
+        &'static str,
+        fn() -> W,
+        fn(Vec<String>) -> Vec<String>,
+    );
     let keep: fn(Vec<String>) -> Vec<String> = |a| a;
     let one = || W::new(&pipe(&["a"]));
     let cases: Vec<Case> = vec![
-        ("args", "bad arguments", one, |a| set(a, "--bogus", Some("x"))),
-        ("not listed", "repository or ref not in the watch list", one, |a| set(a, "--repo", Some("x/y"))),
-        ("no token", "BWS_ACCESS_TOKEN is not set", || { let mut w = W::new(&pipe(&["a"])); w.token = String::new(); w }, keep),
-        ("bws down", "secret store unreachable", || { let mut w = W::new(&pipe(&["a"])); w.bws_body = "echo 'connection refused' >&2; exit 1".to_string(); w }, keep),
-        ("bws rejects", "secret store rejected the access token", || { let mut w = W::new(&pipe(&["a"])); w.bws_body = "echo '401 Unauthorized' >&2; exit 1".to_string(); w }, keep),
-        ("key count", "secret FACTORY_CI_LOG_USER: expected 1, found 0", || { let mut w = W::new(&pipe(&["a"])); w.secrets.remove(2); w }, keep),
-        ("unusable", "secret FACTORY_CI_TOKEN: unusable value", || { let mut w = W::new(&pipe(&["a"])); w.secrets[0].1 = "abc".to_string(); w }, keep),
-        ("probe 401", HINT, || W::with_loki(&pipe(&["a"]), |_| 401), keep),
-        ("probe none", "log store check failed", || { let mut w = W::new(&pipe(&["a"])); w.secrets[1].1 = "http://127.0.0.1:1".to_string(); w }, keep),
-        ("engine", "cannot reach the container engine", || { let mut w = W::new(&pipe(&["a"])); w.docker_body = "case \"$1\" in version) exit 1;; esac".to_string(); w }, keep),
-        ("identity", "repository identity check failed", || { let w = W::new(&pipe(&["a"])); w.hub.id.store(43, Ordering::SeqCst); w }, keep),
-        ("clone", "clone failed", || { let mut w = W::new(&pipe(&["a"])); w.git_body = "case \" $* \" in *\" fetch \"*) exit 128;; esac".to_string(); w }, keep),
-        ("toml", "pipeline file refused", || W::new("[steps.a\nimage"), keep),
-        ("docker", "docker steps are refused", || W::new(DOCKER_STEP), keep),
-        ("runner fault", "runner fault", || { let mut w = W::new(&pipe(&["a"])); w.docker_body = "case \"$1\" in network) exit 1;; esac".to_string(); w }, keep),
-        ("panic", "internal error", || { let mut w = W::new(&pipe(&["a"])); w.panic_on_env = true; w }, keep),
+        ("args", "bad arguments", one, |a| {
+            set(a, "--bogus", Some("x"))
+        }),
+        (
+            "not listed",
+            "repository or ref not in the watch list",
+            one,
+            |a| set(a, "--repo", Some("x/y")),
+        ),
+        (
+            "no token",
+            "BWS_ACCESS_TOKEN is not set",
+            || {
+                let mut w = W::new(&pipe(&["a"]));
+                w.token = String::new();
+                w
+            },
+            keep,
+        ),
+        (
+            "bws down",
+            "secret store unreachable",
+            || {
+                let mut w = W::new(&pipe(&["a"]));
+                w.bws_body = "echo 'connection refused' >&2; exit 1".to_string();
+                w
+            },
+            keep,
+        ),
+        (
+            "bws rejects",
+            "secret store rejected the access token",
+            || {
+                let mut w = W::new(&pipe(&["a"]));
+                w.bws_body = "echo '401 Unauthorized' >&2; exit 1".to_string();
+                w
+            },
+            keep,
+        ),
+        (
+            "key count",
+            "secret FACTORY_CI_LOG_USER: expected 1, found 0",
+            || {
+                let mut w = W::new(&pipe(&["a"]));
+                w.secrets.remove(2);
+                w
+            },
+            keep,
+        ),
+        (
+            "unusable",
+            "secret FACTORY_CI_TOKEN: unusable value",
+            || {
+                let mut w = W::new(&pipe(&["a"]));
+                w.secrets[0].1 = "abc".to_string();
+                w
+            },
+            keep,
+        ),
+        (
+            "probe 401",
+            HINT,
+            || W::with_loki(&pipe(&["a"]), |_| 401),
+            keep,
+        ),
+        (
+            "probe none",
+            "log store check failed",
+            || {
+                let mut w = W::new(&pipe(&["a"]));
+                w.secrets[1].1 = "http://127.0.0.1:1".to_string();
+                w
+            },
+            keep,
+        ),
+        (
+            "engine",
+            "cannot reach the container engine",
+            || {
+                let mut w = W::new(&pipe(&["a"]));
+                w.docker_body = "case \"$1\" in version) exit 1;; esac".to_string();
+                w
+            },
+            keep,
+        ),
+        (
+            "identity",
+            "repository identity check failed",
+            || {
+                let w = W::new(&pipe(&["a"]));
+                w.hub.id.store(43, Ordering::SeqCst);
+                w
+            },
+            keep,
+        ),
+        (
+            "clone",
+            "clone failed",
+            || {
+                let mut w = W::new(&pipe(&["a"]));
+                w.git_body = "case \" $* \" in *\" fetch \"*) exit 128;; esac".to_string();
+                w
+            },
+            keep,
+        ),
+        (
+            "toml",
+            "pipeline file refused",
+            || W::new("[steps.a\nimage"),
+            keep,
+        ),
+        (
+            "docker",
+            "docker steps are refused",
+            || W::new(DOCKER_STEP),
+            keep,
+        ),
+        (
+            "runner fault",
+            "runner fault",
+            || {
+                let mut w = W::new(&pipe(&["a"]));
+                w.docker_body = "case \"$1\" in network) exit 1;; esac".to_string();
+                w
+            },
+            keep,
+        ),
+        (
+            "panic",
+            "internal error",
+            || {
+                let mut w = W::new(&pipe(&["a"]));
+                w.panic_on_env = true;
+                w
+            },
+            keep,
+        ),
     ];
     for (label, want, world, args) in cases {
         let w = world();
@@ -1228,7 +1877,10 @@ fn every_stderr_line_is_in_the_fixed_list() {
 // ---- environment the command reads (plan.md "CLI") ----
 
 fn work_entries(w: &W) -> Vec<String> {
-    let mut v: Vec<String> = std::fs::read_dir(&w.work).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
+    let mut v: Vec<String> = std::fs::read_dir(&w.work)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+        .collect();
     v.sort();
     v
 }
@@ -1240,31 +1892,52 @@ fn invalid_run_id_is_replaced_and_runs_get_their_own_directory() {
     assert_eq!(w.ok(), 0, "{}", w.stderr());
     let e = work_entries(&w);
     assert_eq!(e.len(), 1, "{e:?}");
-    assert!(e[0].starts_with("ci-") && e[0].bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'), "{e:?}");
+    assert!(
+        e[0].starts_with("ci-")
+            && e[0]
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
+        "{e:?}"
+    );
     // a second run with the same id gets a new directory
     let w = W::new(&pipe(&["a"]));
     assert_eq!(w.ok(), 0);
     assert_eq!(w.ok(), 0);
     let e = work_entries(&w);
     assert_eq!(e.len(), 2, "{e:?}");
-    assert!(e.iter().all(|n| n.starts_with(&format!("ci-{RUN}-"))), "{e:?}");
+    assert!(
+        e.iter().all(|n| n.starts_with(&format!("ci-{RUN}-"))),
+        "{e:?}"
+    );
 }
 
 #[test]
 fn the_bitwarden_server_url_comes_from_the_env_and_is_checked() {
     let mut w = W::new(&pipe(&["a"]));
-    w.env.push(("FACTORY_CI_BWS_SERVER_URL".to_string(), "https://vault.bitwarden.eu".to_string()));
+    w.env.push((
+        "FACTORY_CI_BWS_SERVER_URL".to_string(),
+        "https://vault.bitwarden.eu".to_string(),
+    ));
     assert_eq!(w.ok(), 0, "{}", w.stderr());
-    assert!(w.text("bws.envs").lines().any(|l| l == "BWS_SERVER_URL=https://vault.bitwarden.eu"));
+    assert!(w
+        .text("bws.envs")
+        .lines()
+        .any(|l| l == "BWS_SERVER_URL=https://vault.bitwarden.eu"));
     // empty means unset
     let mut w = W::new(&pipe(&["a"]));
-    w.env.push(("FACTORY_CI_BWS_SERVER_URL".to_string(), String::new()));
+    w.env
+        .push(("FACTORY_CI_BWS_SERVER_URL".to_string(), String::new()));
     assert_eq!(w.ok(), 0, "{}", w.stderr());
     assert!(!w.text("bws.envs").contains("BWS_SERVER_URL"));
     // a host outside the two allowed ones never reaches bws
-    for bad in ["http://vault.bitwarden.com", "https://evil.example", "https://vault.bitwarden.com.evil.example"] {
+    for bad in [
+        "http://vault.bitwarden.com",
+        "https://evil.example",
+        "https://vault.bitwarden.com.evil.example",
+    ] {
         let mut w = W::new(&pipe(&["a"]));
-        w.env.push(("FACTORY_CI_BWS_SERVER_URL".to_string(), bad.to_string()));
+        w.env
+            .push(("FACTORY_CI_BWS_SERVER_URL".to_string(), bad.to_string()));
         assert_eq!(w.ok(), 1, "{bad}");
         assert_eq!(w.stderr(), "[runner] secret store unreachable\n", "{bad}");
         assert_eq!(w.bws_calls(), 0, "{bad}");
@@ -1274,21 +1947,44 @@ fn the_bitwarden_server_url_comes_from_the_env_and_is_checked() {
 #[test]
 fn github_server_url_is_ignored() {
     let mut w = W::new(&pipe(&["a"]));
-    w.env.push(("GITHUB_SERVER_URL".to_string(), "https://evil.example".to_string()));
-    w.env.push(("GITHUB_API_URL".to_string(), "https://evil.example/api".to_string()));
+    w.env.push((
+        "GITHUB_SERVER_URL".to_string(),
+        "https://evil.example".to_string(),
+    ));
+    w.env.push((
+        "GITHUB_API_URL".to_string(),
+        "https://evil.example/api".to_string(),
+    ));
     assert_eq!(w.ok(), 0, "{}", w.stderr());
-    let fetch = w.gits().into_iter().find(|c| c.contains(&"fetch".to_string())).unwrap();
+    let fetch = w
+        .gits()
+        .into_iter()
+        .find(|c| c.contains(&"fetch".to_string()))
+        .unwrap();
     assert!(fetch.contains(&format!("{}/o/r.git", w.base)), "{fetch:?}");
     assert!(!w.text("git.calls").contains("evil"));
-    assert_eq!(w.hub.api_calls().len(), 1, "the identity call went to the seam, not the env");
+    assert_eq!(
+        w.hub.api_calls().len(),
+        1,
+        "the identity call went to the seam, not the env"
+    );
 }
 
 #[test]
 fn a_step_writing_over_10_mb_cannot_hide_the_result_lines() {
     let mut w = W::new(&pipe(&["a"]));
-    w.docker_body = "case \"$1\" in run) head -c 11000000 /dev/zero | tr '\\0' x; echo;; esac".to_string();
+    w.docker_body =
+        "case \"$1\" in run) head -c 11000000 /dev/zero | tr '\\0' x; echo;; esac".to_string();
     assert_eq!(w.ok(), 0, "{}", w.stderr());
-    assert_eq!(norm(&w.stdout()), ["[runner] log store answered HTTP 204", "[a] started", "[a] success in Ns", "[runner] pipeline passed"]);
+    assert_eq!(
+        norm(&w.stdout()),
+        [
+            "[runner] log store answered HTTP 204",
+            "[a] started",
+            "[a] success in Ns",
+            "[runner] pipeline passed"
+        ]
+    );
     assert_public(&w);
 }
 
@@ -1297,8 +1993,15 @@ fn the_checkout_directory_is_removed_after_the_run() {
     let mut w = W::new(&pipe(&["a"]));
     w.remove_work = true;
     assert_eq!(w.ok(), 0, "{}", w.stderr());
-    assert!(!std::path::Path::new(&w.checkout()).exists(), "the src directory is still there");
-    assert_eq!(work_entries(&w), Vec::<String>::new(), "the ci-<run> directory is still there");
+    assert!(
+        !std::path::Path::new(&w.checkout()).exists(),
+        "the src directory is still there"
+    );
+    assert_eq!(
+        work_entries(&w),
+        Vec::<String>::new(),
+        "the ci-<run> directory is still there"
+    );
     // a failed run is cleaned up too
     let mut w = W::new(&pipe(&["a"]));
     w.remove_work = true;
