@@ -205,8 +205,8 @@ rm -rf "$W"
 eq "the blob uses 600000 iterations to encrypt and decrypt" 2 "$(grep -c -e '-iter 600000' "$here/factory-ci-blob.sh")"
 # FR-036: a blob key is 64 lower-case hex characters, for every caller; each bad shape is refused by name, never by value
 h16=0123456789abcdef; h64=$h16$h16$h16$h16
-BKL=(short nonhex upper 63 65 empty)
-BKV=(abc "$(printf 'g%.0s' $(seq 64))" "$(printf 'A%.0s' $(seq 64))" "${h64%?}" "${h64}0" "")
+BKL=(short nonhex upper 63 65 empty newline mixed)
+BKV=(abc "$(printf 'g%.0s' $(seq 64))" "$(printf 'A%.0s' $(seq 64))" "${h64%?}" "${h64}0" "" "$h64"$'\n' "${h64%?}A")
 for i in "${!BKL[@]}"; do
   l=${BKL[$i]}; v=${BKV[$i]}
   for var in FACTORY_CI_BLOB_KEY FACTORY_CI_BLOB_KEY_DOCKER; do
@@ -251,7 +251,8 @@ cand_with() { cand_row; jq "$1" "$W/state/cand.json" > "$W/t" && mv "$W/t" "$W/s
 store_case() {  # store_case LABEL WANT_RC WANT_CALLS JQ_FILTER [VAR=value]...
   local l=$1 rc=$2 calls=$3 filter=$4; shift 4
   plan_world; cand_with "$filter"; echo down > "$W/state/bws.mode"; run_plan "$@"
-  eq "$l: exit" "$rc" "$RC"; eq "$l: store calls" "$calls" "$(bwscalls)"; rm -rf "$W"
+  # WANT_CALLS may be "2|3": with a 2 s window the third call depends on where SECONDS ticks (about 1 run in 4 stops at 2)
+  eq "$l: exit" "$rc" "$RC"; case "|$calls|" in *"|$(bwscalls)|"*) pass ;; *) fail "$l: store calls: want [$calls] got [$(bwscalls)]" ;; esac; rm -rf "$W"
 }
 store_ok() {  # same with a working store
   local l=$1 calls=$2 filter=$3; shift 3
@@ -260,7 +261,7 @@ store_ok() {  # same with a working store
 }
 store_case "no names, no id, store down" 0 0 '.rows[0].repo_id = "" | .rows[0].secrets = ""'
 store_ok "shared names, store up" 1 '.rows[0].repo_id = "" | .rows[0].secrets = "NPM_TOKEN"'
-store_case "repo id, store down (fci_list retries)" 1 3 '.rows[0].repo_id = "123" | .rows[0].secrets = ""'
+store_case "repo id, store down (fci_list retries)" 1 "2|3" '.rows[0].repo_id = "123" | .rows[0].secrets = ""'
 store_case "secrets_ok false, names and id, store down" 0 0 '.rows[0].secrets_ok = false | .rows[0].secrets = "NPM_TOKEN"'
 plan_world; cand_with '.rows[0].repo_id = "123"'; echo down > "$W/state/bws.mode"; run_plan
 has "repo id, store down: the store message" "$(cat "$W/gh_summary")" "secret store unreachable"; rm -rf "$W"
