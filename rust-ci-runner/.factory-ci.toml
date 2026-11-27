@@ -7,5 +7,5 @@ timeout = 1200
 
 [steps.test]
 image = "rust:1.90"
-commands = ["cargo test --locked"]
+commands = ["cargo test --locked || { cat /sys/fs/cgroup/pids.current /sys/fs/cgroup/pids.max; ps -eLf | wc -l; ps -eo comm | sort | uniq -c | sort -rn | head; exit 1; }"]
 timeout = 1800
