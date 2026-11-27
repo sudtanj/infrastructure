@@ -14,7 +14,7 @@ test:
 
 lint:
 	cargo fmt --check
-	cargo clippy -- -D warnings
+	cargo clippy --locked -- -D warnings
 
 build:
 	cargo build --locked --release --target $(TARGET)
