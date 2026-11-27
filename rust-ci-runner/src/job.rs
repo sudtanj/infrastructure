@@ -501,6 +501,7 @@ pub fn job(args: &[String], env: Env) -> i32 {
     if let Some((names, reason)) = &o.prepare {
         return prepare_job(&o, env, image, names, reason);
     }
+    #[allow(clippy::type_complexity)]
     let setup = || -> Result<(Opts, HttpApi, Vec<String>, Option<LogConfig>, String), String> {
         let mut o = o;
         let image = image?;
