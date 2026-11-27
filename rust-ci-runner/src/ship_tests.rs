@@ -405,7 +405,6 @@ fn url_of(raw: &str) -> String {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn url_loses_the_push_path_and_slashes() {
     for (raw, want) in [
         ("https://h.example.com/loki/api/v1/push", "https://h.example.com"),
@@ -420,7 +419,6 @@ fn url_loses_the_push_path_and_slashes() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn url_normalisation_is_idempotent() {
     // I3: also for random mixes of slashes and the push path
     let mut x: u64 = 11;
@@ -437,7 +435,6 @@ fn url_normalisation_is_idempotent() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn url_with_another_path_is_kept() {
     assert_eq!(url_of("https://h.example.com/loki/api/v1"), "https://h.example.com/loki/api/v1");
     assert_eq!(url_of("https://h.example.com/loki/api/v1/pushed"), "https://h.example.com/loki/api/v1/pushed");

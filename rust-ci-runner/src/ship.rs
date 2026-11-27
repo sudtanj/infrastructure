@@ -43,7 +43,16 @@ impl LogConfig {
             return Err(vec![format!("FACTORY_CI_LOG_* must be all set or all unset; missing {}", missing.join(", "))]);
         };
         let mut bad = vec![];
-        let url = url.trim_end_matches('/').to_string();
+        let mut norm = url.as_str();
+        // A loop, not one strip, so normalising twice gives the same result (I3).
+        loop {
+            norm = norm.trim_end_matches('/');
+            match norm.strip_suffix("/loki/api/v1/push") {
+                Some(rest) => norm = rest,
+                None => break,
+            }
+        }
+        let url = norm.to_string();
         let authority = url.split_once("://").map_or("", |(_, r)| r.split(['/', '?', '#']).next().unwrap_or(""));
         // shortcut: plain http only to the runner's own machine (tests run a fake store there).
         let local = ["127.0.0.1", "localhost", "[::1]"]
