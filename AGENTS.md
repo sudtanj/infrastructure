@@ -18,4 +18,4 @@ Every change in this repo goes through Spec Kit, for every agent and sub-agent i
 
 ## Where things live
 
-This repo is public and holds the factory CI runner (`rust-ci-runner/`) and every GitHub Actions workflow for sudtanj's repos. Bootstrap secrets come from this repo's Actions secrets and variables; pipeline secrets come from Bitwarden. Never commit a secret and never print one in a log (Principles II and III).
+This repo is public and holds the factory CI runner (`rust-ci-runner/`) and every GitHub Actions workflow for sudtanj's repos. GitHub holds one secret, `BWS_ACCESS_TOKEN` (Environment `factory-ci`), and one optional variable; every other secret and setting, pipeline secrets included, comes from one Bitwarden project. Never commit a secret and never print one in a log (Principles II and III).

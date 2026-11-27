@@ -19,22 +19,28 @@ Rationale: one place owns all automation, so checks do not depend on whose machi
 
 ### II. Secrets Source
 
-- Bootstrap secrets are the minimum the runner needs before it can read anything else: the
-  Bitwarden access token, Grafana and Loki credentials, runner tokens and blob keys. They come
-  from GitHub Actions secrets and variables of this repository, repository-level or in its Environments, and from nowhere else.
-- Pipeline secrets, the ones the watched repositories' steps use, come from Bitwarden, read at
-  run time with the Bitwarden access token.
+- GitHub Actions holds exactly one secret: `BWS_ACCESS_TOKEN`, the access token of one Bitwarden
+  Secrets Manager machine account. It is an Environment secret of `factory-ci`, whose deployment
+  branches are `main` only, with admin bypass off. It exists nowhere else on GitHub. The only
+  GitHub variable the workflows may read is the optional Bitwarden server URL, because the runner
+  needs it before it can reach Bitwarden.
+- Every other secret and setting the runner needs comes from one Bitwarden project, read at run
+  time with that token: the GitHub token, the blob key, the Grafana and Loki credentials, the
+  heartbeat URL, the pinned image references and the pipeline secrets the watched repositories'
+  steps use. The machine account can read only that project.
 - A secret MUST NOT be committed in any file, including examples, fixtures and specs. Docs name
   a secret by key, never by value.
 
-Rationale: a public repo can show its whole setup only if every value lives outside it.
+Rationale: a public repo can show its whole setup only if every value lives outside it, and one
+token on GitHub means one value to rotate, restrict and audit there.
 
 ### III. Nothing Private in Public Logs
 
 - Workflow logs, job summaries, commit statuses, artifacts and error messages are public.
   They MUST NOT contain a secret value, a private repository's code, file paths or contents, or
   anything derived from them that identifies a secret.
-- Workflows MUST mask secret values and MUST NOT print them, with or without `set -x`.
+- Workflows MUST mask secret values and MUST NOT print them, with or without `set -x`. A job
+  MUST mask every value it fetches from Bitwarden with `::add-mask::` before any other use of it.
 - Private details reach the maintainer only through the Grafana and Loki sink, never through
   public output. Public statuses link to it, and the link requires login.
 
@@ -89,9 +95,9 @@ and stops agents from building what nobody specified.
 - Top-level layout: `rust-ci-runner/` (the runner), `.github/` (workflows, scripts and the
   watched-repo list), `specs/` (Spec Kit feature specs), `.specify/` and `.claude/` (Spec Kit
   tooling and agent skills).
-- GitHub Actions secrets and variables of this repository, repository-level or in its Environments, are the only bootstrap channel (Principle II). The README
-  lists every one the workflows read, and a workflow change that reads a new one updates that
-  list in the same pull request.
+- The Bitwarden access token is the only GitHub Actions secret (Principle II). The README lists
+  every GitHub item and every Bitwarden secret the workflows read, and a workflow change that
+  reads a new one updates that list in the same pull request.
 - Third-party actions MUST be pinned and workflow `permissions` MUST be the minimum the job needs.
 
 ## Development Workflow
@@ -118,4 +124,4 @@ and stops agents from building what nobody specified.
 - Reviewers check pull requests against these principles; violations need either a fix or a
   justified exception recorded in the feature's `plan.md`.
 
-**Version**: 1.1.0 | **Ratified**: 2026-11-27 | **Last Amended**: 2026-11-27
+**Version**: 1.2.0 | **Ratified**: 2026-11-27 | **Last Amended**: 2026-11-27

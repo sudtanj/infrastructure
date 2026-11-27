@@ -1,45 +1,49 @@
 # Data Model: Infrastructure Home
 
-No stored data. These are the configuration objects the feature touches.
+No stored data. These are the configuration objects the feature touches. Round 4 (one Bitwarden token) replaced the Environment and secret tables.
 
 ## Environment
 
 | Field | Value |
 | --- | --- |
-| name | `factory-ci-plan`, `factory-ci`, `factory-ci-docker`, `factory-ci-release` |
+| name | `factory-ci`, `factory-ci-release` |
 | deployment branches | `main` only; `factory-ci-release` also allows the tag pattern `rust-ci-runner-v*` |
 | admin bypass | off |
-| jobs | `plan` and `verdict` use `factory-ci-plan`; `run` uses `factory-ci`; `run-docker` uses `factory-ci-docker`; release `publish` and the image mirror use `factory-ci-release` (no secrets) |
-| selftest and bootstrap | name no Environment |
+| jobs | `plan`, `run` and `verdict` use `factory-ci`; release `publish` and the image mirror use `factory-ci-release` (no secrets) |
+| selftest | names no Environment |
 
-## Bootstrap secret (name, Environments)
+## GitHub Actions items (all of them)
 
-| Name | Required | `factory-ci-plan` | `factory-ci` | `factory-ci-docker` |
-| --- | --- | --- | --- | --- |
-| `FACTORY_CI_TOKEN` | yes | yes | yes | no |
-| `FACTORY_CI_TOKEN_DOCKER` | only with `allow_docker` rows | yes | no | yes |
-| `BWS_ACCESS_TOKEN` | only for pipelines with secrets | yes | yes | no |
-| `BWS_ACCESS_TOKEN_DOCKER` | only with `allow_docker` rows | yes | no | yes |
-| `FACTORY_CI_BLOB_KEY` | yes, 64 lower-case hex characters (`openssl rand -hex 32`) | yes | yes | no |
-| `FACTORY_CI_BLOB_KEY_DOCKER` | optional: only with `allow_docker` rows, 64 lower-case hex characters, a different value | yes | no | yes |
-| `FACTORY_CI_HEARTBEAT_URL` | optional | yes | no | no |
-| `FACTORY_CI_LOG_URL` | all three or none; required for a private watched repo | yes | yes | yes |
-| `FACTORY_CI_LOG_USER` | same | yes | yes | yes |
-| `FACTORY_CI_LOG_TOKEN` | same; `factory-ci-docker` holds a second, separate token (own Grafana access policy, `logs:write` only) | yes | yes | yes (own value) |
+| Name | Type | Scope | Required |
+| --- | --- | --- | --- |
+| `BWS_ACCESS_TOKEN` | Environment secret | `factory-ci` | yes |
+| `FACTORY_CI_BWS_SERVER_URL` | repository variable | repository, must start with `https://` | only outside the US cloud |
 
-`GITHUB_TOKEN` is supplied by GitHub. None of these names exists at repository or organisation level; `gh secret list` shows none of them after Setup.
+`GITHUB_TOKEN` is supplied by GitHub. `gh secret list` shows no secret at repo or org level, and `gh secret list --env factory-ci` shows exactly `BWS_ACCESS_TOKEN`.
 
-## Repository variable
+## Bitwarden secret (key, load list)
 
-| Name | Required | Set when |
-| --- | --- | --- |
-| `RUNNER_IMAGE_DIGEST` | yes | after the release; `sha256:<64 hex>` |
-| `FACTORY_CI_CLONE_IMAGE` | yes | after `factory-ci-mirror-images`; pinned `@sha256` |
-| `FACTORY_CI_DIND_IMAGE` | yes | same |
-| `FACTORY_CI_BWS_PROJECT` | for pipelines with secrets | after Bitwarden setup |
-| `FACTORY_CI_BWS_PROJECT_DOCKER` | with `allow_docker` rows | same |
-| `FACTORY_CI_BWS_SERVER_URL` | outside the US cloud; must start with `https://` | same |
-| `FACTORY_CI_LOG_LINK` | optional | Explore URL with `{run_id}` |
+One project; one machine account with Can read. Keys are plain, with no prefix. `factory-ci-load.sh` writes the value to `$GITHUB_ENV` under the key, except `RUNNER_IMAGE_DIGEST`, written as `FCI_RUNNER_IMAGE_DIGEST`.
+
+| Key | Required | Form | `plan` | `run` | `verdict` |
+| --- | --- | --- | --- | --- | --- |
+| `FACTORY_CI_TOKEN` | yes | fine-grained PAT (FR-016) | yes | yes | no |
+| `FACTORY_CI_BLOB_KEY` | yes | 64 lower-case hex, `openssl rand -hex 32` | yes | yes | no |
+| `RUNNER_IMAGE_DIGEST` | yes | `sha256:<64 hex>` | yes | yes | no |
+| `FACTORY_CI_CLONE_IMAGE` | yes | `...@sha256:<64 hex>` | no | yes | no |
+| `FACTORY_CI_DIND_IMAGE` | yes | `...@sha256:<64 hex>` | no | yes | no |
+| `FACTORY_CI_LOG_URL` | all three or none; required for a private watched repo | Loki base URL | yes | yes | no |
+| `FACTORY_CI_LOG_USER` | same | Loki instance user ID | yes | yes | no |
+| `FACTORY_CI_LOG_TOKEN` | same | `logs:write` token | yes | yes | no |
+| `FACTORY_CI_LOG_LINK` | optional | Explore URL with `{run_id}` | yes | yes | no |
+| `FACTORY_CI_HEARTBEAT_URL` | optional | healthchecks.io ping URL | no | no | yes |
+| pipeline secrets | per pipeline | names in `.factory-ci.toml` steps; shared names or `<owner>/<repo>/<NAME>` keys | no | second list call, only with names | no |
+
+Every key above starts with `FACTORY_CI` or `RUNNER_`, which the runner reserves, so no pipeline can ask for one (FR-053).
+
+## Removed
+
+`FACTORY_CI_TOKEN_DOCKER`, `BWS_ACCESS_TOKEN_DOCKER`, `FACTORY_CI_BLOB_KEY_DOCKER`, `FACTORY_CI_BWS_PROJECT`, `FACTORY_CI_BWS_PROJECT_DOCKER`, the Environments `factory-ci-docker` and `factory-ci-plan`, the job `run-docker` and its outputs. The old repository variables for the images, the digest and the log link move into Bitwarden.
 
 ## Watch entry
 
@@ -59,4 +63,4 @@ Unchanged schema (`contracts/watch-list.md` in 002). 003 adds two entries:
 
 ## Log credential state (derived)
 
-`on` (three non-empty), `off` (three empty), `partial` (anything else). `partial` is an error everywhere. A value with a trimmed line under 4 characters is an error.
+`on` (three non-empty), `off` (three absent), `partial` (anything else). `partial` is an error everywhere. A value with a trimmed line under 4 characters is an error.

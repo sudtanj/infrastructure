@@ -2,19 +2,19 @@
 
 Decisions for `spec.md`. Each has the choice, why, and what was rejected. Live results of the 002 checks (T046, T054, T065) are added under "Live check results" when they run. Review round 1 (critic, devops, security; lead decisions D1 to D9 in the spec) changed D4 to D9 and added D14 to D18. Review round 2 (PR review; decisions R2-1 to R2-9 in the spec) changed D1, D10 and added D19 to D25.
 
-## D1. Log credentials move to Environment secrets; the store check stays
+## D1. Log credentials move to Environment secrets; the store check stays (superseded by D26, round 4)
 
 - **Decision**: `FACTORY_CI_LOG_URL`, `FACTORY_CI_LOG_USER` and `FACTORY_CI_LOG_TOKEN` are secrets of the three Environments. `.github/scripts/factory-ci-secrets.sh` replaces `fci_log_creds` (reads Bitwarden JSON) with `fci_log_env` (reads the process environment). The plan checks all-or-none at its start. The plan still calls `fci_list` to prove the token works (002 FR-045), but since review round 2 only when a candidate row can use a secret (D19); it no longer reads log values from the result.
 - **Why**: The Rust code already reads `FACTORY_CI_LOG_*` from its environment (`src/main.rs`, `src/job.rs`, `src/ship.rs`). Only the scripts change. The smallest diff keeps 002's reviewed store check.
 - **Rejected**: (a) Drop the plan's store check. It saves a call but turns a revoked token from one failed tick into one `error` status per item. (b) Keep Bitwarden as the source and add Actions secrets as a fallback. Two sources make a partial set ambiguous and contradict Principle II.
 
-## D2. A job calls Bitwarden only when the pipeline lists a secret
+## D2. A job calls Bitwarden only when the pipeline lists a secret (superseded by D27, round 4)
 
 - **Decision**: `factory-ci-job.sh` skips `fci_list` when `names` is empty.
 - **Why**: The list call existed to also fetch the log credentials. Without that, a log-only job needs no store, so a Bitwarden outage no longer blocks it.
 - **Rejected**: Keep the call and ignore the result. It adds a failure path for no data.
 
-## D3. Environment copies of the log credentials, two Loki tokens
+## D3. Environment copies of the log credentials, two Loki tokens (superseded by D26, round 4)
 
 - **Decision**: All three Environments hold the three secrets. `factory-ci-plan` and `factory-ci` hold one `FACTORY_CI_LOG_TOKEN`; `factory-ci-docker` holds a second token from its own Grafana access policy. URL and user are shared. The plan needs the values for its own log lines and the private-repo rule; each job needs them to ship.
 - **Why**: Each job reads only its own Environment, so a run from another branch gets none. The docker Environment is the one whose pipelines get root on the host (002 README "Risks you accept"); a separate token lets the owner cut it off alone. The lead closed OQ-3 this way.
@@ -108,7 +108,7 @@ Decisions for `spec.md`. Each has the choice, why, and what was rejected. Live r
 
 Recorded in `plan.md` Open risks (round 2 adds M3 wording, L3, L4, L6, m3 and YAML escapes there): replace the third-party `alpine/git` clone image with one built in-repo; container escape reads the runner environment (narrow tokens and `allow_docker` off now); `cargo audit` or `cargo deny`; build provenance attestation; a YAML-parsing lint; splitting the clone token from the status token; a test that fetched file content never reaches the summary `problems` text (security L7), if cheap.
 
-## D19. The plan's store check runs only when a row can use a secret (review round 2)
+## D19. The plan's store check runs only when a row can use a secret (review round 2) (superseded by D28, round 4)
 
 - **Decision**: `factory-ci-plan.sh` calls `fci_list` for the plain store only when a plain row has `secrets_ok == true` and (`secrets != ""` or `repo_id != ""`), and the same for the docker store and docker rows. D1's purpose stays: a revoked or wrong token fails one tick early, not one `error` status per item.
 - **Why**: QA found that the plan called `fci_list` whenever a plain row existed and the token was set. A Bitwarden outage then failed every tick, though neither watch entry names a secret or an owner id, so no job can reach the store. D2 already stops the job from calling Bitwarden without a listed secret; this is the same rule one level up.
@@ -127,7 +127,7 @@ Recorded in `plan.md` Open risks (round 2 adds M3 wording, L3, L4, L6, m3 and YA
 - **Why**: A line-based rule is cheap to read and to mutate-test. Each of these closes a way to reach secrets or a trigger that a past review found.
 - **Rejected**: A YAML parser (`yq`, a Rust crate): a dependency for a few rules; deferred. YAML escape sequences in trigger keys stay a gap, covered by D20.
 
-## D22. Blob keys are 64 lower-case hex characters
+## D22. Blob keys are 64 lower-case hex characters (one key only since round 4)
 
 - **Decision**: Every guard uses `^[0-9a-f]{64}$`: the tick guard steps, `factory-ci-plan.sh`, and `fci_blob_encrypt` and `fci_blob_decrypt` (so `job.sh` and `status.sh` inherit it).
 - **Why**: The README already says `openssl rand -hex 32`. A length check of 32 accepts a 32-character word. A check in the blob functions covers every caller with one change.
@@ -150,6 +150,48 @@ Recorded in `plan.md` Open risks (round 2 adds M3 wording, L3, L4, L6, m3 and YA
 
 - **Decision**: FR-034 and `contracts/tick-workflow.md` state the ping rules of the `verdict` job; README Setup step 11 says a red tick or failed plan pings `/fail` and alerts at once, and a late check means ticks stopped. The docs test asserts `/fail` in the README.
 - **Why**: The tick change and QA's 13 rows (commit aa6a307) existed without a requirement; the README told the owner a red tick does not alert, which the code no longer does.
+
+## D26. One Bitwarden token; every other value in Bitwarden (review round 4)
+
+- **Decision**: GitHub holds `BWS_ACCESS_TOKEN` (Environment `factory-ci`) and the optional `FACTORY_CI_BWS_SERVER_URL`. Bitwarden holds the rest (FR-048). One machine account, one project, no project ID.
+- **Why**: The owner chose it. Ten secrets across three Environments and two projects meant ten copies to rotate. The token has to sit on GitHub because Bitwarden cannot be reached without it, and the server URL because it is read before the first call.
+- **Rejected**: (a) Two tokens, one per trust level: that was round 3, the owner dropped it. (b) Repository-level `BWS_ACCESS_TOKEN`: it reaches jobs on any branch; the Environment limits it to `main`. (c) Keeping `FACTORY_CI_BWS_PROJECT`: the machine account sees one project, so a list call without an ID returns exactly it. If an owner ever grants a second project, a duplicate key fails as ambiguous (FR-050) instead of picking one.
+
+## D27. How a job gets its values: one list, a hand-off through `$GITHUB_ENV` (review round 4)
+
+- **Decision**: `.github/scripts/factory-ci-load.sh NAME...` runs one `bws secret list -o json`, looks up each requested name by exact key, masks each value, checks it (4 characters per line, one line), and appends `NAME=value` to `$GITHUB_ENV`. The allowlist of names sits in the script. Later steps read plain environment variables, so `factory-ci-plan.sh`, `factory-ci-job.sh`, `factory-ci-status.sh` and the guard steps change little.
+- **Why `$GITHUB_ENV`**: the guard and `fetch runner` steps need the digest before the plan or job script runs, and `status fallback` needs the blob key and token after `job` fails. A file in `$RUNNER_TEMP` would hold every secret in cleartext, and a step output cannot carry a masked value. `$GITHUB_ENV` carries only the requested names, and a step cannot read a value it was not given.
+- **Cost of the hand-off**: every later step of the job inherits the values, so no `uses:` step may follow the load step (lint, FR-052). Values must be one line, or a newline could write a second variable into `$GITHUB_ENV` (FR-050). `bws` itself is the only code that sees the whole list, and it runs inside the script.
+- **`RUNNER_` prefix**: GitHub documents `RUNNER_*` as reserved. I cannot test whether `$GITHUB_ENV` refuses a write named `RUNNER_IMAGE_DIGEST`, so the script writes it as `FCI_RUNNER_IMAGE_DIGEST`. The Bitwarden key keeps the owner's name. The live check (T066) confirms nothing else is needed.
+- **Per-job lists** (FR-051): `plan` needs no clone or dind image because only the job clones; it drops the old early check of those two variables, and the `run` guard still checks them before any container starts. `verdict` needs the heartbeat URL only.
+- **Second call in `run`**: the pipeline's secret names are known only after `prepare`, which needs the clone token. Folding both lists into one needs the `prepare` step before the load step, and `prepare` needs the token from the load. So `run` calls `bws` twice when the pipeline lists a secret, once otherwise.
+- **Rejected**: (a) One load step that writes a JSON file for later steps: cleartext copy of every secret on disk. (b) Mapping each value into each step's `env:` from a step output: GitHub drops a masked output. (c) A composite action: it needs a `uses:` and a pin for no gain.
+
+## D28. No separate plan store check (review round 4)
+
+- **Decision**: FR-038 and D19 are withdrawn. `factory-ci-plan.sh` makes no `bws` call. The plan's load step proves the token works: a revoked token fails the tick at `plan` with the store message.
+- **Why**: The plan cannot run without the blob key and the GitHub token, so it must call Bitwarden anyway. A second call to prove what the first proved adds a failure path. The old predicate (`secrets_ok`, `secrets`, `repo_id`) goes with it.
+- **Cost**: an idle tick now calls Bitwarden. Round 3 promised none. Two calls per idle tick (plan, verdict) is about 576 a day. Bitwarden's limits on `bws` calls are not documented to me; `fci_list` retries a 429 inside its 60-second window, and live check T066 measures it. Open risk R-14.
+
+## D29. One `run` job (review round 4)
+
+- **Decision**: Delete `run-docker`, `matrix_docker`, `count_docker` and the docker blob key. `plan.sh` seals every row with the one key. The runner's plan stops partitioning rows by `allow_docker`; the flag still reaches the job as `--allow-docker`.
+- **Why**: The only differences between the two jobs were credentials and an Environment, and round 4 removes both. Two jobs with identical content would be a copy to maintain.
+- **Accepted risk (owner)**: a docker-enabled step runs in a job that can read every Bitwarden secret. Neither watch entry sets `allow_docker` today (FR-002).
+- **Runner change**: `main.rs` drops `docker_api()` and the partition in `plan_a` and `plan_c`, the `FACTORY_CI_TOKEN_DOCKER` redaction entry and the "is not set" problem text. `plan.rs` drops `matrix_docker`; `Apis` keeps one client (`Apis::same` is already how most tests build it). Tests that checked the docker routing go (`grep -rn "_DOCKER\|matrix_docker" rust-ci-runner`).
+
+## D30. `plan` and `verdict` in `factory-ci`; the heartbeat from Bitwarden (review round 4)
+
+- **Decision**: `plan`, `run` and `verdict` all use `factory-ci`. I searched for a reason to keep `factory-ci-plan` and found none: it held the heartbeat URL and tokens that now sit in Bitwarden, and its branch rule equals `factory-ci`'s.
+- **Heartbeat**: `verdict` installs `bws` and loads `FACTORY_CI_HEARTBEAT_URL`, both steps `continue-on-error: true`, before the verdict step, so a Bitwarden fault there never turns a green tick red. With Bitwarden down in the whole tick, `plan` is red, `verdict` is red from the plan result, no ping goes out, and the healthchecks.io check goes late. The owner accepted it.
+- **`verdict` needs a checkout and `contents: read`**: the load script is in the repo.
+
+## D31. Constitution 1.2.0 (review round 4)
+
+- **Decision**: MINOR. Principle II is rewritten (one GitHub secret; everything else in Bitwarden) and Principle III and the Repository Structure bullet follow. No principle is removed or renamed.
+- **Why not PATCH**: a rule changes. Before, Grafana credentials, tokens and keys had to come from GitHub; now they must not.
+- **Why not MAJOR**: Principle II keeps its purpose (secrets have defined sources, none committed). The change narrows what GitHub may hold. MAJOR is for removing or redefining a principle.
+- **Components that must change to comply** (Governance): the tick workflow, the plan, job and load scripts, the runner's `main.rs` and `plan.rs`, the lint, the docs test and the README. Each has a task (T054 to T062).
 
 ## Test classification
 

@@ -4,7 +4,7 @@
 
 **Tests**: required by the constitution (Principle V). Test tasks come first in their phase and fail until the matching impl task lands.
 
-**Format**: `- [ ] T### [P?] [US#] description with path`. `[P]` means the task touches different files from every other open task of its group and can run in parallel with them. Paths are from the repo root. Review round 1 (critic, devops, security; lead decisions in `spec.md`) renumbered every task; no ID from the first draft survives. Review round 2 adds T036 to T044 in Phase 7b.
+**Format**: `- [ ] T### [P?] [US#] description with path`. `[P]` means the task touches different files from every other open task of its group and can run in parallel with them. Paths are from the repo root. Review round 1 (critic, devops, security; lead decisions in `spec.md`) renumbered every task; no ID from the first draft survives. Review round 2 adds T036 to T044 in Phase 7b; round 3 T045 to T053; round 4 T054 to T068 (Phases 7d, 9 and 10).
 
 ## Common constraints (every task and brief)
 
@@ -110,19 +110,47 @@ Phase 1 is the gate: nothing else can be checked until the crate compiles. Phase
 
 **Checkpoint**: every selftest job green, then T029 and T030.
 
+## Phase 7d: Review round 4 (one Bitwarden token; decisions R2-19 to R2-28 in the spec, D26 to D31 in research)
+
+**Goal**: GitHub keeps `BWS_ACCESS_TOKEN` and the optional `FACTORY_CI_BWS_SERVER_URL`; every other value comes from one Bitwarden project; the docker split, the plan Environment and the project variables are gone. Test rows first inside each task and red before the change; row IDs (L1, J1, P1, W1, M1, D1, RS1 and so on) are defined in `plan.md` "Round 4 test rows". Shell tests run on the VM with the stand-in `openssl` on `PATH` for the test run only; cargo and everything else run in CI.
+
+**Where the removed items appear (every place, found by `grep -rn "_DOCKER\|FACTORY_CI_BWS_PROJECT\|factory-ci-plan\|factory-ci-docker\|run-docker\|matrix_docker\|count_docker"`)**: `.github/workflows/factory-ci-tick.yml` (T058); `.github/scripts/factory-ci-plan.sh`, `factory-ci-job.sh`, `factory-ci-blob.sh` header, `factory-ci-secrets.sh` header (T054 to T056); `.github/scripts/factory-ci-lint-workflow.sh` (T059); `.github/scripts/test-factory-ci-hardening.sh`, `test-factory-ci-secrets.sh` (T054 to T058); `.github/scripts/test-factory-ci-docs.sh` (T060); `README.md` (T061); `rust-ci-runner/README.md` (T062); `rust-ci-runner/src/main.rs`, `plan.rs`, `plan_tests.rs`, `plan_hardening_tests.rs`, `tests/cli.rs` (T057); the constitution, `CLAUDE.md`, `AGENTS.md` (T063, T064); this folder (T065). `specs/002-ci-runner/` keeps its history and is not edited.
+
+- [ ] T054 [US3] Load script and store library (FR-047, FR-048, FR-050, FR-059; R2-23, D27): rows L1 to L15 first in `.github/scripts/test-factory-ci-secrets.sh`, with its stub `bws` accepting `secret list [-o json]` with no project argument and recording argv. Then change `fci_list` in `.github/scripts/factory-ci-secrets.sh` to `fci_list TOKEN` (drop the project parameter and its error; update the file header comment, which names projects and the Environment log path), and add `.github/scripts/factory-ci-load.sh` per `contracts/bootstrap-secrets.md`. Files: `.github/scripts/test-factory-ci-secrets.sh`, `.github/scripts/factory-ci-secrets.sh`, `.github/scripts/factory-ci-load.sh`. Proof: `bash .github/scripts/test-factory-ci-secrets.sh` prints 0 failed for L1 to L15; `bash -n` on both scripts. Needs nothing.
+- [ ] T055 [US3] Job script (FR-013, FR-031, FR-053; R2-25): rows J1 to J5 first in `test-factory-ci-secrets.sh`. Then in `.github/scripts/factory-ci-job.sh` call `fci_list "$BWS_ACCESS_TOKEN"` only when names exist; delete the `FACTORY_CI_BWS_PROJECT` use, the `FACTORY_CI_BWS_SERVER_URL` check, and `HAVE_BWS`, `FACTORY_CI_BWS_PROJECT` and `FACTORY_CI_BWS_SERVER_URL` from the final `unset`; update the header comment. Existing rows that set `FACTORY_CI_BWS_PROJECT` (secrets test lines near 173, 325, 346; hardening test lines near 111, 152, 325, 479) change to the new interface. Files: `.github/scripts/factory-ci-job.sh`, `.github/scripts/test-factory-ci-secrets.sh`, `.github/scripts/test-factory-ci-hardening.sh`. Proof: both shell tests, 0 failed. Needs T054.
+- [ ] T056 [US3] Plan script and blob header (FR-054, FR-056; R2-22, R2-25, D28, D29): rows P1 to P6 first in `.github/scripts/test-factory-ci-hardening.sh`; delete the rows for the docker key (near lines 193, 212, 275, 281), the store-check section (lines 247 to 277), the docker token rows (268 to 276, 503), the `matrix_docker` rows (185 to 188) and the README row for `FACTORY_CI_BLOB_KEY_DOCKER` (281). Then in `.github/scripts/factory-ci-plan.sh` remove `fci_list`, the `can_use` jq, the docker counts, the docker key and the `https://` check; `run()` strips `BWS_ACCESS_TOKEN` and `FACTORY_CI_BLOB_KEY` only; one `matrix`, `count`, `fail_tick` output. In `.github/scripts/factory-ci-blob.sh` fix the header comment (no docker key). Files: those three. Proof: hardening test 0 failed. Needs T055.
+- [ ] T057 [P] [US3] Runner: one token, one matrix (FR-055; R2-28, D29): rows RS1 to RS4 first. In `rust-ci-runner/src/main.rs` delete `docker_api()`, the partition and `skipped` problems in `plan_a`, the `gone` logic in `plan_c`, and the `FACTORY_CI_TOKEN_DOCKER` entry of the redaction list; both phases use `plan::Apis::same(&api)`. In `rust-ci-runner/src/plan.rs` delete `matrix_docker` and the partition at the end of `finish`, and the docker routing that `Apis::pick` served if nothing else needs it; keep `allow_docker` on `WatchEntry` and `Item` because the job still gets `--allow-docker`. Change the tests: `plan_tests.rs` (doc comment line 10, `rows()` at line 72), `plan_hardening_tests.rs` (the block near line 267 that builds two clients and expects `matrix_docker.len() == 2` becomes one asserting two rows in `matrix`), `tests/cli.rs` (delete the T068 and T082 blocks about the missing docker token; add RS3), and add every Bitwarden bootstrap name to `reserved_secret_names_are_refused_whatever_the_case` in `pipeline.rs` (RS1). Files: the five Rust files above plus `pipeline.rs`. Proof: `grep -rn "_DOCKER\|matrix_docker\|docker_api" rust-ci-runner/src rust-ci-runner/tests` prints nothing; the selftest `check`, `pipeline` and `own-pipelines` jobs are green (no local cargo, C1). Needs nothing; CI budget: 2 selftest runs.
+- [ ] T058 [US3] Tick workflow (FR-047, FR-051, FR-052, FR-054, FR-057, FR-058; R2-21, R2-22, R2-26, D30): rows W1 to W8 first in `.github/scripts/test-factory-ci-hardening.sh` (replace the "9 times" and per-step LOG rows near lines 516 to 540). Then rewrite `.github/workflows/factory-ci-tick.yml` per `contracts/bootstrap-secrets.md`: delete `run-docker`; `plan`, `run`, `verdict` in `factory-ci`; per job `checkout`, `install bws` (https guard kept, no `HAVE_BWS`), `load secrets` with the argument list of the table, then `guard, pinned images` reading `FCI_RUNNER_IMAGE_DIGEST` (and the two images in `run` only; `plan` checks digest and blob key), `fetch runner`, then the job's wrapper; `verdict` per FR-057; plan outputs `matrix`, `count`, `fail_tick`; `RUN_RESULTS: ${{ needs.run.result }}`; header comment updated. `secrets.BWS_ACCESS_TOKEN` only where FR-052 allows. Files: `.github/workflows/factory-ci-tick.yml`, `.github/scripts/test-factory-ci-hardening.sh`. Proof: hardening test 0 failed. Lands in the same push as T059.
+- [ ] T059 [US1] Lint (FR-047, FR-052, FR-054, FR-057; contract "Lint rules added in round 4"): mutation rows M1 to M8 first. Delete the rules and rows for the docker split: `bws-scope`, `blob-key-scope`, `have-bws`, `run-docker-name`, the docker rows of `tick-environment`, `main-guard` (line 106) and `verdict-always` (lines 64, 229); change `want_env` to `factory-ci`, the job loop to `plan run`, `runs-on` count to 3, `max-parallel: 4` count to 1; the two `permissions: {}` rows that targeted `verdict` now target `^    permissions:$`; the guard-first rule reads the guard step for the names its job loads. Add `github-items`, `bws-token-scope`, `load-order`, `load-list`, `verdict-soft`, `single-run`. Files: `.github/scripts/factory-ci-lint-workflow.sh`. Proof: `bash .github/scripts/factory-ci-lint-workflow.sh --self-test .github/workflows/factory-ci-tick.yml` prints `self-test ok`; the lint passes on the repo, also with `FACTORY_CI_LINT_STRICT=1`. Needs T058.
+- [ ] T060 [US6] Docs test (FR-023, FR-049, FR-060; D1 to D5): rows first. In `.github/scripts/test-factory-ci-docs.sh` rework `readme_rows` and `ck_d` for the two tables (GitHub items table with `Type` and `Scope` columns; Bitwarden table with a header starting `Bitwarden secret`), compare the Bitwarden names with the arguments of every `factory-ci-load.sh` line in the workflows, add check (h) for the removed names (patterns built from parts), update the fixture README and the "README Environment no workflow uses" mutation (it names `factory-ci-plan` and `factory-ci-docker`), and add keyword rows for the PAT permissions, the scheduler token and the migration note (D5), and row D6: the constitution reads `Version**: 1.2.0` and names `BWS_ACCESS_TOKEN`, and `CLAUDE.md` and `AGENTS.md` name it too (FR-061). Files: `.github/scripts/test-factory-ci-docs.sh`. Proof: the docs test shows 0 failed on the old README only for rows that still hold, and passes after T061. Needs T058.
+- [ ] T061 [US6] Root README Setup (FR-016, FR-022, FR-060; R2-19, R2-20): `grep -n "no Bitwarden call\|idle" README.md` and fix any claim that an idle tick makes no Bitwarden call. Rewrite Setup as the brief says: Setup keeps its order, with a table of GitHub Actions items (the `factory-ci` Environment, `BWS_ACCESS_TOKEN`, the optional `FACTORY_CI_BWS_SERVER_URL`, `factory-ci-release` with no secret) and a separate table of Bitwarden secrets (name, what it is, how to create it, when to set it). Remove the four-Environment text, the Environment secrets matrix, the variables step, the second machine account, the second Loki policy, the docker token and key, the "Delete the old log keys last" section and the old step 13; add the new step 13 (`gh secret list` empty, `gh secret list --env factory-ci` exactly `BWS_ACCESS_TOKEN`), the migration note (delete `factory-ci-plan` and `factory-ci-docker`, any repo-level or old Environment secrets, and the old repository variables once the Bitwarden keys exist), the blob-key rotation note, the PAT and scheduler-token text of FR-016, and update the troubleshooting table and rollback notes. Files: `README.md`. Proof: `bash .github/scripts/test-factory-ci-docs.sh` 0 failed. Needs T060.
+- [ ] T062 [P] [US6] Runner README (FR-024, FR-055; constitution 1.1.0): in `rust-ci-runner/README.md` say one `run` job (lines 21 to 22), replace "An idle tick makes no Bitwarden call" (line 36) with the two calls of FR-056, delete the `FACTORY_CI_BLOB_KEY_DOCKER` sentence (lines 39 to 40), the two-project and `FACTORY_CI_BWS_PROJECT*` text (lines 85 to 93) and the Environment text of Log shipping (lines 104 to 108); say the log credentials come from Bitwarden through the load step; rollback line for removing `BWS_ACCESS_TOKEN`: every tick stops at `plan`. Files: `rust-ci-runner/README.md`. Proof: docs-test checks (f) and (g) 0 failed; `grep -n "_DOCKER\|BWS_PROJECT\|factory-ci-plan\|factory-ci-docker" rust-ci-runner/README.md` prints nothing. Needs nothing.
+- [X] T063 [US6] Constitution 1.2.0 (FR-061; R2-27, D31): Principle II rewritten, Principle III gains the mask rule, Repository Structure bullet updated, version 1.2.0. Files: `.specify/memory/constitution.md`. Proof: `grep -n "Version" .specify/memory/constitution.md` shows 1.2.0. Done in the round 4 planning step.
+- [X] T064 [US6] Agent rule files (FR-061): the one sentence about secrets in `CLAUDE.md` and `AGENTS.md`. Done in the round 4 planning step. Proof: `grep -n BWS_ACCESS_TOKEN CLAUDE.md AGENTS.md`.
+- [X] T065 Spec folder (R2-19 to R2-28): `spec.md`, `plan.md`, `research.md` D26 to D31, `data-model.md`, `contracts/bootstrap-secrets.md`, `contracts/tick-workflow.md`, `quickstart.md`, this file. Done in the round 4 planning step.
+
+**Checkpoint**: every selftest job green with round 4, then T029 and T030. CI budget for T054 to T062: 4 selftest runs, then stop and report.
+
 ## Phase 8: Close the pull request
 
 - [X] T028 Remove the temporary bootstrap workflow (FR-008, FR-009): delete `.github/workflows/factory-ci-bootstrap.yml` and its entry in the `no-cargo` allowlist of the lint, after the last fmt patch is applied. Needs T005 and every impl task above. After this, a review-time Rust edit that fails `cargo fmt --check` is fixed by applying the diff the failing step prints, by hand. Proof: green selftest with no bootstrap workflow; `grep -rn bootstrap .github` finds nothing but comments about the exception.
-- [ ] T029 Read-through (FR-001, FR-005): `grep` for removed names (`fci_log_creds`), for `ubuntu-latest`, for bare "monorepo", for "Set up B" and for private identifiers over tracked files; confirm every task above is ticked or blocked on Setup; the PR body links `specs/003-infrastructure-home/`. Also grep for `CODEOWNERS`. Proof: the greps print nothing.
+- [ ] T029 Read-through (FR-001, FR-005, FR-049): `grep` for removed names (`fci_log_creds`, and for round 4 `_DOCKER`, `FACTORY_CI_BWS_PROJECT`, `factory-ci-plan`, `factory-ci-docker`, `run-docker`, `matrix_docker` outside `specs/`), for `ubuntu-latest`, for bare "monorepo", for "Set up B" and for private identifiers over tracked files; confirm every task above is ticked or blocked on Setup; the PR body links `specs/003-infrastructure-home/`. Also grep for `CODEOWNERS`. Proof: the greps print nothing.
 - [ ] T030 Request review (FR-008). Fix findings through the Spec Kit steps (a change to a spec or plan reruns tasks and analyze). Merge only when every selftest job is green and the owner has read the README Setup (Development Workflow). Proof: the selftest jobs are the required checks on `main` (D3).
 
 ## Phase 9: After Setup (blocked on the owner's manual steps and factory-monorepo PR 2; US7)
 
 - [ ] T031 [US7] Owner pushes `rust-ci-runner-v0.1.0`; the engineer checks that the release workflow is green, the image exists at `ghcr.io/sudtanj/rust-ci-runner`, the package is public (`gh api /users/sudtanj/packages/container/rust-ci-runner --jq .visibility`), the digest in the summary is `sha256:<64 hex>`, and the run was on `main` (FR-004). Also records how the mirrored clone image digest was checked (deferred risk M1). Proof: the `gh api` output and the run summary; docker is not run on the VM.
 - [ ] T032 [US7] Live walk of `quickstart.md` Part 3 (002 T046; FR-017, FR-025): checks 1, 2, 5, 12 and 13 against `sudtanj/infrastructure`; checks 3 and 4 against factory-monorepo only after its PR 2 is merged (blocker); record in `research.md` "Live check results". Needs T031 and the Setup.
-- [ ] T033 [US7] Bitwarden live check (002 T054; FR-013, FR-025): quickstart checks 6, 8 and 11; also a key containing `/` is accepted (else set `FCI_KEY_SEP` to `:` and change the README), a revoked token matches the 401 or 403 stderr text, the `--server-url` or `bws config server-base` form works, an idle tick makes zero Bitwarden calls. Needs T032.
+- [ ] T033 [US7] Bitwarden live check (002 T054; FR-013, FR-025): quickstart checks 6, 8 and 11; also a key containing `/` is accepted (else set `FCI_KEY_SEP` to `:` and change the README), a revoked token matches the 401 or 403 stderr text, the `--server-url` or `bws config server-base` form works, an idle tick makes exactly two Bitwarden calls (plan and verdict; round 4, FR-056). Needs T032.
 - [ ] T034 [US7] Hardening live check (002 T065; FR-015, FR-025): quickstart checks 5, 7, 9 and 10, plus `GET /user` with a fine-grained token, the ping alert, the IPv6 coverage of the DROP rules (deferred risk M6), and the rootless-dind and `--cap-drop ALL` trials recorded but not adopted. Needs T032.
-- [ ] T035 [US7] Record every live result and every spec change it causes in `research.md` (FR-032): no private run URL, Grafana hostname or token (the docs test scans it); if a check fails, open a new task here and rerun the Spec Kit steps. When checks 1 to 5 and 8 pass and some days of ticks are green, tell the owner to delete the old `FACTORY_CI_LOG_*` keys from Bitwarden. Needs T032 to T034.
+- [ ] T035 [US7] Record every live result and every spec change it causes in `research.md` (FR-032): no private run URL, Grafana hostname or token (the docs test scans it); if a check fails, open a new task here and rerun the Spec Kit steps. When checks 1 to 5 and 8 pass and some days of ticks are green, tell the owner to delete the retired Environments and secrets named in the README migration note (round 4). Needs T032 to T034.
+
+- [ ] T066 [US7] Round 4 live checks (FR-048, FR-050, FR-056, FR-057; R-14): quickstart checks 6, 7, 8, 14 and 15 after the owner has moved the values into Bitwarden. Record: the idle tick's two `bws` calls and any 429 or retry over a day of ticks; that `FCI_RUNNER_IMAGE_DIGEST` reaches `fetch runner`; that a `verdict` with Bitwarden unreachable stays green and sends no ping. If a call limit shows, open a task to cut the `verdict` call (for example by caching the heartbeat URL in an encrypted plan output). Needs T032.
+- [ ] T067 [US7] Owner migration (FR-060): the owner creates the Bitwarden project, machine account and keys, sets `BWS_ACCESS_TOKEN` in `factory-ci`, restricts it to `main`, and deletes `factory-ci-plan`, `factory-ci-docker`, the old secrets and the old repository variables, per the README migration note. The engineer checks the result with `gh secret list`, `gh secret list --env factory-ci` and `gh variable list` and records names only. Needs T061 and the merge.
+
+## Phase 10: Close out the README and description (constitution 1.1.0, the last task)
+
+- [ ] T068 [US6] After the merge, update the root `README.md`, `rust-ci-runner/README.md` and the GitHub repository description so they match `main` (FR-062). Round 4 changes both READMEs in T061 and T062 inside the pull request. After the merge, check that the description still says the repository is the open-source home of sudtanj's infrastructure and DevOps tools (it names no secret, Environment or project, so no edit is expected); run `gh repo view sudtanj/infrastructure --json description` and, if it differs from `main`, `gh repo edit sudtanj/infrastructure --description`. State in the report which of the three needed a change and which did not, with the reason. Needs T030, T061, T062.
 
 ---
 
@@ -139,20 +167,20 @@ Phase 1 is the gate: nothing else can be checked until the crate compiles. Phase
 | FR-007 | T001, T004, T005, T009 |
 | FR-008 | T001, T005, T028, T030, T043 |
 | FR-009 | T002, T003, T004, T028 |
-| FR-010 | T007, T008, T011, T012, T013, T014, T024 |
+| FR-010 | T011, T054, T058, T061 |
 | FR-011 | T007, T008, T012, T013 |
 | FR-012 | T007, T008, T011, T012 |
-| FR-013 | T008, T013, T033, T042 |
-| FR-014 | T005 (existing `pipeline.rs` reserved-name tests stay green) |
+| FR-013 | T008, T013, T033, T042 (reworded), T055 |
+| FR-014 | T005, T057 (RS1) |
 | FR-015 | T008, T034 |
-| FR-016 | T009, T024 |
+| FR-016 | T009, T024, T061 |
 | FR-017 | T015, T017, T024, T032 |
 | FR-018 | T020, T021 |
 | FR-019 | T020, T021, T022, T044 |
 | FR-020 | T001, T015, T023, T024 |
 | FR-021 | T022 |
-| FR-022 | T009, T024, T037, T038 |
-| FR-023 | T009, T019, T024 |
+| FR-022 | T009, T024, T037, T038, T061 |
+| FR-023 | T009, T019, T024, T060 |
 | FR-024 | T009, T025 |
 | FR-025 | T004, T005, T027, T032, T033, T034 |
 | FR-026 | T026 |
@@ -160,14 +188,14 @@ Phase 1 is the gate: nothing else can be checked until the crate compiles. Phase
 | FR-028 | T006 |
 | FR-029 | T001, T015, T016, T039 |
 | FR-030 | T001, T010, T020, T022, T044 |
-| FR-031 | T008, T012, T013, T014, T033 |
+| FR-031 | T008, T012, T013, T014, T033, T058 |
 | FR-032 | T009, T035 |
 | FR-033 | T019, T009 |
-| FR-034 | T036, T037 |
+| FR-034 | T036, T037, T058 |
 | FR-035 | T039 |
 | FR-036 | T040 |
 | FR-037 | T041 |
-| FR-038 | T042 |
+| FR-038 | T042 (withdrawn by FR-056; T056 deletes its rows) |
 | FR-039 | T045 |
 | FR-040 | T046 |
 | FR-041 | T047 |
@@ -176,10 +204,27 @@ Phase 1 is the gate: nothing else can be checked until the crate compiles. Phase
 | FR-044 | T050 |
 | FR-045 | T051 |
 | FR-046 | T052 |
+| FR-047 | T058, T059 (`github-items`), T060, T061 |
+| FR-048 | T054, T060, T061, T066 |
+| FR-049 | T056, T057, T058, T059, T060 (check h), T061, T062 |
+| FR-050 | T054 (L1 to L15), T058 |
+| FR-051 | T058 (W4), T059 (`load-list`) |
+| FR-052 | T058 (W1), T059 (`bws-token-scope`, `load-order`) |
+| FR-053 | T055 (J1 to J3), T057 (RS1) |
+| FR-054 | T056 (P1, P2, P6), T057 (RS2), T058 (W7), T059 (`single-run`) |
+| FR-055 | T057 (RS2 to RS4), T062 |
+| FR-056 | T056 (P3), T066 |
+| FR-057 | T058 (W8), T059 (`verdict-soft`), T066 |
+| FR-058 | T058, T059 (`tick-environment`) |
+| FR-059 | T054 (L2, L12), T055 (J5), T056 |
+| FR-060 | T060, T061, T067 |
+| FR-061 | T060 (D6), T063, T064 |
+| FR-062 | T068 |
 | SC-001 | T005, T006, T028 |
 | SC-002 | T009, T015 |
 | SC-003 to SC-005 | T032, T033, T034 |
 | SC-006 | T024, T032 |
+| SC-005, SC-007 (round 4) | T058, T061, T066, T067 |
 
 ## Dependencies
 
@@ -194,9 +239,13 @@ Phase 1 is the gate: nothing else can be checked until the crate compiles. Phase
 - T037 needs T036; T038 needs T037; T039 needs nothing; T040 needs T039; T041 needs T040; T042 needs T041; T043 and T044 need nothing. T029 and T030 follow T028 and T036 to T044.
 - T031 needs the merge and the owner's Setup; T032 needs T031 (monorepo checks also need factory-monorepo PR 2); T033 and T034 need T032; T035 needs T032 to T034.
 
-Parallel groups: {T007, T008, T009}, {T015, T017, T018, T026, T027}, {T020, T021}, {T033, T034}, {T039, T043} (the shell chain T037 to T038 and T040 to T042 runs in ID order because of shared files).
+- Round 4: T054 -> T055 -> T056 -> T058 -> T059; T060 needs T058; T061 needs T060; T057 and T062 need nothing; T063 to T065 are done. T029 and T030 follow T054 to T062. T066 needs T032 and T067; T067 needs T061 and the merge; T068 needs T030, T061, T062.
+
+Parallel groups: {T054, T057, T062}, {T007, T008, T009}, {T015, T017, T018, T026, T027}, {T020, T021}, {T033, T034}, {T039, T043} (the shell chain T037 to T038 and T040 to T042 runs in ID order because of shared files).
 
 Round 3 shared files: README T047, T052; docs test T047; lint script T048 to T051; hardening test, plan script and tick workflow T052.
+
+Round 4 shared files in order: `test-factory-ci-secrets.sh` T054, T055; `test-factory-ci-hardening.sh` T055, T056, T058; `factory-ci-secrets.sh` T054; `factory-ci-job.sh` T055; `factory-ci-plan.sh` and `factory-ci-blob.sh` T056; tick workflow T058; lint T059; docs test T060; README T061.
 
 Shared files in order: selftest workflow T001, T004, T006, T016, T022; release workflow T004, T006, T016, T019, T023; tick workflow T014, T018; lint script T015, T028; READMEs T024, T025; `Cargo.toml` T001; README T037, T038; docs test T037, T038; hardening test T036, T040, T041, T042; plan script T040, T041, T042; tick workflow T036, T040; lint script T039.
 
@@ -266,6 +315,13 @@ Each brief covers one feature folder, `specs/003-infrastructure-home/`, and the 
 **Files**: `README.md`, `.github/scripts/factory-ci-lint-workflow.sh`, `factory-ci-plan.sh`, `test-factory-ci-docs.sh`, `test-factory-ci-hardening.sh`, `.github/workflows/factory-ci-tick.yml`, spec folder.
 **Acceptance**: see T047 to T053; lint passes on the repo, also with `FACTORY_CI_LINT_STRICT=1`.
 **Constraints**: C1; test rows first; sentinel values only; CI budget 4 selftest runs.
+
+### S11. Review round 4, one Bitwarden token (T054 to T062)
+
+**Goal**: GitHub keeps `BWS_ACCESS_TOKEN` and the optional server URL; Bitwarden holds everything else; the docker split, `factory-ci-plan` and the project variables are gone. Full per-step briefs: `plan.md` "Engineer briefs".
+**Files**: see each task. Design: `research.md` D26 to D31, `contracts/bootstrap-secrets.md`, `contracts/tick-workflow.md`.
+**Acceptance**: each task's proof; the lint passes on the repo, also with `FACTORY_CI_LINT_STRICT=1`; `--self-test` prints `self-test ok`; the three shell tests show 0 failed; `grep -rn "_DOCKER\|FACTORY_CI_BWS_PROJECT\|factory-ci-plan\|factory-ci-docker\|run-docker\|matrix_docker" . --exclude-dir=specs --exclude-dir=.git --exclude-dir=.claude` prints nothing (the docs test and lint build their patterns from parts).
+**Constraints**: C1 to C7; no value in any file or output; sentinels only; test rows first; T058 and T059 in one push; CI budget 4 selftest runs.
 
 ### S9. Review round 2 (T036 to T044)
 

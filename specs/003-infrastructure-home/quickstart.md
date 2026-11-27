@@ -12,7 +12,7 @@ Checks the owner runs, in order. Each names the spec item it proves. Nothing her
 
 ## Part 2. Setup by hand (README "Setup")
 
-Follow the root README top to bottom: repository rules, Environments, Bitwarden, Grafana, GitHub tokens, Environment secrets, merge, release tag, public package, variables, mirror images, scheduler, first manual tick. After Setup, `gh secret list` (repo and org) shows none of the bootstrap names. (FR-022)
+Follow the root README top to bottom: repository rules, the Environment, the Bitwarden project and machine account, the tokens, the first Bitwarden secrets, merge, release tag, public package, mirror images (their names go into Bitwarden), scheduler, first manual tick. After Setup, `gh secret list` (repo and org) shows nothing and `gh secret list --env factory-ci` shows exactly `BWS_ACCESS_TOKEN`. (FR-022, SC-007)
 
 ## Part 3. After Setup (live checks, 002 T046, T054, T065)
 
@@ -23,12 +23,14 @@ Checks 1 to 5, 8 and 9 on factory-monorepo need its PR 2 merged (the root `.fact
 3. `sudtanj/factory-monorepo` has `factory-ci` statuses on its branch tips. (needs PR 2)
 4. Loki holds the step output of a monorepo run, searchable in 30 seconds. The Actions log shows only `item N`. (SC-004, needs PR 2)
 5. Signed out, open the public run log and search it for a branch name, a SHA, a project path, a secret name and the host of the Loki URL. None appears.
-6. Unset `BWS_ACCESS_TOKEN` in `factory-ci`, dispatch a tick: a pipeline with no secrets still runs and ships logs. Restore the token. (SC-005)
-7. Unset `FACTORY_CI_LOG_TOKEN` in `factory-ci-plan` only: the tick fails at the start and names it. Restore it.
-8. Revoke the Bitwarden token: a pipeline that lists a secret ends in `error` with "secret store rejected the token". (002 T054)
+6. Unset `BWS_ACCESS_TOKEN` in `factory-ci`, dispatch a tick: `plan` stops at its load step with the fixed "BWS_ACCESS_TOKEN is not set" line and `verdict` is red. Restore the token. (SC-005)
+7. Delete `FACTORY_CI_LOG_TOKEN` from Bitwarden, leaving the other two log keys: the tick fails at the start and names it. Restore it.
+8. Revoke the Bitwarden token: `plan` stops with "secret store rejected the token". With a valid token and a pipeline that lists a secret Bitwarden lacks, the item ends in `error`. (002 T054)
 9. A step container cannot reach `169.254.169.254`, and the DROP rules cover IPv6 too. (002 T065)
 10. Dispatch from a branch other than `main`: the Environment refuses the job, `plan` does not run and `verdict` ends red. No secret is read. (002 T065)
 11. Set `FACTORY_CI_BWS_SERVER_URL` to an `http://` value on a scratch run: the tick refuses it before any download. Unset it. (FR-031)
 12. With a watched repo that has no `.factory-ci.toml`, a tick posts nothing for it and does not fail. (FR-017)
 13. `gh api /users/sudtanj/packages/container/rust-ci-runner --jq .visibility` prints `public`, and the release digest came from a run on `main`. (FR-004, FR-022)
-14. Record results in `research.md` under "Live check results". Only after checks 1 to 5 and 8 pass and some days of green ticks, delete the old `FACTORY_CI_LOG_*` keys from Bitwarden.
+14. Rate: record how many `bws` calls an idle tick makes (two) and whether any run saw a 429 or a retry over a day of ticks. (R-14, T066)
+15. `FCI_RUNNER_IMAGE_DIGEST` reaches the `fetch runner` step: the first tick pulls the image. (D27)
+16. Record results in `research.md` under "Live check results". Checks 1 to 5 and 8 pass and some days of ticks are green before the owner deletes the old Environments and secrets (migration note in the README).

@@ -1,10 +1,10 @@
 # Contract: tick workflow and plan script rules added in review round 2
 
-Covers FR-034 to FR-038. The base contract is `specs/002-ci-runner/contracts/` (tick, plan output); this file lists only what 003 adds or changes. Files: `.github/workflows/factory-ci-tick.yml`, `.github/scripts/factory-ci-plan.sh`, `factory-ci-job.sh`, `factory-ci-status.sh`, `factory-ci-blob.sh`, `factory-ci-lint-workflow.sh`.
+Covers FR-034 to FR-037 and, from round 4, FR-051 to FR-059 (FR-038 is withdrawn). The load step and the new job layout are in `bootstrap-secrets.md`. The base contract is `specs/002-ci-runner/contracts/` (tick, plan output); this file lists only what 003 adds or changes. Files: `.github/workflows/factory-ci-tick.yml`, `.github/scripts/factory-ci-plan.sh`, `factory-ci-job.sh`, `factory-ci-status.sh`, `factory-ci-blob.sh`, `factory-ci-lint-workflow.sh`.
 
 ## Heartbeat (`verdict` job, step `heartbeat`; FR-034)
 
-Inputs: `FACTORY_CI_HEARTBEAT_URL` (secret of `factory-ci-plan`), `PLAN_RESULT` (`needs.plan.result`), `FAIL_TICK` (`needs.plan.outputs.fail_tick`), `RUN_RESULTS` (`needs.run.result` and `needs.run-docker.result`, space separated).
+Inputs: `FACTORY_CI_HEARTBEAT_URL` (a Bitwarden key, loaded by the `verdict` job, FR-057), `PLAN_RESULT` (`needs.plan.result`), `FAIL_TICK` (`needs.plan.outputs.fail_tick`), `RUN_RESULTS` (`needs.run.result`).
 
 | Condition | Ping |
 | --- | --- |
@@ -23,18 +23,18 @@ Inputs: `FACTORY_CI_HEARTBEAT_URL` (secret of `factory-ci-plan`), `PLAN_RESULT` 
 
 ## Blob key guard (FR-036)
 
-`FACTORY_CI_BLOB_KEY` and `FACTORY_CI_BLOB_KEY_DOCKER` are valid only when they match `^[0-9a-f]{64}$`. The same check sits in every place that reads one:
+`FACTORY_CI_BLOB_KEY` (the only blob key since round 4) is valid only when it matches `^[0-9a-f]{64}$`. The same check sits in every place that reads it:
 
-- the three guard steps in the tick (`plan`, `run`, `run-docker`; the docker key may be empty in `plan`);
-- `factory-ci-plan.sh` (both keys);
+- the guard steps of `plan` and `run` in the tick;
+- `factory-ci-plan.sh`;
 - `fci_blob_encrypt` and `fci_blob_decrypt` in `factory-ci-blob.sh`, so `factory-ci-job.sh` and `factory-ci-status.sh` refuse a bad key through them.
 
 A refusal message names the variable and says "64 lower-case hex characters", never the value.
 
-## Plan script (FR-037, FR-038)
+## Plan script (FR-037, FR-056)
 
-1. The `run` function strips `BWS_ACCESS_TOKEN`, `BWS_ACCESS_TOKEN_DOCKER` and both blob keys. For the phase A call (`plan --rows-out`) it also strips `FACTORY_CI_LOG_URL`, `FACTORY_CI_LOG_USER` and `FACTORY_CI_LOG_TOKEN`, because `plan::candidates` only reads GitHub and the log line is sent from `plan::finish` (`rust-ci-runner/src/plan.rs`, phase C). The phase C call keeps them.
-2. `fci_list` runs (plain store) only when `jq` finds at least one row with `secrets_ok == true` and (`secrets != ""` or `repo_id != ""`) among the plain rows, and the Bitwarden token is set. The docker store follows the same rule for docker rows. With no such row the plan makes no Bitwarden call even when a token is set.
+1. The `run` function strips `BWS_ACCESS_TOKEN` and `FACTORY_CI_BLOB_KEY`. For the phase A call (`plan --rows-out`) it also strips `FACTORY_CI_LOG_URL`, `FACTORY_CI_LOG_USER` and `FACTORY_CI_LOG_TOKEN`, because `plan::candidates` only reads GitHub and the log line is sent from `plan::finish` (`rust-ci-runner/src/plan.rs`, phase C). The phase C call keeps them.
+2. The plan script makes no `bws` call (round 4). The `load secrets` step before it is the store check (FR-056).
 
 ## Lint rules (FR-035)
 
@@ -45,7 +45,7 @@ The lint stays line-based. Each rule below has a mutation row in `--self-test` t
 | `tick-on-only-dispatch` | the tick's `on:` block | any key other than `workflow_dispatch:` at 2 spaces of indent under `on:` (quoted or not), or a flow-style `on:` |
 | file loop | `*.yml` and `*.yaml` | a `.yaml` workflow is skipped |
 | the existing 40-hex `uses:` pin rule and `permissions` present rule (names as in the script) | every workflow file | a `uses:` not pinned to 40 hex, or a file with no `permissions` |
-| `tick-environment` | the tick's jobs | `plan` or `verdict` not in `factory-ci-plan`, `run` not in `factory-ci`, `run-docker` not in `factory-ci-docker` |
+| `tick-environment` | the tick's jobs | a job is not in `factory-ci` (round 4: `plan`, `run` and `verdict` all use it) |
 | `main-guard` (existing rule, regex tightened) | the tick job `if:` lines the rule reads, and the mirror job | the line does not match `if: github.ref == 'refs/heads/main'( && .*)?$`, or holds `\|\|` |
 | `selftest-shell` (extended) | the selftest | `secrets: inherit` or `secrets[` appears |
 | `permissions` (tightened) | every workflow file | a `permissions:` that is not `{}` or a block of `scope: read\|write\|none` lines, at workflow or job level (`write-all`, `read-all`) |
@@ -53,3 +53,16 @@ The lint stays line-based. Each rule below has a mutation row in `--self-test` t
 | `main-guard` (every release job) | every workflow file with a job in `factory-ci-release` | the job has no end-anchored main `if:`, and the file is not a tag-push workflow whose `verify` step runs `git merge-base --is-ancestor "$GITHUB_SHA" origin/main` |
 
 Known gap, accepted: YAML escape sequences in trigger keys. Only the owner can merge (R2-2), which covers it.
+
+## Lint rules added in round 4 (FR-047, FR-052, FR-054, FR-057)
+
+Each has a mutation row in `--self-test`. Rules that existed only for the docker split are deleted (`bws-scope`, `blob-key-scope`, `have-bws`, `run-docker-name`, the docker rows of `tick-environment`, `main-guard` and `verdict-always`).
+
+| Rule | Fails when |
+| --- | --- |
+| `github-items` | a workflow reads a `secrets.X` other than `BWS_ACCESS_TOKEN` or `GITHUB_TOKEN`, or a `vars.X` other than `FACTORY_CI_BWS_SERVER_URL` |
+| `bws-token-scope` | `secrets.BWS_ACCESS_TOKEN` is mapped in a step that is neither `load secrets` nor the `run` job's `job` step, or the `verdict` job maps it outside `load secrets` |
+| `load-order` | a tick job lacks `install bws` then `load secrets` before its repo scripts, or has a `uses:` after `load secrets` |
+| `load-list` | a job's `load secrets` arguments differ from the table in `bootstrap-secrets.md` |
+| `verdict-soft` | `verdict`'s `install bws` or `load secrets` lacks `continue-on-error: true`, or comes after the verdict step |
+| `single-run` | the workflow has a `run-docker` job, `matrix_docker`, or `max-parallel: 4` other than once |
