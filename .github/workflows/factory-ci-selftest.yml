@@ -62,6 +62,9 @@ jobs:
       - name: no containers, networks or volumes are left
         shell: bash
         run: |
+          docker ps -a --filter label=factory-ci.run --format '{{.Names}} {{.Image}} {{.Status}} {{.Label "factory-ci.run"}}'
+          docker network ls --filter label=factory-ci.run --format '{{.Name}} {{.Label "factory-ci.run"}}'
+          docker volume ls --filter label=factory-ci.run --format '{{.Name}} {{.Label "factory-ci.run"}}'
           test -z "$(docker ps -aq --filter label=factory-ci.run)"
           test -z "$(docker network ls -q --filter label=factory-ci.run)"
           test -z "$(docker volume ls -q --filter label=factory-ci.run)"
