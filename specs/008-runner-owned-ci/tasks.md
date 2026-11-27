@@ -90,6 +90,7 @@ Found by the review and security pass of Landing A. Each is one commit naming it
 - [X] R16 `factory-monorepo-ci.yml`: `DOCKER_CONFIG=$(mktemp -d); export DOCKER_CONFIG` so `set -e` sees an `mktemp` failure; the runner container name adds `$GITHUB_RUN_ATTEMPT` so two attempts of one run cannot collide.
 - [X] R17 README: the workflow inputs and `FACTORY_CI_BWS_SERVER_URL` show on the public run page and step header, so they must never hold private values; the by-hand tick is named as the only other workflow holding `BWS_ACCESS_TOKEN`.
 - [ ] R18 [follow-up, new spec] Retire `factory-ci-tick.yml` and its `bws` install, or move it onto the `ci` image, so one workflow holds `BWS_ACCESS_TOKEN`. Until then the tick uses the same `factory-ci` Environment and its `main`-only branch rule.
+- [X] R19 `rust-ci-runner/.factory-ci.toml`: split the `test` step into `unit` (the `--lib` groups) and `integration` (the stub-docker integration tests, `depends_on = ["unit"]` so it reuses `target/`), so each shows under its own step label in the Actions log and in Loki. `tests/executor.rs` stays in the selftest because it needs the real docker binary.
 
 ## Dependencies
 
