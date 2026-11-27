@@ -77,13 +77,11 @@ impl Engine {
     }
 
     /// Runs the engine with a time limit. Returns stdout, or stderr as the error.
-    /// `container` is killed and removed when the limit passes.
     pub fn capture(
         &self,
         args: &[String],
         env: &[(String, String)],
         limit: Duration,
-        container: Option<&str>,
     ) -> Result<String, String> {
         let mut child = self
             .command(args, env)
@@ -101,9 +99,6 @@ impl Engine {
                 match child.try_wait() {
                     Ok(Some(st)) => break Ok(st),
                     Ok(None) if Instant::now() >= end => {
-                        if let Some(name) = container {
-                            self.kill(name);
-                        }
                         let _ = child.kill();
                         let _ = child.wait();
                         break Err(format!("{} timed out", self.bin));
@@ -122,7 +117,7 @@ impl Engine {
     }
 
     fn quick(&self, args: &[&str]) -> Result<String, String> {
-        self.capture(&strs(args), &[], Duration::from_secs(60), None)
+        self.capture(&strs(args), &[], Duration::from_secs(60))
     }
 
     pub fn kill(&self, name: &str) {
@@ -369,7 +364,7 @@ impl Sidecar {
             ctx.dind_image,
         ];
         // The first start pulls the image, which can take minutes on a slow link.
-        e.capture(&strs(&args), &[], Duration::from_secs(900), None)
+        e.capture(&strs(&args), &[], Duration::from_secs(900))
             .map_err(fail)?;
         let ready = Instant::now() + Duration::from_secs(90);
         loop {
