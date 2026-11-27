@@ -342,3 +342,22 @@ fn garbage_output_is_unreadable_and_not_echoed() {
         assert_eq!(format!("{e}"), "secret store unreachable", "{out:?}");
     }
 }
+
+// ---- run_capped (R02): a grandchild that holds the pipe cannot block the return ----
+
+#[test]
+fn a_backgrounded_child_holding_stdout_does_not_block_run_capped() {
+    use crate::engine::run_capped;
+    let sb = Sandbox::new();
+    // the shell exits at once; the `sleep` it leaves behind keeps stdout open
+    let exits = sb.bws("", "sleep 20 &\necho done");
+    let start = Instant::now();
+    let r = run_capped(std::process::Command::new(&exits), LONG);
+    assert!(r.is_some_and(|(ok, _, _)| ok));
+    assert!(start.elapsed() < Duration::from_secs(8), "{:?}", start.elapsed());
+    // the shell waits for it: the limit kills the shell and the call still returns
+    let waits = sb.bws("", "sleep 20 &\nwait");
+    let start = Instant::now();
+    assert!(run_capped(std::process::Command::new(&waits), SHORT).is_none());
+    assert!(start.elapsed() < Duration::from_secs(8), "{:?}", start.elapsed());
+}

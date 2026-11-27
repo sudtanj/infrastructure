@@ -79,23 +79,30 @@ pub(crate) fn run_capped(mut c: Command, limit: Duration) -> Option<(bool, Strin
     let mut child = c.spawn().ok()?;
     let (out, err) = (child.stdout.take(), child.stderr.take());
     let end = Instant::now() + limit;
-    std::thread::scope(|sc| {
-        let o = sc.spawn(move || out.map(|r| read_capped(r, 16 << 20)).unwrap_or_default());
-        let e = sc.spawn(move || err.map(|r| read_capped(r, 64 << 10)).unwrap_or_default());
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(st)) => break Some(st),
-                Ok(None) if Instant::now() < end => std::thread::sleep(Duration::from_millis(25)),
-                _ => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    break None;
-                }
+    // Plain threads, not a scope: a grandchild that keeps a pipe open must not block the return.
+    let (o_tx, o_rx) = mpsc::channel();
+    let (e_tx, e_rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = o_tx.send(out.map(|r| read_capped(r, 16 << 20)).unwrap_or_default());
+    });
+    std::thread::spawn(move || {
+        let _ = e_tx.send(err.map(|r| read_capped(r, 64 << 10)).unwrap_or_default());
+    });
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(st)) => break st,
+            Ok(None) if Instant::now() < end => std::thread::sleep(Duration::from_millis(25)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
             }
-        };
-        let (o, e) = (o.join().unwrap_or_default(), e.join().unwrap_or_default());
-        status.map(|st| (st.success(), o, e))
-    })
+        }
+    };
+    // After the child exits the pipes close unless a grandchild holds them: wait a little, then give up.
+    let grace = Duration::from_secs(2);
+    let (o, e) = (o_rx.recv_timeout(grace).unwrap_or_default(), e_rx.recv_timeout(grace).unwrap_or_default());
+    Some((status.success(), o, e))
 }
 
 impl Engine {
