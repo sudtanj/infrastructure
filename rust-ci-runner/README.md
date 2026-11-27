@@ -59,7 +59,7 @@ dispatch one tick, delete the old token.
 ## Release the runner
 
 Push a tag `rust-ci-runner-vX.Y.Z` on a commit on `main`. The tag must match `version` in `Cargo.toml`. The
-`rust-ci-runner-release` workflow builds static x86_64 and aarch64 binaries, attaches them to a release, and pushes a
+`rust-ci-runner-release` workflow builds static x86_64 and aarch64 binaries, each on a native runner (no cross compiler), attaches them to a release, and pushes a
 multi-arch image holding only the binary to `ghcr.io/<owner>/rust-ci-runner`. The last step prints the image digest in
 the run summary: "Set the repository variable RUNNER_IMAGE_DIGEST to ...". Set that variable to the digest alone, `sha256:<64 hex>`, without the image name.
 

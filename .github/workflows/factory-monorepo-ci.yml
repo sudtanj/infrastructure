@@ -1,4 +1,4 @@
-# Owner exception, 2026-11-27: this plain workflow builds rust-ci-runner with cargo because the runner cannot build itself yet; only that build is exempt. The pipelines run through the runner: factory-monorepo's steps, or the unit tests of rust-ci-runner itself (rust-ci-runner/.factory-ci.toml). Stopgap until the runner image release (feature 003); specs: specs/005-plain-actions-ci/, specs/006-runner-unit-tests/.
+# The runner comes from the released image (RUNNER_IMAGE below, pinned by digest); only rust-ci-runner-release.yml builds it, an owner exception of 2026-11-27. This workflow copies the binary out of the image and runs the pipelines through it: factory-monorepo's steps, or the unit tests of rust-ci-runner itself (rust-ci-runner/.factory-ci.toml). Specs: specs/005-plain-actions-ci/, specs/006-runner-unit-tests/, specs/007-runner-image/.
 name: factory-monorepo-ci
 
 on:
@@ -22,6 +22,10 @@ concurrency:
 
 permissions: {}
 
+env:
+  # Pinned by digest; bump this line after each release.
+  RUNNER_IMAGE: ghcr.io/sudtanj/rust-ci-runner:0.1.0@sha256:DIGEST_PLACEHOLDER
+
 jobs:
   ci:
     if: github.ref == 'refs/heads/main'
@@ -30,6 +34,7 @@ jobs:
     environment: factory-ci
     permissions:
       contents: read
+      packages: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -108,13 +113,20 @@ jobs:
             timeout 300 git clone -q --depth 1 --no-tags --branch "$REF" \
             https://github.com/sudtanj/factory-monorepo.git "$RUNNER_TEMP/target" 2> /dev/null \
             || fail "cloning factory-monorepo at ref $REF failed"
-      - name: build rust-ci-runner
-        # Runs in rust-ci-runner/ so rustup reads its rust-toolchain.toml.
-        working-directory: rust-ci-runner
+      - name: fetch rust-ci-runner
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          rustup show active-toolchain > /dev/null 2>&1 || rustup toolchain install
-          # shortcut: no Cargo.lock committed, deps float; commit one and add --locked when the runner build is pinned.
-          cargo build --release
+          set -eu
+          mkdir -p "$RUNNER_TEMP/bin"
+          # The token is only for a private package; it goes in on stdin, never in argv.
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker pull "$RUNNER_IMAGE"
+          # The image is FROM scratch: no shell, so copy the binary out instead of running it there.
+          cid=$(docker create "$RUNNER_IMAGE")
+          trap 'docker rm "$cid" > /dev/null' EXIT
+          docker cp "$cid:/rust-ci-runner" "$RUNNER_TEMP/bin/rust-ci-runner"
+          chmod +x "$RUNNER_TEMP/bin/rust-ci-runner"
       - name: refuse docker steps
         # A docker-in-docker step would give root on this VM and access to the job's secrets, BWS_ACCESS_TOKEN included.
         env:
@@ -157,9 +169,26 @@ jobs:
             export "$key=$val"
           done
           unset json val
+          # Grafana Cloud shows the push URL with its path; the runner appends the path itself.
+          FACTORY_CI_LOG_URL=${FACTORY_CI_LOG_URL%/}
+          FACTORY_CI_LOG_URL=${FACTORY_CI_LOG_URL%/loki/api/v1/push}
+          export FACTORY_CI_LOG_URL
+          # The runner's local mode drops failed pushes silently, so prove the store accepts one line now.
+          body=$(jq -nc --arg repo "$GITHUB_REPOSITORY" --arg ts "$(date +%s%N)" --arg line "probe run=$GITHUB_RUN_ID" \
+            '{streams: [{stream: {repo: $repo, project: "probe", step: "probe", stream: "stdout"}, values: [[$ts, $line]]}]}')
+          # Credentials go to curl on stdin: not in argv.
+          code=$(printf 'user = "%s:%s"\n' "$FACTORY_CI_LOG_USER" "$FACTORY_CI_LOG_TOKEN" \
+            | curl -sS -o /dev/null -w '%{http_code}' --max-time 15 --proto '=https' -K - \
+              -H 'Content-Type: application/json' --data "$body" "$FACTORY_CI_LOG_URL/loki/api/v1/push" 2> /dev/null) \
+            || code=${code:-000}
+          echo "log store answered HTTP $code"
+          case $code in
+            2??) ;;
+            *) fail "check FACTORY_CI_LOG_URL (host only, e.g. https://logs-prod-xxx.grafana.net), FACTORY_CI_LOG_USER (numeric user id) and FACTORY_CI_LOG_TOKEN (needs logs:write)" ;;
+          esac
           log=$RUNNER_TEMP/runner.log
           rc=0
-          "$GITHUB_WORKSPACE/rust-ci-runner/target/release/rust-ci-runner" run \
+          "$RUNNER_TEMP/bin/rust-ci-runner" run \
             --dir "$DIR" --quiet-logs > "$log" 2>&1 || rc=$?
           # The runner's own event lines only, reasons dropped; step output is never printed.
           lines=$(grep -E '^\[[A-Za-z0-9_-]{1,64}\] (started|success in [0-9]+s|failed in [0-9]+s(: .*)?|skipped(: .*)?|pipeline (passed|failed))$' "$log" \

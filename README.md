@@ -42,7 +42,7 @@ The Grafana Loki credentials (`FACTORY_CI_LOG_URL`, `FACTORY_CI_LOG_USER`, `FACT
 
 ## Run factory-monorepo CI by hand
 
-`.github/workflows/factory-monorepo-ci.yml` runs the `.factory-ci.toml` pipeline of the private repo `sudtanj/factory-monorepo` with `rust-ci-runner` built from source. It is a stopgap. Delete it once the runner image is released and the tick runs (`specs/003-infrastructure-home/`).
+`.github/workflows/factory-monorepo-ci.yml` runs the `.factory-ci.toml` pipeline of the private repo `sudtanj/factory-monorepo` with the released `rust-ci-runner` image. The job copies the binary out of `RUNNER_IMAGE` (the env line at the top of the workflow, pinned by tag and digest) and runs it on the runner VM. After each release, set that line to the new digest. Only `.github/workflows/rust-ci-runner-release.yml` builds the runner. Before the first digest is filled in, the line holds `DIGEST_PLACEHOLDER` and the pull fails.
 
 To run it, open Actions, pick `factory-monorepo-ci`, choose `main` as the workflow branch, and set `ref` to the factory-monorepo branch (default `main`). Runs started from any other branch do nothing. The job uses the Environment `factory-ci`, which needs the secret `BWS_ACCESS_TOKEN` and may use the variable `FACTORY_CI_BWS_SERVER_URL`. It reads the Bitwarden secrets `FACTORY_CI_TOKEN` (to clone factory-monorepo) and `FACTORY_CI_LOG_URL`, `FACTORY_CI_LOG_USER`, `FACTORY_CI_LOG_TOKEN` (Grafana Cloud Loki: base URL, instance user ID, a `logs:write` token). Steps get no pipeline secrets here.
 
@@ -54,10 +54,11 @@ Rules for this workflow:
 
 - Logs are minimal on purpose. The repo is public, factory-monorepo is private. If the runner fails before any step, you see one fixed line and nothing else.
 - Docker steps are refused. The job fails if the root `.factory-ci.toml` has `docker = true`, because a docker-in-docker step would give root on the VM and access to the job's secrets. Use the factory CI runner with `allow_docker` for such repos.
+- Before the runner starts, the job posts one probe line to Grafana Loki and prints `log store answered HTTP <code>`. A non-2xx answer fails the job with a hint to check `FACTORY_CI_LOG_URL` (host only; a trailing `/loki/api/v1/push` is stripped), `FACTORY_CI_LOG_USER` and `FACTORY_CI_LOG_TOKEN`. The runner itself drops failed pushes silently.
 - Keep `FACTORY_CI_BWS_SERVER_URL` unset unless you run your own Bitwarden server.
 - Give the Bitwarden machine account behind `factory-ci` read access only to a project that holds `FACTORY_CI_TOKEN` and the three `FACTORY_CI_LOG_*` keys. The workflow lists every secret that account can read.
 
-Owner exception, 2026-11-27: building the runner with cargo in a plain workflow breaks the rule that compile, test and lint run only through the CI runner. The runner cannot build itself before it exists, so only its own build is exempt. factory-monorepo's steps still run through `rust-ci-runner`. Spec: `specs/005-plain-actions-ci/`.
+Owner exception, 2026-11-27: only `.github/workflows/rust-ci-runner-release.yml` builds the runner (rule: compile, test and lint run only through the CI runner). The pipeline workflow relies on the released image and compiles nothing itself; the runner's unit tests compile inside their own step container, which counts as the pipeline. This replaces the build exception of `specs/005-plain-actions-ci/`. Spec: `specs/007-runner-image/`.
 
 ## License
 

@@ -33,21 +33,25 @@ jobs:
 
   build:
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     permissions:
       contents: read
     strategy:
       matrix:
+        # Each architecture builds on its own runner: the aarch64 cross gcc on x86_64 lacks the libc headers
+        # (bits/libc-header-start.h) that ring needs.
         include:
           - target: x86_64-unknown-linux-musl
             arch: amd64
+            runner: ubuntu-24.04
             cc: musl-gcc
             packages: musl-tools
           - target: aarch64-unknown-linux-musl
             arch: arm64
-            cc: aarch64-linux-gnu-gcc
-            packages: gcc-aarch64-linux-gnu musl-tools
+            runner: ubuntu-24.04-arm
+            cc: musl-gcc
+            packages: musl-tools
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
