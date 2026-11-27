@@ -19,8 +19,9 @@
 - [x] T007 [US1] Review fix, FR-008: in the run step of `.github/workflows/factory-monorepo-ci.yml`, set a throwaway loopback log store so `--quiet-logs` is accepted, with a one-line comment.
 - [x] T008 [US2] Review fix, FR-009: in the run step, print and summarise the fixed line `runner failed before running any step (see a run with a log store for details)` when the exit code is non-zero and no result line was printed.
 - [x] T009 [US2] Review fix, FR-012: add the `refuse docker steps` step to `.github/workflows/factory-monorepo-ci.yml` before the run step; it fails closed on `docker = true` or a failed check and prints only a fixed message.
+- [x] T011 On a failed `FACTORY_CI_TOKEN` lookup, print only the number of secrets the access token sees and how many keys match ignoring case and surrounding spaces, never names or values (FR-004 diagnostics, found by the first live run).
 - [x] T010 Update `README.md`: how to start the workflow, the Environment and secret it needs, stopgap until the runner image release (feature 003), the owner exception of 2026-11-27, logs minimal on purpose, docker steps refused, `FACTORY_CI_BWS_SERVER_URL` kept unset, and a Bitwarden machine account that reads only a project holding `FACTORY_CI_TOKEN` (FR-011). Last task.
 
 ## Dependencies
 
-T001, then T002 to T004 and T006 to T009 in order (same file), then T005, then T010.
+T001, then T002 to T004 and T006 to T009 in order (same file), then T005, then T011, then T010.

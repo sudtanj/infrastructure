@@ -76,7 +76,12 @@ jobs:
             || fail "the secret store is unreachable or rejected the access token"
           n=$(printf '%s' "$json" | jq -r --arg k "$key" '[.[] | select(.key == $k)] | length' 2> /dev/null) \
             || fail "the secret store returned an unreadable list"
-          [ "$n" = 1 ] || fail "expected exactly one secret with key $key, found $n"
+          if [ "$n" != 1 ]; then
+            # Counts only, never names or values: helps tell "no access to the project" from "key misspelled".
+            total=$(printf '%s' "$json" | jq -r 'length')
+            near=$(printf '%s' "$json" | jq -r --arg k "$key" '[.[] | select((.key | gsub("^\\s+|\\s+$"; "") | ascii_upcase) == $k)] | length')
+            fail "expected exactly one secret with key $key, found $n; the access token sees $total secrets, $near match ignoring case and spaces"
+          fi
           tok=$(printf '%s' "$json" | jq -r --arg k "$key" '.[] | select(.key == $k) | .value // ""')
           unset json
           # One line of token characters only: a newline or % could smuggle a workflow command.
