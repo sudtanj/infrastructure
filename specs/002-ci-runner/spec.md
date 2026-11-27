@@ -8,6 +8,17 @@
 
 **Input**: User description: "lets just make it will run in interval call by external caller to execute the runner that will check every repo listed and run whats need to be run this custom rust-ci-runner on each project on each repo, please make it into the spec kit". Earlier requirements still hold: a runner of our own, written in Rust, with a TOML step graph that runs steps in containers in parallel, runnable locally, with no vendor lock-in in the pipeline format.
 
+## Superseded in part by 003
+
+`specs/003-infrastructure-home/spec.md` changes these items of this spec. Read the 003 spec for the current behaviour.
+
+| 002 item | Now |
+| --- | --- |
+| A1 (central repo B is the monorepo or a public copy) | B is this repo. The "separate public copy" step is gone. |
+| FR-029, FR-040 last sentence, US8 scenario 3 (log credentials in the Bitwarden default project) | They come from Environment secrets (003 FR-010). |
+| FR-045 (the plan checks the store and that the three log values are all present or all absent) | The store check stays. The all-or-none check on the log values moves to the start of the plan and reads the environment (003 FR-011). |
+| Open tasks T045, T046, T054, T065, T081 | Done or tracked in 003 (FR-025): T045 and T081 by 003 T005 and T004; T046, T054 and T065 by 003 T032 to T034. |
+
 ## Clarifications
 
 ### Session 2026-11-27

@@ -54,11 +54,14 @@ fn load_list(repos: &Path) -> Result<Vec<watch::WatchEntry>, String> {
     ship::LogConfig::from_env(&|n| std::env::var(n).ok()).map_err(|e| e.join(". "))?;
     // One byte over the limit is enough for parse to refuse the file without reading all of it.
     let mut buf = Vec::new();
-    let read = std::fs::File::open(repos).and_then(|f| f.take(watch::MAX_BYTES as u64 + 1).read_to_end(&mut buf));
+    let read = std::fs::File::open(repos)
+        .and_then(|f| f.take(watch::MAX_BYTES as u64 + 1).read_to_end(&mut buf));
     if let Err(e) = read {
         return Err(format!("cannot read {}: {e}", repos.display()));
     }
-    let Ok(text) = String::from_utf8(buf) else { return Err("watch list is not valid UTF-8".to_string()) };
+    let Ok(text) = String::from_utf8(buf) else {
+        return Err("watch list is not valid UTF-8".to_string());
+    };
     watch::parse(&text).map_err(|p| p.join("\n"))
 }
 
@@ -66,19 +69,30 @@ fn load_list(repos: &Path) -> Result<Vec<watch::WatchEntry>, String> {
 /// resolved when all three `FACTORY_CI_LOG_*` values are set.
 fn plan_opts() -> plan::Opts {
     let var = |n: &str| std::env::var(n).unwrap_or_default();
-    let logs = ["FACTORY_CI_LOG_URL", "FACTORY_CI_LOG_USER", "FACTORY_CI_LOG_TOKEN"].map(var);
+    let logs = [
+        "FACTORY_CI_LOG_URL",
+        "FACTORY_CI_LOG_USER",
+        "FACTORY_CI_LOG_TOKEN",
+    ]
+    .map(var);
     let run_id = var("GITHUB_RUN_ID");
-    let heartbeat: Option<plan::Heartbeat> = match ship::LogConfig::from_env(&|k| std::env::var(k).ok()) {
-        Ok(Some(cfg)) => {
-            let id = run_id.clone();
-            Some(std::sync::Arc::new(move |line: &str| ship::send_heartbeat(&cfg, &id, line)))
-        }
-        _ => None,
-    };
+    let heartbeat: Option<plan::Heartbeat> =
+        match ship::LogConfig::from_env(&|k| std::env::var(k).ok()) {
+            Ok(Some(cfg)) => {
+                let id = run_id.clone();
+                Some(std::sync::Arc::new(move |line: &str| {
+                    ship::send_heartbeat(&cfg, &id, line)
+                }))
+            }
+            _ => None,
+        };
     plan::Opts {
         b_private: var("B_PRIVATE") != "false",
         log_store: logs.iter().all(|v| !v.is_empty()),
-        secrets: logs.into_iter().chain([var("FACTORY_CI_TOKEN"), var("FACTORY_CI_TOKEN_DOCKER")]).collect(),
+        secrets: logs
+            .into_iter()
+            .chain([var("FACTORY_CI_TOKEN"), var("FACTORY_CI_TOKEN_DOCKER")])
+            .collect(),
         heartbeat,
         run_id,
         ..Default::default()
@@ -99,7 +113,8 @@ fn write_private(path: &Path, text: &str) -> Result<(), String> {
         .mode(0o600)
         .open(path)
         .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
-    f.write_all(text.as_bytes()).map_err(|e| format!("cannot write {}: {e}", path.display()))
+    f.write_all(text.as_bytes())
+        .map_err(|e| format!("cannot write {}: {e}", path.display()))
 }
 
 fn plan_a(repos: &Path, out: &Path) -> Result<(), String> {
@@ -107,20 +122,37 @@ fn plan_a(repos: &Path, out: &Path) -> Result<(), String> {
     let api = HttpApi::from_env("FACTORY_CI_TOKEN")?;
     let docker = docker_api();
     // FR-047: no docker token, no row; the plain token never stands in.
-    let (list, skipped): (Vec<_>, Vec<_>) = list.into_iter().partition(|e| !e.allow_docker || docker.is_some());
+    let (list, skipped): (Vec<_>, Vec<_>) = list
+        .into_iter()
+        .partition(|e| !e.allow_docker || docker.is_some());
     // The list holds no docker entry when `docker` is None, so `Apis::same` never serves one.
     let apis = match docker.as_ref() {
-        Some(d) => plan::Apis { plain: &api, docker: d },
+        Some(d) => plan::Apis {
+            plain: &api,
+            docker: d,
+        },
         None => plan::Apis::same(&api),
     };
     let mut c = plan::candidates(&apis, &list, &plan_opts());
-    c.problems.extend(skipped.iter().map(|e| format!("{}: FACTORY_CI_TOKEN_DOCKER is not set", e.repo)));
+    c.problems.extend(
+        skipped
+            .iter()
+            .map(|e| format!("{}: FACTORY_CI_TOKEN_DOCKER is not set", e.repo)),
+    );
     write_private(out, &serde_json::to_string(&c).map_err(|e| e.to_string())?)
 }
 
-fn plan_c(input: &Path, out: &Path, summary: &Path, cap: Option<usize>, now: Option<i64>) -> Result<bool, String> {
-    let text = std::fs::read_to_string(input).map_err(|e| format!("cannot read {}: {e}", input.display()))?;
-    let mut cand: plan::Candidates = serde_json::from_str(&text).map_err(|e| format!("bad candidates file: {e}"))?;
+fn plan_c(
+    input: &Path,
+    out: &Path,
+    summary: &Path,
+    cap: Option<usize>,
+    now: Option<i64>,
+) -> Result<bool, String> {
+    let text = std::fs::read_to_string(input)
+        .map_err(|e| format!("cannot read {}: {e}", input.display()))?;
+    let mut cand: plan::Candidates =
+        serde_json::from_str(&text).map_err(|e| format!("bad candidates file: {e}"))?;
     let api = HttpApi::from_env("FACTORY_CI_TOKEN")?;
     let mut o = plan_opts();
     o.cap = cap.unwrap_or(o.cap);
@@ -128,14 +160,23 @@ fn plan_c(input: &Path, out: &Path, summary: &Path, cap: Option<usize>, now: Opt
     let docker = docker_api();
     // FR-047: no docker token, no row and no post for a docker repo; the plain token never stands in.
     let apis = match docker.as_ref() {
-        Some(d) => plan::Apis { plain: &api, docker: d },
+        Some(d) => plan::Apis {
+            plain: &api,
+            docker: d,
+        },
         None => {
             let mut gone: Vec<String> = cand
                 .rows
                 .iter()
                 .filter(|r| r.allow_docker)
                 .map(|r| r.repo.clone())
-                .chain(cand.unchanged.iter().chain(&cand.invalid).filter(|s| s.docker).map(|s| s.repo.clone()))
+                .chain(
+                    cand.unchanged
+                        .iter()
+                        .chain(&cand.invalid)
+                        .filter(|s| s.docker)
+                        .map(|s| s.repo.clone()),
+                )
                 .collect();
             gone.sort();
             gone.dedup();
@@ -143,14 +184,20 @@ fn plan_c(input: &Path, out: &Path, summary: &Path, cap: Option<usize>, now: Opt
             cand.unchanged.retain(|s| !s.docker);
             // A27: a stale `pending` on a Docker repo stays until a tick runs with the Docker token.
             cand.invalid.retain(|s| !s.docker);
-            cand.problems.extend(gone.iter().map(|r| format!("{r}: FACTORY_CI_TOKEN_DOCKER is not set")));
+            cand.problems.extend(
+                gone.iter()
+                    .map(|r| format!("{r}: FACTORY_CI_TOKEN_DOCKER is not set")),
+            );
             plan::Apis::same(&api)
         }
     };
     let fin = plan::finish(&apis, cand, &o);
     let mut rows: Vec<&plan::Item> = fin.matrix.iter().chain(&fin.matrix_docker).collect();
     rows.sort_by_key(|r| r.n);
-    write_private(out, &serde_json::to_string(&rows).map_err(|e| e.to_string())?)?;
+    write_private(
+        out,
+        &serde_json::to_string(&rows).map_err(|e| e.to_string())?,
+    )?;
     write_private(summary, &fin.summary)?;
     Ok(fin.fail_tick)
 }

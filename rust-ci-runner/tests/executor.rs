@@ -95,7 +95,11 @@ fn go(toml: &str, o: Opts) -> Run {
         run_id: &id,
         workspace: &ws,
         env: vec![("FACTORY_CI_SHA".to_string(), "abc123".to_string())],
-        secrets: o.secrets.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+        secrets: o
+            .secrets
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
         max_parallel: o.parallel,
         deadline: Instant::now() + Duration::from_secs(o.deadline_secs),
         log: &log,
@@ -116,7 +120,12 @@ fn go(toml: &str, o: Opts) -> Run {
 fn leftovers(id: &str) -> Vec<String> {
     let label = format!("label=factory-ci.run={id}");
     let mut found = Vec::new();
-    for kind in [["ps", "-aq"], ["network", "ls", "-q"], ["volume", "ls", "-q"]] {
+    let kinds: [&[&str]; 3] = [
+        &["ps", "-aq"],
+        &["network", "ls", "-q"],
+        &["volume", "ls", "-q"],
+    ];
+    for kind in kinds {
         let mut a: Vec<&str> = kind.to_vec();
         a.push("--filter");
         a.push(&label);
@@ -127,10 +136,16 @@ fn leftovers(id: &str) -> Vec<String> {
 
 /// start and end seconds of a step, printed by the step named `report`.
 fn times(log: &str, step: &str) -> (u64, u64) {
-    let line = log.lines().find(|l| l.starts_with("[report] T ")).expect("report line");
+    let line = log
+        .lines()
+        .find(|l| l.starts_with("[report] T "))
+        .expect("report line");
     let words: Vec<&str> = line.split_whitespace().collect();
     let at = words.iter().position(|w| *w == step).unwrap();
-    (words[at + 1].parse().unwrap(), words[at + 2].parse().unwrap())
+    (
+        words[at + 1].parse().unwrap(),
+        words[at + 2].parse().unwrap(),
+    )
 }
 
 const TWO_PARALLEL: &str = r#"
@@ -149,19 +164,34 @@ commands = ['echo T a $(cat a.start) $(cat a.end) b $(cat b.start) $(cat b.end)'
 "#;
 
 #[test]
+#[ignore = "needs a container engine"]
 fn independent_steps_overlap_and_the_limit_is_honoured() {
     let r = go(TWO_PARALLEL, opts());
     assert!(r.out.ok(), "{}", r.log);
     let (a, b) = (times(&r.log, "a"), times(&r.log, "b"));
-    assert!(a.0 < b.1 && b.0 < a.1, "steps did not overlap: {a:?} {b:?}\n{}", r.log);
+    assert!(
+        a.0 < b.1 && b.0 < a.1,
+        "steps did not overlap: {a:?} {b:?}\n{}",
+        r.log
+    );
 
-    let r = go(TWO_PARALLEL, Opts { parallel: 1, ..opts() });
+    let r = go(
+        TWO_PARALLEL,
+        Opts {
+            parallel: 1,
+            ..opts()
+        },
+    );
     assert!(r.out.ok(), "{}", r.log);
     let (a, b) = (times(&r.log, "a"), times(&r.log, "b"));
-    assert!(a.1 <= b.0 || b.1 <= a.0, "steps overlapped with a limit of 1: {a:?} {b:?}");
+    assert!(
+        a.1 <= b.0 || b.1 <= a.0,
+        "steps overlapped with a limit of 1: {a:?} {b:?}"
+    );
 }
 
 #[test]
+#[ignore = "needs a container engine"]
 fn a_dependent_step_sees_files_written_by_an_earlier_step() {
     let r = go(
         r#"
@@ -181,6 +211,7 @@ commands = ['test "$(cat out.txt)" = hello', "echo [read] saw it"]
 }
 
 #[test]
+#[ignore = "needs a container engine"]
 fn failure_skips_dependents_but_not_independent_steps() {
     let r = go(
         r#"
@@ -200,7 +231,10 @@ commands = ["echo free-ran"]
         opts(),
     );
     assert!(!r.out.ok());
-    assert_eq!(r.out.failed, Some(("bad".to_string(), "exit code 3".to_string())));
+    assert_eq!(
+        r.out.failed,
+        Some(("bad".to_string(), "exit code 3".to_string()))
+    );
     assert!(matches!(r.out.states["after"], State::Skipped(_)));
     assert_eq!(r.out.states["free"], State::Success);
     assert!(r.log.contains("[bad] before"));
@@ -210,6 +244,7 @@ commands = ["echo free-ran"]
 }
 
 #[test]
+#[ignore = "needs a container engine"]
 fn a_timeout_kills_the_step_and_leaves_no_container() {
     let start = Instant::now();
     let r = go(
@@ -221,12 +256,19 @@ commands = ["sleep 120"]
 "#,
         opts(),
     );
-    assert!(start.elapsed() < Duration::from_secs(60), "the step was not killed");
-    assert_eq!(r.out.failed.as_ref().map(|f| f.1.as_str()), Some("timed out after 3s"));
+    assert!(
+        start.elapsed() < Duration::from_secs(60),
+        "the step was not killed"
+    );
+    assert_eq!(
+        r.out.failed.as_ref().map(|f| f.1.as_str()),
+        Some("timed out after 3s")
+    );
     assert!(leftovers(&r.id).is_empty(), "{:?}", leftovers(&r.id));
 }
 
 #[test]
+#[ignore = "needs a container engine"]
 fn the_run_deadline_kills_running_steps_and_skips_the_rest() {
     let r = go(
         r#"
@@ -239,7 +281,10 @@ image = "busybox"
 depends_on = ["hang"]
 commands = ["echo x"]
 "#,
-        Opts { deadline_secs: 3, ..opts() },
+        Opts {
+            deadline_secs: 3,
+            ..opts()
+        },
     );
     assert!(r.out.failed.is_some());
     assert!(matches!(r.out.states["next"], State::Skipped(_)));
@@ -247,6 +292,7 @@ commands = ["echo x"]
 }
 
 #[test]
+#[ignore = "needs a container engine"]
 fn steps_have_no_engine_socket_and_only_their_own_secrets() {
     let r = go(
         r#"
@@ -268,7 +314,10 @@ commands = [
 image = "busybox"
 commands = ['test -z "$TOKEN"']
 "#,
-        Opts { secrets: &[("TOKEN", "s3cret-value")], ..opts() },
+        Opts {
+            secrets: &[("TOKEN", "s3cret-value")],
+            ..opts()
+        },
     );
     assert!(r.out.ok(), "{}", r.log);
     assert!(r.log.contains("[nosock] token is ***"));
@@ -276,6 +325,7 @@ commands = ['test -z "$TOKEN"']
 }
 
 #[test]
+#[ignore = "needs a container engine"]
 fn a_docker_step_builds_and_runs_an_image_and_everything_is_cleaned_up() {
     let r = go(
         r#"
@@ -288,7 +338,10 @@ commands = ["docker build -q -t fci-built .", "docker run --rm fci-built"]
 image = "busybox"
 commands = ['test -z "$DOCKER_HOST"', 'test ! -e /var/run/docker.sock']
 "#,
-        Opts { files: &[("Dockerfile", "FROM busybox\nCMD [\"echo\", \"built-ok\"]\n")], ..opts() },
+        Opts {
+            files: &[("Dockerfile", "FROM busybox\nCMD [\"echo\", \"built-ok\"]\n")],
+            ..opts()
+        },
     );
     assert!(r.out.ok(), "{}", r.log);
     assert!(r.log.contains("[img] built-ok"), "{}", r.log);
@@ -296,6 +349,7 @@ commands = ['test -z "$DOCKER_HOST"', 'test ! -e /var/run/docker.sock']
 }
 
 #[test]
+#[ignore = "needs a container engine"]
 fn concurrent_runs_cannot_see_each_others_images() {
     let pipeline = |tag: &str| {
         format!(
@@ -309,15 +363,29 @@ fn concurrent_runs_cannot_see_each_others_images() {
         (a.join().unwrap(), b.join().unwrap())
     });
     assert!(a.out.ok() && b.out.ok(), "{}\n{}", a.log, b.log);
-    assert!(a.log.contains("fci-run-one") && !a.log.contains("fci-run-two"), "{}", a.log);
-    assert!(b.log.contains("fci-run-two") && !b.log.contains("fci-run-one"), "{}", b.log);
+    assert!(
+        a.log.contains("fci-run-one") && !a.log.contains("fci-run-two"),
+        "{}",
+        a.log
+    );
+    assert!(
+        b.log.contains("fci-run-two") && !b.log.contains("fci-run-one"),
+        "{}",
+        b.log
+    );
 }
 
 // ---- T031 and T039: real Docker, run in CI where an engine exists (as every test above) ----
 
-const RUNNER_VARS: [&str; 4] = ["FACTORY_CI_TOKEN", "FACTORY_CI_LOG_URL", "FACTORY_CI_LOG_USER", "FACTORY_CI_LOG_TOKEN"];
+const RUNNER_VARS: [&str; 4] = [
+    "FACTORY_CI_TOKEN",
+    "FACTORY_CI_LOG_URL",
+    "FACTORY_CI_LOG_USER",
+    "FACTORY_CI_LOG_TOKEN",
+];
 
 #[test]
+#[ignore = "needs a container engine"]
 fn a_step_sees_none_of_the_runner_process_environment() {
     // AS 7.4, SC-007: the token and the log credentials are in the runner's environment only
     for (k, v) in [
@@ -330,7 +398,10 @@ fn a_step_sees_none_of_the_runner_process_environment() {
     }
     let r = go(
         "[steps.dump]\nimage = \"busybox\"\ncommands = [\"env\"]\n",
-        Opts { secrets: &[], ..opts() },
+        Opts {
+            secrets: &[],
+            ..opts()
+        },
     );
     // the other tests of this binary spawn the runner: leave no runner variable behind
     for k in RUNNER_VARS {
@@ -338,14 +409,25 @@ fn a_step_sees_none_of_the_runner_process_environment() {
     }
     assert!(r.out.ok(), "{}", r.log);
     assert!(r.log.contains("[dump] FACTORY_CI_SHA=abc123"), "{}", r.log);
-    assert!(!r.log.contains("AAA111"), "a runner value reached a step:\n{}", r.log);
-    assert!(!r.log.contains("FACTORY_CI_TOKEN") && !r.log.contains("FACTORY_CI_LOG"), "{}", r.log);
+    assert!(
+        !r.log.contains("AAA111"),
+        "a runner value reached a step:\n{}",
+        r.log
+    );
+    assert!(
+        !r.log.contains("FACTORY_CI_TOKEN") && !r.log.contains("FACTORY_CI_LOG"),
+        "{}",
+        r.log
+    );
 }
 
 /// A `docker` on PATH that behaves like the real one except that the clone container copies
 /// `fixture` into the workspace (there is no git server here).
 fn docker_with_fixture_clone(dir: &Path, fixture: &Path) -> String {
-    let real = Command::new("sh").args(["-c", "command -v docker"]).output().unwrap();
+    let real = Command::new("sh")
+        .args(["-c", "command -v docker"])
+        .output()
+        .unwrap();
     let real = String::from_utf8_lossy(&real.stdout).trim().to_string();
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
@@ -357,14 +439,25 @@ fn docker_with_fixture_clone(dir: &Path, fixture: &Path) -> String {
     std::fs::write(&path, script).unwrap();
     let mode = <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o755);
     std::fs::set_permissions(&path, mode).unwrap();
-    format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default())
+    format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    )
 }
 
 fn started(text: &str) -> Vec<String> {
-    text.lines().filter_map(|l| l.strip_prefix('[')?.split_once("] started").map(|(n, _)| n.to_string())).collect()
+    text.lines()
+        .filter_map(|l| {
+            l.strip_prefix('[')?
+                .split_once("] started")
+                .map(|(n, _)| n.to_string())
+        })
+        .collect()
 }
 
 #[test]
+#[ignore = "needs a container engine"]
 fn local_run_and_job_give_the_same_step_order_and_result() {
     // SC-007, AS 7.4: a chain, so the order is fixed
     pull_once();
@@ -393,32 +486,70 @@ fn local_run_and_job_give_the_same_step_order_and_result() {
         .env("TMPDIR", &dir)
         .env("FACTORY_CI_TOKEN", "tok-x")
         .env("GITHUB_API_URL", &api.url)
-        .env("FACTORY_CI_CLONE_IMAGE", "alpine/git@sha256:0000000000000000000000000000000000000000000000000000000000000000")
+        .env(
+            "FACTORY_CI_CLONE_IMAGE",
+            "alpine/git@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        )
         .output()
         .unwrap();
     assert!(job.status.success(), "{}", common::out_text(&job));
     assert_eq!(started(&common::stdout(&local)), ["a", "b", "c"]);
-    assert_eq!(started(&common::stdout(&job)), started(&common::stdout(&local)));
+    assert_eq!(
+        started(&common::stdout(&job)),
+        started(&common::stdout(&local))
+    );
     assert_eq!(api.statuses().last().unwrap()["state"], "success");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
+#[ignore = "needs a container engine"]
 fn local_run_of_a_docker_pipeline_needs_no_opt_in_and_leaves_nothing() {
     // AS 8.4, FR-025
     pull_once();
     let dir = tmp();
-    std::fs::write(dir.join("Dockerfile"), "FROM busybox\nCMD [\"echo\", \"built-ok\"]\n").unwrap();
+    std::fs::write(
+        dir.join("Dockerfile"),
+        "FROM busybox\nCMD [\"echo\", \"built-ok\"]\n",
+    )
+    .unwrap();
     std::fs::write(
         dir.join(".factory-ci.toml"),
         "[steps.img]\nimage = \"docker:27.5.1-cli\"\ndocker = true\ncommands = [\"echo RUNID=$FACTORY_CI_RUN_ID\", \"docker build -q -t fci-local-built .\", \"docker run --rm fci-local-built\"]\n",
     )
     .unwrap();
-    let o = Command::new(common::BIN).args(["run", "--dir", dir.to_str().unwrap()]).output().unwrap();
+    let o = Command::new(common::BIN)
+        .args(["run", "--dir", dir.to_str().unwrap()])
+        .output()
+        .unwrap();
     let out = common::out_text(&o);
     assert!(o.status.success(), "{out}");
     assert!(out.contains("built-ok"), "{out}");
-    let id = out.split("RUNID=").nth(1).and_then(|s| s.split_whitespace().next()).expect("run id").to_string();
+    let id = out
+        .split("RUNID=")
+        .nth(1)
+        .and_then(|s| s.split_whitespace().next())
+        .expect("run id")
+        .to_string();
     assert!(leftovers(&id).is_empty(), "{:?}", leftovers(&id));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+#[ignore = "needs a container engine"]
+fn a_deadline_that_hits_during_container_creation_leaves_nothing() {
+    // Four steps start at once against a one second deadline: some are still being created
+    // when the client is killed. The daemon must not keep a `Created` container.
+    let steps: String = (1..=4)
+        .map(|i| format!("[steps.s{i}]\nimage = \"busybox\"\ncommands = [\"sleep 120\"]\n\n"))
+        .collect();
+    let r = go(
+        &steps,
+        Opts {
+            deadline_secs: 1,
+            ..opts()
+        },
+    );
+    assert!(r.out.failed.is_some());
+    assert!(leftovers(&r.id).is_empty(), "{:?}", leftovers(&r.id));
 }

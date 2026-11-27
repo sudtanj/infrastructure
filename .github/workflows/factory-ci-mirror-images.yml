@@ -10,8 +10,10 @@ permissions: {}
 
 jobs:
   mirror:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    environment: factory-ci-release
     permissions:
       contents: read
       packages: write

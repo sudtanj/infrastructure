@@ -3,6 +3,9 @@ name: rust-ci-runner-release
 # Push a tag such as rust-ci-runner-v0.1.0 on a commit that is on main. Publishes static
 # binaries as release assets and a multi-arch image holding only the binary at
 # ghcr.io/<owner>/rust-ci-runner. Protect this tag pattern and main in the repository settings.
+#
+# Bootstrap exception: this workflow and factory-ci-selftest.yml run cargo directly, because no
+# runner exists yet to build the first one. No other workflow may run cargo.
 on:
   push:
     tags: ["rust-ci-runner-v*"]
@@ -12,7 +15,7 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
       TAG: ${{ github.ref_name }}
@@ -33,7 +36,7 @@ jobs:
 
   build:
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -47,7 +50,7 @@ jobs:
           - target: aarch64-unknown-linux-musl
             arch: arm64
             cc: aarch64-linux-gnu-gcc
-            packages: gcc-aarch64-linux-gnu musl-tools
+            packages: gcc-aarch64-linux-gnu libc6-dev-arm64-cross musl-tools
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -56,6 +59,9 @@ jobs:
         env:
           PACKAGES: ${{ matrix.packages }}
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $PACKAGES
+      - name: install the pinned toolchain
+        working-directory: rust-ci-runner
+        run: rustup toolchain install
       - name: build
         working-directory: rust-ci-runner
         env:
@@ -83,8 +89,9 @@ jobs:
 
   publish:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
+    environment: factory-ci-release
     permissions:
       contents: write
       packages: write
@@ -144,3 +151,4 @@ jobs:
           DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           echo "Set the repository variable RUNNER_IMAGE_DIGEST to $DIGEST" >> "$GITHUB_STEP_SUMMARY"
+          echo "Make the GHCR package public once, then set RUNNER_IMAGE_DIGEST" >> "$GITHUB_STEP_SUMMARY"

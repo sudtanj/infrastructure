@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Secret fetch library (research.md D9, D12; FR-039 to FR-046, FR-053). Sourced by the plan and job
 # scripts. Never `set -x`, never prints a value, a token or bws stderr. Bitwarden Secrets Manager is
-# the only store; one project per list call.
+# the only store for pipeline secrets, one project per list call. The log credentials come from the
+# Actions Environment (fci_log_env), not from the store.
 #
 # SHA-256 of bws-x86_64-unknown-linux-musl-2.1.0.zip, from the bws-v2.1.0 release of bitwarden/sdk-sm.
 # The workflow's install step compares the download with it.
@@ -81,22 +82,19 @@ fci_lookup() {
   return 1
 }
 
-# fci_log_creds: the three log keys of the default project, all or none. Sets FCI_LOG_URL,
-# FCI_LOG_USER, FCI_LOG_TOKEN and FCI_HAVE_LOGS=1, or leaves FCI_HAVE_LOGS empty. On failure FCI_ERR.
-fci_log_creds() {
-  local k found=0 vals=()
+# fci_log_env: the three log variables from the process environment (Actions Environment secrets),
+# all or none. Sets FCI_LOG_URL, FCI_LOG_USER, FCI_LOG_TOKEN and FCI_HAVE_LOGS=1, or leaves
+# FCI_HAVE_LOGS empty. Some set and some empty: FCI_ERR names the empty ones, never a value; returns 1.
+fci_log_env() {
+  local k v missing= found=0
   FCI_HAVE_LOGS=
   for k in URL USER TOKEN; do
-    fci_key_value "FACTORY_CI_LOG_$k"
-    case $? in
-      0) found=$((found + 1)); vals+=("$FCI_VALUE") ;;
-      2) FCI_ERR="secret FACTORY_CI_LOG_$k is ambiguous"; return 1 ;;
-      *) vals+=("") ;;
-    esac
+    v=FACTORY_CI_LOG_$k
+    if [ -n "${!v:-}" ]; then found=$((found + 1)); else missing+=", $v"; fi
   done
   [ "$found" -eq 0 ] && return 0
-  [ "$found" -eq 3 ] || { FCI_ERR="log credentials incomplete"; return 1; }
-  FCI_LOG_URL=${vals[0]} FCI_LOG_USER=${vals[1]} FCI_LOG_TOKEN=${vals[2]} FCI_HAVE_LOGS=1
+  [ "$found" -eq 3 ] || { FCI_ERR="log credentials incomplete: ${missing#, }"; return 1; }
+  FCI_LOG_URL=$FACTORY_CI_LOG_URL FCI_LOG_USER=$FACTORY_CI_LOG_USER FCI_LOG_TOKEN=$FACTORY_CI_LOG_TOKEN FCI_HAVE_LOGS=1
 }
 
 # fci_short_line VALUE: 0 when a trimmed line is under 4 characters (FR-053).

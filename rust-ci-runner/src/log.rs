@@ -69,7 +69,10 @@ impl Log {
         // Control characters other than tab could rewrite a terminal line or forge a log line (R7).
         let text = self.red.apply(text.trim_end_matches(['\r', '\n']));
         let bad = |c: char| c.is_control() && c != '\t';
-        let text: String = text.chars().map(|c| if bad(c) { '\u{fffd}' } else { c }).collect();
+        let text: String = text
+            .chars()
+            .map(|c| if bad(c) { '\u{fffd}' } else { c })
+            .collect();
         let Ok(mut g) = self.inner.lock() else {
             return;
         };
@@ -194,7 +197,10 @@ pub mod tests {
         let (log, buf, rec) = with_rec(&[], 1000);
         log.out("build", "stderr", "oops\r\n");
         assert_eq!(buf.text(), "[build] oops\n");
-        assert_eq!(pushed(&rec), [("build".into(), "stderr".into(), "oops".into())]);
+        assert_eq!(
+            pushed(&rec),
+            [("build".into(), "stderr".into(), "oops".into())]
+        );
     }
 
     #[test]
@@ -203,7 +209,11 @@ pub mod tests {
         let (log, buf, rec) = with_rec(&["hunter2"], 1000);
         log.out("s", "stdout", "pw=hunter2");
         log.event("s", "started");
-        let all: String = pushed(&rec).iter().map(|p| p.2.clone()).collect::<Vec<_>>().join("|");
+        let all: String = pushed(&rec)
+            .iter()
+            .map(|p| p.2.clone())
+            .collect::<Vec<_>>()
+            .join("|");
         assert!(!all.contains("hunter2") && all.contains("pw=***"), "{all}");
         assert!(!buf.text().contains("hunter2"));
     }
@@ -270,7 +280,10 @@ pub mod tests {
         for _ in 0..3 {
             log.out("a", "stdout", "0123456789");
         }
-        assert_eq!(buf.text().matches("log cut off at the size limit").count(), 1);
+        assert_eq!(
+            buf.text().matches("log cut off at the size limit").count(),
+            1
+        );
         let marks = pushed(&rec)
             .iter()
             .filter(|p| p.2.contains("log cut off at the size limit"))

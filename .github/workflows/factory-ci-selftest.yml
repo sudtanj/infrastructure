@@ -1,25 +1,55 @@
 name: factory-ci-selftest
 
+# Bootstrap exception: this workflow runs cargo on the pull request's own code with no secret,
+# no Environment and no artifact.
 on:
   pull_request:
-    paths:
-      - "rust-ci-runner/**"
-      - ".github/workflows/factory-ci*.yml"
-      - ".github/factory-ci-repos.toml"
-      - ".github/scripts/**"
+  workflow_dispatch:
+
+concurrency:
+  group: selftest-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: install the pinned toolchain
+        working-directory: rust-ci-runner
+        run: rustup toolchain install
+      - name: type-check every target
+        working-directory: rust-ci-runner
+        run: cargo check --locked --all-targets
+
   pipeline:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: install the pinned toolchain
+        working-directory: rust-ci-runner
+        run: rustup toolchain install
+      - name: format
+        working-directory: rust-ci-runner
+        run: cargo fmt --check
+      - name: clippy
+        working-directory: rust-ci-runner
+        run: cargo clippy --locked -- -D warnings
+      - name: tests, engine tests included
+        working-directory: rust-ci-runner
+        run: cargo test --locked -- --include-ignored
       - name: build the runner from source
         working-directory: rust-ci-runner
-        run: cargo build --release
+        run: cargo build --locked --release
       - name: run the fixture pipeline
         shell: bash
         run: |
@@ -31,9 +61,65 @@ jobs:
       - name: no containers, networks or volumes are left
         shell: bash
         run: |
+          docker ps -a --filter label=factory-ci.run --format '{{.Names}} {{.Image}} {{.Status}} {{.Label "factory-ci.run"}}'
+          docker network ls --filter label=factory-ci.run --format '{{.Name}} {{.Label "factory-ci.run"}}'
+          docker volume ls --filter label=factory-ci.run --format '{{.Name}} {{.Label "factory-ci.run"}}'
           test -z "$(docker ps -aq --filter label=factory-ci.run)"
           test -z "$(docker network ls -q --filter label=factory-ci.run)"
           test -z "$(docker volume ls -q --filter label=factory-ci.run)"
+
+  build-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            arch: amd64
+            cc: musl-gcc
+            packages: musl-tools
+          - target: aarch64-unknown-linux-musl
+            arch: arm64
+            cc: aarch64-linux-gnu-gcc
+            packages: gcc-aarch64-linux-gnu libc6-dev-arm64-cross musl-tools
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: install the C compiler for ${{ matrix.target }}
+        env:
+          PACKAGES: ${{ matrix.packages }}
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $PACKAGES
+      - name: install the pinned toolchain
+        working-directory: rust-ci-runner
+        run: rustup toolchain install
+      - name: build
+        working-directory: rust-ci-runner
+        env:
+          TARGET: ${{ matrix.target }}
+          CC_VAR: ${{ matrix.cc }}
+        run: |
+          set -eu
+          up=$(printf '%s' "$TARGET" | tr 'a-z-' 'A-Z_')
+          lower=$(printf '%s' "$TARGET" | tr '-' '_')
+          export "CC_$lower=$CC_VAR"
+          export "CARGO_TARGET_${up}_LINKER=$CC_VAR"
+          make build TARGET="$TARGET"
+      - name: stage the binary and the Dockerfile
+        env:
+          TARGET: ${{ matrix.target }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -eu
+          mkdir -p "image/$ARCH"
+          cp "rust-ci-runner/target/$TARGET/release/rust-ci-runner" "image/$ARCH/rust-ci-runner"
+          chmod +x "image/$ARCH/rust-ci-runner"
+          cp rust-ci-runner/Dockerfile image/Dockerfile
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: build the image without pushing
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: docker buildx build --platform "linux/$ARCH" image
 
   list:
     runs-on: ubuntu-24.04
@@ -42,21 +128,55 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - name: install the pinned toolchain
+        working-directory: rust-ci-runner
+        run: rustup toolchain install
       - name: build the runner from source
         working-directory: rust-ci-runner
-        run: cargo build --release
+        run: cargo build --locked --release
       - name: check the watch list
         run: rust-ci-runner/target/release/rust-ci-runner plan --repos .github/factory-ci-repos.toml --check
 
-  workflow:
+  own-pipelines:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 45
+    env:
+      FACTORY_CI_EVENT: push
+      FACTORY_CI_BRANCH: selftest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - name: lint the tick and release workflows
+      - name: separate target directory
+        run: echo "CARGO_TARGET_DIR=$RUNNER_TEMP/own-target" >> "$GITHUB_ENV"
+      - name: install the pinned toolchain
+        working-directory: rust-ci-runner
+        run: rustup toolchain install
+      - name: build the runner from source
+        working-directory: rust-ci-runner
+        run: cargo build --locked --release
+      - name: run the pipeline of the runner
+        run: FACTORY_CI_SHA=$(git rev-parse HEAD) "$CARGO_TARGET_DIR/release/rust-ci-runner" run --dir rust-ci-runner
+      - name: run the pipeline of the repository
+        run: FACTORY_CI_SHA=$(git rev-parse HEAD) "$CARGO_TARGET_DIR/release/rust-ci-runner" run --dir .
+
+  workflow:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      FACTORY_CI_LINT_STRICT: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: lint every workflow
         run: .github/scripts/factory-ci-lint-workflow.sh .github/workflows/factory-ci-tick.yml .github/workflows/rust-ci-runner-release.yml
+      - name: the pinned bws archive matches BWS_SHA256
+        run: |
+          set -eu
+          . .github/scripts/factory-ci-secrets.sh
+          curl -fsSL --max-time 120 -o bws.zip https://github.com/bitwarden/sdk-sm/releases/download/bws-v2.1.0/bws-x86_64-unknown-linux-musl-2.1.0.zip
+          [ "$(sha256sum bws.zip | cut -d ' ' -f 1)" = "$BWS_SHA256" ] || { echo "the bws archive does not match BWS_SHA256" >&2; exit 1; }
 
   shell:
     runs-on: ubuntu-24.04

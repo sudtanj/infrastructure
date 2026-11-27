@@ -11,8 +11,10 @@
 #                           `rust-ci-runner job ... --names-file F --reason-file R` under `env -i`,
 #                           then `exec rust-ci-runner job ...`; failure reasons go to
 #                           $RUNNER_TEMP/fci-reason and the exit status is non-zero
-#   factory-ci-plan.sh      cwd = checkout of B; env as the plan step; writes $GITHUB_OUTPUT and
+#   factory-ci-plan.sh      cwd = checkout of this repo; env as the plan step; writes $GITHUB_OUTPUT and
 #                           $GITHUB_STEP_SUMMARY
+#   003 (FR-010 to FR-012): log credentials come from FACTORY_CI_LOG_URL/_USER/_TOKEN in the
+#                           environment (fci_log_env), never from the store.
 #   `bws secret list <project> -o json` prints [{"key","value",...}]; the 401/403 and 429 cases
 #   are recognised by the words "401", "403" and "429" or "timed out" on stderr.
 set -u
@@ -26,8 +28,64 @@ eq() { if [ "$2" = "$3" ]; then pass; else fail "$1: want [$2] got [$3]"; fi; }
 has() { case $2 in *"$3"*) pass ;; *) fail "$1: [$3] not in [$2]" ;; esac; }
 lacks() { case $2 in *"$3"*) fail "$1: [$3] found in [$2]" ;; *) pass ;; esac; }
 
-KEY=test-key-0123456789-abcdefghijklmnop
+KEY=7f3a9c1e5b8d20467f3a9c1e5b8d20467f3a9c1e5b8d20467f3a9c1e5b8d2046
 export FACTORY_CI_BLOB_KEY=$KEY
+
+# ---------------------------------------------------------------- fci_log_env unit (FR-010 to FR-012; I1, P1, P2)
+# shellcheck source=/dev/null
+. "$here/factory-ci-secrets.sh"
+if declare -F fci_log_env > /dev/null; then pass; else fail "fci_log_env is not defined in factory-ci-secrets.sh (T011); its cases below are skipped"; fi
+declare -F fci_log_creds > /dev/null && fail "fci_log_creds still defined (T011 removes it)" || pass
+
+UR=; have_env=0; ! declare -F fci_log_env > /dev/null || have_env=1
+LOGV=(FACTORY_CI_LOG_URL FACTORY_CI_LOG_USER FACTORY_CI_LOG_TOKEN)
+SENT=(sentinel-url-AAAA11 sentinel-user-BBBB22 sentinel-token-CCCC33)
+# env_case MASK [unset]: bit i of MASK set means variable i has its sentinel; a clear bit is empty,
+# or unset when the second argument is "unset". Result in UR (rc|state|url|user|token|err|printed).
+W0=$(mktemp -d)
+env_case() {
+  local mask=$1 mode=${2:-empty} i
+  UR=$(
+    for i in 0 1 2; do
+      if [ $(((mask >> i) & 1)) -eq 1 ]; then export "${LOGV[$i]}=${SENT[$i]}"
+      elif [ "$mode" = unset ]; then unset "${LOGV[$i]}"
+      else export "${LOGV[$i]}="; fi
+    done
+    FCI_HAVE_LOGS=stale FCI_ERR=
+    fci_log_env > "$W0/o" 2>&1; rc=$?; printed=$(cat "$W0/o")
+    printf '%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s' "$rc" "${FCI_HAVE_LOGS-}" "${FCI_LOG_URL-}" "${FCI_LOG_USER-}" "${FCI_LOG_TOKEN-}" "${FCI_ERR-}" "$printed"
+  )
+  IFS=$'\x1f' read -r U_RC U_HAVE U_URL U_USER U_TOKEN U_ERR U_OUT <<< "$UR"
+}
+for mode in $([ $have_env = 1 ] && echo empty unset); do
+  for mask in 0 1 2 3 4 5 6 7; do
+    env_case $mask $mode; t="fci_log_env mask=$mask ($mode)"
+    eq "$t: prints nothing" "" "$U_OUT"
+    case $mask in
+      7) eq "$t: rc" 0 "$U_RC"; eq "$t: state on" 1 "$U_HAVE"
+         eq "$t: values" "${SENT[0]}|${SENT[1]}|${SENT[2]}" "$U_URL|$U_USER|$U_TOKEN"; eq "$t: no error" "" "$U_ERR" ;;
+      0) eq "$t: rc" 0 "$U_RC"; eq "$t: state off" "" "$U_HAVE"; eq "$t: no error" "" "$U_ERR" ;;
+      *) eq "$t: rc" 1 "$U_RC"; has "$t: error text" "$U_ERR" "log credentials incomplete"
+         want=; for i in 0 1 2; do [ $(((mask >> i) & 1)) -eq 1 ] || want="$want ${LOGV[$i]}"; done
+         got=$(printf '%s' "$U_ERR" | grep -o 'FACTORY_CI_LOG_[A-Z]*' | sort | tr '\n' ' ' | sed 's/ $//')
+         eq "$t: names exactly the empty variables" "$(printf '%s\n' $want | sort | tr '\n' ' ' | sed 's/ $//')" "$got"
+         for s in "${SENT[@]}"; do lacks "$t: error holds no value" "$U_ERR" "$s"; done
+         eq "$t: partial never reports on" "" "$U_HAVE" ;;
+    esac
+  done
+done
+# I1 over many random subsets: the state is on, off or partial, and partial always returns 1.
+for _ in $([ $have_env = 1 ] && echo 1 2 3 4 5 6 7 8 9 10 11 12); do
+  m=$((RANDOM % 8)); env_case "$m"
+  want=$([ "$m" -eq 7 ] && echo 0 || { [ "$m" -eq 0 ] && echo 0 || echo 1; })
+  eq "I1 random subset $m: rc" "$want" "$U_RC"
+done
+# FR-011: a 3-character line passes fci_log_env but the callers' short-line check refuses it.
+[ $have_env = 1 ] && UR=$(export FACTORY_CI_LOG_URL=${SENT[0]} FACTORY_CI_LOG_USER=abc FACTORY_CI_LOG_TOKEN=${SENT[2]}; fci_log_env && fci_short_line "$FACTORY_CI_LOG_USER" && echo short)
+eq "3-character line is caught by fci_short_line" short "$UR"
+[ $have_env = 1 ] && UR=$(export FACTORY_CI_LOG_URL=${SENT[0]} FACTORY_CI_LOG_USER=abcd FACTORY_CI_LOG_TOKEN=${SENT[2]}; fci_log_env && fci_short_line "$FACTORY_CI_LOG_USER" || echo ok)
+eq "4-character line is not short" ok "$UR"
+rm -rf "$W0"
 # shellcheck source=/dev/null
 . "$here/factory-ci-blob.sh"
 
@@ -200,16 +258,25 @@ new_world; mkrow secrets_ok=false; names; run_job; eq "secrets not ok but none l
 new_world; mkrow; names; run_job -BWS_ACCESS_TOKEN; eq "empty names, no token: no store call" 0 "$(bwscalls)"; rm -rf "$W"
 new_world; mkrow; names; run_job; n=$(bwscalls); eq "empty names: at most one store call" 1 "$([ "$n" -le 1 ] && echo 1 || echo 0)"; eq "empty names: runs" 0 "$RC"; rm -rf "$W"
 
-# AS 12.3: log credentials come from the three project keys.
-logrow() { store_add FACTORY_CI_LOG_URL https://loki.example.com; store_add FACTORY_CI_LOG_USER loki-user-1; store_add FACTORY_CI_LOG_TOKEN loki-token-2222; }
-new_world; mkrow; names; logrow; echo "FACTORY_CI_LOG_URL FACTORY_CI_LOG_USER FACTORY_CI_LOG_TOKEN" > "$W/state/dumpnames"; run_job
-n=$(real_n); eq "log creds: exit" 0 "$RC"; eq "log creds: url" https://loki.example.com "$(cat "$W/state/val.FACTORY_CI_LOG_URL.$n")"
-eq "log creds: token" loki-token-2222 "$(cat "$W/state/val.FACTORY_CI_LOG_TOKEN.$n")"; has "log creds on: --quiet-logs" "$(runner_arg "$n")" "--quiet-logs"; rm -rf "$W"
+# AS 12.3 (FR-010 to FR-012): log credentials come from the process environment, not the store.
+LU=https://loki.example.com LN=loki-user-1 LT=loki-token-2222
+new_world; mkrow; names; echo "FACTORY_CI_LOG_URL FACTORY_CI_LOG_USER FACTORY_CI_LOG_TOKEN" > "$W/state/dumpnames"
+run_job FACTORY_CI_LOG_URL=$LU FACTORY_CI_LOG_USER=$LN FACTORY_CI_LOG_TOKEN=$LT
+n=$(real_n); eq "log creds: exit" 0 "$RC"; eq "log creds: url" $LU "$(cat "$W/state/val.FACTORY_CI_LOG_URL.$n")"
+eq "log creds: token" $LT "$(cat "$W/state/val.FACTORY_CI_LOG_TOKEN.$n")"; has "log creds on: --quiet-logs" "$(runner_arg "$n")" "--quiet-logs"
+has "log creds masked" "$OUT" "::add-mask::$LT"; rm -rf "$W"
+# FR-010: a log key in the store is not read any more.
+new_world; mkrow; names; store_add FACTORY_CI_LOG_URL $LU; store_add FACTORY_CI_LOG_USER $LN; store_add FACTORY_CI_LOG_TOKEN $LT; run_job
+eq "store log keys ignored: exit" 0 "$RC"; lacks "store log keys ignored: no --quiet-logs" "$(runner_arg "$(real_n)")" "--quiet-logs"; rm -rf "$W"
 new_world; mkrow; names; run_job; lacks "no log creds: no --quiet-logs" "$(runner_arg "$(real_n)")" "--quiet-logs"; eq "no log creds: exit" 0 "$RC"; rm -rf "$W"
-new_world; mkrow; names; store_add FACTORY_CI_LOG_URL https://loki.example.com; run_job
-eq "one log key: exit" 1 "$RC"; has "one log key: reason" "$(reason)" "log credentials incomplete"; eq "one log key: no real run" 0 "$(real_n)"; rm -rf "$W"
-new_world; mkrow; names; store_add FACTORY_CI_LOG_URL https://loki.example.com; store_add FACTORY_CI_LOG_USER loki-user-1; run_job
-eq "two log keys: exit" 1 "$RC"; has "two log keys: reason" "$(reason)" "log credentials incomplete"; rm -rf "$W"
+new_world; mkrow; names; run_job FACTORY_CI_LOG_URL=$LU
+eq "one log var: exit" 1 "$RC"; has "one log var: reason" "$(reason)" "log credentials incomplete"; has "one log var: names the empty ones" "$(reason)" "FACTORY_CI_LOG_USER"
+eq "one log var: no real run" 0 "$(real_n)"; eq "one log var: refused before any store call" 0 "$(bwscalls)"; rm -rf "$W"
+new_world; mkrow; names; run_job FACTORY_CI_LOG_URL=$LU FACTORY_CI_LOG_USER=$LN
+eq "two log vars: exit" 1 "$RC"; has "two log vars: reason" "$(reason)" "log credentials incomplete"; lacks "two log vars: names only the empty one" "$(reason)" "FACTORY_CI_LOG_URL"; rm -rf "$W"
+# FR-011 with a short line: refused by the caller, the value never printed.
+new_world; mkrow; names; run_job FACTORY_CI_LOG_URL=$LU FACTORY_CI_LOG_USER=abc FACTORY_CI_LOG_TOKEN=$LT
+eq "3-character log value: refused" 1 "$RC"; has "3-character log value: reason" "$(reason)" "under 4 characters"; eq "3-character log value: no real run" 0 "$(real_n)"; rm -rf "$W"
 
 # AS 12.6 variants: duplicate key is ambiguous; an empty value counts as no match.
 new_world; mkrow secrets=NPM_TOKEN; names NPM_TOKEN; store_add NPM_TOKEN first-val-8888; store_add NPM_TOKEN second-val-9999
@@ -254,9 +321,8 @@ run_job; eq "invalid pipeline: exit" 1 "$RC"; has "invalid pipeline: reason copi
 eq "invalid pipeline: no real run" 0 "$(real_n)"; rm -rf "$W"
 
 # The row's flags and the docker variant (reads only the project it was given).
-new_world; mkrow allow_docker=true fail_closed=true retry=true prev_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; names
-store_add FACTORY_CI_LOG_URL https://loki.example.com; store_add FACTORY_CI_LOG_USER u-1234; store_add FACTORY_CI_LOG_TOKEN t-12345
-run_job FACTORY_CI_BWS_PROJECT=proj-docker; a=$(runner_arg "$(real_n)")
+new_world; mkrow allow_docker=true fail_closed=true retry=true prev_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa secrets=NPM_TOKEN; names NPM_TOKEN; store_add NPM_TOKEN v-12345
+run_job FACTORY_CI_BWS_PROJECT=proj-docker FACTORY_CI_LOG_URL=https://loki.example.com FACTORY_CI_LOG_USER=u-1234 FACTORY_CI_LOG_TOKEN=t-12345; a=$(runner_arg "$(real_n)")
 for f in --allow-docker --private --retry --quiet-logs "--prev aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; do has "flag $f" "$a" "$f"; done
 has "docker variant reads its project" "$(cat "$W/state/bws.argv.1")" "proj-docker"; lacks "docker variant never reads the default project" "$(cat "$W"/state/bws.argv.*)" "proj-default"; rm -rf "$W"
 new_world; mkrow; names; run_job; a=$(runner_arg "$(real_n)")
@@ -287,11 +353,13 @@ run_plan() {
 plan_world; run_plan
 eq "idle plan: exit" 0 "$RC"; eq "idle plan: no bws call (I28)" 0 "$(bwscalls)"; eq "idle plan: both phases ran" "A C" "$(tr '\n' ' ' < "$W/state/phases" | sed 's/ $//')"; rm -rf "$W"
 
-# Rows and a healthy store: the log credentials reach phase C.
-plan_world; cand_row; store_add FACTORY_CI_LOG_URL https://loki.example.com; store_add FACTORY_CI_LOG_USER u-1234; store_add FACTORY_CI_LOG_TOKEN t-12345
-run_plan; eq "healthy plan: exit" 0 "$RC"; eq "healthy plan: phases" "A C" "$(tr '\n' ' ' < "$W/state/phases" | sed 's/ $//')"
+# Rows and a healthy store: the log credentials, read from the environment, reach phase C (FR-010).
+plan_world; cand_row
+run_plan FACTORY_CI_LOG_URL=https://loki.example.com FACTORY_CI_LOG_USER=u-1234 FACTORY_CI_LOG_TOKEN=t-12345
+eq "healthy plan: exit" 0 "$RC"; eq "healthy plan: phases" "A C" "$(tr '\n' ' ' < "$W/state/phases" | sed 's/ $//')"
 cenv=$(cat "$W/state/runner.env.2"); has "phase C gets the log url" "$cenv" "FACTORY_CI_LOG_URL=https://loki.example.com"
 has "phase C gets the log token" "$cenv" "FACTORY_CI_LOG_TOKEN=t-12345"; eq "one store call" 1 "$(bwscalls)"
+has "plan masks the log token" "$OUT" "::add-mask::t-12345"
 rm -rf "$W"
 
 # Rows and a rejected token or an unreachable store: non-zero, reason in the summary, phase C never starts.
@@ -310,6 +378,14 @@ done
 # A malformed list fails before any store call.
 plan_world; cand_row; : > "$W/state/plan.a.fail"; run_plan
 eq "malformed list: non-zero" 1 "$([ "$RC" -ne 0 ] && echo 1 || echo 0)"; eq "malformed list: no store call" 0 "$(bwscalls)"; eq "malformed list: phase C not started" A "$(tr '\n' ' ' < "$W/state/phases" | sed 's/ $//')"; rm -rf "$W"
+
+# FR-036: a blob key that is not 64 lower-case hex is refused by name; no store call, nothing runs.
+for v in abc "$(printf 'g%.0s' $(seq 64))" "$(printf 'A%.0s' $(seq 64))"; do
+  plan_world; cand_row; run_plan FACTORY_CI_BLOB_KEY="$v"
+  eq "bad blob key plan: non-zero" 1 "$([ "$RC" -ne 0 ] && echo 1 || echo 0)"; eq "bad blob key plan: no store call" 0 "$(bwscalls)"
+  has "bad blob key plan: names the variable" "$(cat "$W/gh_summary")" "FACTORY_CI_BLOB_KEY is not 64 lower-case hex"
+  lacks "bad blob key plan: value hidden" "$OUT$ERR$(cat "$W/gh_summary")" "$v"; rm -rf "$W"
+done
 
 printf '%s checks, %s failed\n' "$total" "$failed"
 [ "$failed" -eq 0 ]

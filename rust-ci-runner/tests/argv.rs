@@ -17,7 +17,11 @@ fn tokens_and_secrets_travel_in_the_environment_never_in_arguments() {
     let dir: PathBuf = std::env::temp_dir().join(format!("fci-argv-{}", random_id()));
     std::fs::create_dir_all(&dir).unwrap();
     let stub = dir.join("engine.sh");
-    std::fs::write(&stub, "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$0.argv\"\nenv > \"$0.env\"\n").unwrap();
+    std::fs::write(
+        &stub,
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$0.argv\"\nenv > \"$0.env\"\n",
+    )
+    .unwrap();
     std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
     let argv = || std::fs::read_to_string(dir.join("engine.sh.argv")).unwrap();
     let env = || std::fs::read_to_string(dir.join("engine.sh.env")).unwrap();
@@ -46,7 +50,9 @@ fn tokens_and_secrets_travel_in_the_environment_never_in_arguments() {
         run_id: "run1",
         workspace: &ws,
         env: vec![],
-        secrets: [("NPM".to_string(), TOKEN.to_string())].into_iter().collect(),
+        secrets: [("NPM".to_string(), TOKEN.to_string())]
+            .into_iter()
+            .collect(),
         max_parallel: 1,
         deadline: Instant::now() + Duration::from_secs(30),
         log: &log,
@@ -56,7 +62,10 @@ fn tokens_and_secrets_travel_in_the_environment_never_in_arguments() {
     assert!(out.ok());
     let a = argv();
     assert!(!a.contains(TOKEN), "secret in argv:\n{a}");
-    assert!(a.lines().any(|l| l == image), "image must be one argument:\n{a}");
+    assert!(
+        a.lines().any(|l| l == image),
+        "image must be one argument:\n{a}"
+    );
     assert!(a.lines().any(|l| l == "NPM"));
     assert!(env().lines().any(|l| l == format!("NPM={TOKEN}")));
     assert!(!marker.exists());
@@ -70,7 +79,11 @@ fn every_step_container_drops_net_raw_mknod_and_setfcap() {
     let dir: PathBuf = std::env::temp_dir().join(format!("fci-caps-{}", random_id()));
     std::fs::create_dir_all(&dir).unwrap();
     let stub = dir.join("engine.sh");
-    std::fs::write(&stub, "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$0.argv\"\necho -- >> \"$0.argv\"\n").unwrap();
+    std::fs::write(
+        &stub,
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$0.argv\"\necho -- >> \"$0.argv\"\n",
+    )
+    .unwrap();
     std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
     let engine = Engine::new(stub.to_str().unwrap());
     let ws = dir.join("ws");
@@ -96,12 +109,17 @@ fn every_step_container_drops_net_raw_mknod_and_setfcap() {
     let calls: Vec<Vec<&str>> = text.split("--\n").map(|c| c.lines().collect()).collect();
     let steps: Vec<_> = calls
         .iter()
-        .filter(|c| c.first() == Some(&"run") && c.iter().any(|a| a.ends_with("-a") || a.ends_with("-b")))
+        .filter(|c| {
+            c.first() == Some(&"run") && c.iter().any(|a| a.ends_with("-a") || a.ends_with("-b"))
+        })
         .collect();
     assert_eq!(steps.len(), 2, "{text}");
     for c in steps {
         for cap in ["NET_RAW", "MKNOD", "SETFCAP"] {
-            assert!(c.windows(2).any(|w| w[0] == "--cap-drop" && w[1] == cap), "{cap} missing:\n{c:?}");
+            assert!(
+                c.windows(2).any(|w| w[0] == "--cap-drop" && w[1] == cap),
+                "{cap} missing:\n{c:?}"
+            );
         }
     }
     let _ = std::fs::remove_dir_all(&dir);

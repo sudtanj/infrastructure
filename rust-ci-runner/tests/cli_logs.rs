@@ -15,9 +15,16 @@ fn run_quiet_logs_without_a_log_environment_fails_before_running_anything() {
     // AS 11.8
     let sb = Sandbox::new();
     let d = project(&sb);
-    let o = sb.cmd(&["run", "--quiet-logs", "--dir", dir_str(&d)]).output().unwrap();
+    let o = sb
+        .cmd(&["run", "--quiet-logs", "--dir", dir_str(&d)])
+        .output()
+        .unwrap();
     assert_eq!(o.status.code(), Some(1), "{}", out_text(&o));
-    assert!(stderr(&o).contains("FACTORY_CI_LOG_URL"), "the reason names the variables: {}", stderr(&o));
+    assert!(
+        stderr(&o).contains("FACTORY_CI_LOG_URL"),
+        "the reason names the variables: {}",
+        stderr(&o)
+    );
     assert!(sb.calls().is_empty(), "{:?}", sb.calls());
 }
 
@@ -66,7 +73,11 @@ fn run_without_configuration_prints_step_output() {
     // AS 11.9
     let sb = Sandbox::new();
     let d = project(&sb);
-    let o = sb.cmd(&["run", "--dir", dir_str(&d)]).env("STUB_OUT", "STEP_OUT_1").output().unwrap();
+    let o = sb
+        .cmd(&["run", "--dir", dir_str(&d)])
+        .env("STUB_OUT", "STEP_OUT_1")
+        .output()
+        .unwrap();
     assert!(o.status.success(), "{}", out_text(&o));
     assert!(stdout(&o).contains("[build] STEP_OUT_1"), "{}", stdout(&o));
 }
@@ -83,7 +94,13 @@ fn run_with_a_log_store_ships_and_prints() {
     let o = c.output().unwrap();
     assert!(o.status.success(), "{}", out_text(&o));
     assert!(stdout(&o).contains("STEP_OUT_2"));
-    assert!(loki.loki_lines().iter().any(|(_, t)| t.contains("STEP_OUT_2")), "{:?}", loki.loki_lines());
+    assert!(
+        loki.loki_lines()
+            .iter()
+            .any(|(_, t)| t.contains("STEP_OUT_2")),
+        "{:?}",
+        loki.loki_lines()
+    );
 }
 
 #[test]
@@ -98,5 +115,8 @@ fn run_quiet_logs_with_a_log_store_ships_and_does_not_print() {
     let o = c.output().unwrap();
     assert!(o.status.success(), "{}", out_text(&o));
     assert!(!out_text(&o).contains("STEP_OUT_3"), "{}", out_text(&o));
-    assert!(loki.loki_lines().iter().any(|(_, t)| t.contains("STEP_OUT_3")));
+    assert!(loki
+        .loki_lines()
+        .iter()
+        .any(|(_, t)| t.contains("STEP_OUT_3")));
 }

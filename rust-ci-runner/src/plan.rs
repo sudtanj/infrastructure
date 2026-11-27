@@ -29,7 +29,10 @@ pub struct Apis<'a> {
 
 impl<'a> Apis<'a> {
     pub fn same(api: &'a dyn Api) -> Apis<'a> {
-        Apis { plain: api, docker: api }
+        Apis {
+            plain: api,
+            docker: api,
+        }
     }
 
     fn pick(&self, docker: bool) -> &'a dyn Api {
@@ -151,20 +154,29 @@ impl From<ApiError> for Stop {
 fn reason(e: &ApiError) -> String {
     match e {
         ApiError::Http(c, _) => format!("HTTP {c}"),
-        ApiError::Net(m) | ApiError::RateLimited(m) => m.rsplit(": ").next().unwrap_or(m).to_string(),
+        ApiError::Net(m) | ApiError::RateLimited(m) => {
+            m.rsplit(": ").next().unwrap_or(m).to_string()
+        }
     }
 }
 
 fn problem(red: &Redactor, repo: &str, why: &str) -> String {
     let s = red.apply(&format!("{repo}: {why}"));
-    s.chars().map(|c| if c.is_control() { ' ' } else { c }).collect()
+    s.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
 }
 
 /// Phase A: reads only. Per-repo results are atomic; a rate limit stops all reads.
 pub fn candidates(apis: &Apis, list: &[WatchEntry], o: &Opts) -> Candidates {
     let red = Redactor::new(o.secrets.clone());
     let mut c = Candidates::default();
-    let names = |from: usize| list[from..].iter().map(|e| e.repo.clone()).collect::<Vec<_>>();
+    let names = |from: usize| {
+        list[from..]
+            .iter()
+            .map(|e| e.repo.clone())
+            .collect::<Vec<_>>()
+    };
     // One cache and one `GET /user` per token, made at the first entry that uses it (FR-050).
     let mut caches: [Option<walk::Cache>; 2] = [None, None];
     let mut failed = [false; 2];
@@ -180,11 +192,17 @@ pub fn candidates(apis: &Apis, list: &[WatchEntry], o: &Opts) -> Candidates {
                 }
                 Err(err) => {
                     failed[k] = true;
-                    c.problems.push(problem(&red, "list", &format!("cannot read the token's user ({})", reason(&err))));
+                    c.problems.push(problem(
+                        &red,
+                        "list",
+                        &format!("cannot read the token's user ({})", reason(&err)),
+                    ));
                 }
             }
         }
-        let Some(cache) = caches[k].as_mut() else { continue };
+        let Some(cache) = caches[k].as_mut() else {
+            continue;
+        };
         match read_repo(api, e, o, cache) {
             Ok(p) => {
                 c.rows.extend(p.rows);
@@ -202,15 +220,25 @@ pub fn candidates(apis: &Apis, list: &[WatchEntry], o: &Opts) -> Candidates {
     c
 }
 
-fn read_repo(api: &dyn Api, e: &WatchEntry, o: &Opts, cache: &mut walk::Cache) -> Result<Candidates, Stop> {
+fn read_repo(
+    api: &dyn Api,
+    e: &WatchEntry,
+    o: &Opts,
+    cache: &mut walk::Cache,
+) -> Result<Candidates, Stop> {
     let repo = api.repo(&e.repo)?;
     if let Some(id) = e.id.filter(|id| *id != repo.id) {
-        return Err(Stop::Problem(format!("id {id} in the list, but the API says {}", repo.id)));
+        return Err(Stop::Problem(format!(
+            "id {id} in the list, but the API says {}",
+            repo.id
+        )));
     }
     let mut tips = api.branches(&e.repo)?;
     tips.retain(|b| e.matches_branch(&b.name));
     if tips.len() > MAX_BRANCHES {
-        return Err(Stop::Problem(format!("more than {MAX_BRANCHES} matching branches")));
+        return Err(Stop::Problem(format!(
+            "more than {MAX_BRANCHES} matching branches"
+        )));
     }
     // Branches sharing a sha plan once (FR-012, R2): under the default branch if it is among
     // them, else the alphabetically first name; secrets are allowed if any of them may have them.
@@ -233,14 +261,19 @@ fn read_repo(api: &dyn Api, e: &WatchEntry, o: &Opts, cache: &mut walk::Cache) -
         let found = projects::discover(api, &e.repo, &b.sha)?;
         let projs: Vec<Project> = found
             .iter()
-            .map(|f| Project { path: f.path.clone(), context: projects::context(&f.path) })
+            .map(|f| Project {
+                path: f.path.clone(),
+                context: projects::context(&f.path),
+            })
             .collect();
         if projs.is_empty() {
             continue;
         }
         let d = walk::decide(api, &e.repo, &b.sha, &projs, o.now, cache)?;
         for (f, p) in found.iter().zip(&projs) {
-            let Some(dec) = d.by_context.get(&p.context) else { continue };
+            let Some(dec) = d.by_context.get(&p.context) else {
+                continue;
+            };
             let post = |state: &str, description: String| Status {
                 repo: e.repo.clone(),
                 sha: b.sha.clone(),
@@ -251,18 +284,26 @@ fn read_repo(api: &dyn Api, e: &WatchEntry, o: &Opts, cache: &mut walk::Cache) -
             };
             match dec {
                 Decision::Done => {}
-                Decision::Close => out.invalid.push(post("error", "job did not finish (retry)".into())),
-                Decision::Unchanged { since } => {
-                    out.unchanged.push(post("success", format!("unchanged since {}", short_sha(since))))
-                }
+                Decision::Close => out
+                    .invalid
+                    .push(post("error", "job did not finish (retry)".into())),
+                Decision::Unchanged { since } => out.unchanged.push(post(
+                    "success",
+                    format!("unchanged since {}", short_sha(since)),
+                )),
                 // The retry mark keeps a bad folder from being posted again every tick.
                 Decision::Run { retry, .. } if !f.valid => {
                     let mark = if *retry { " (retry)" } else { "" };
-                    out.invalid.push(post("error", format!("invalid project folder name{mark}")))
+                    out.invalid
+                        .push(post("error", format!("invalid project folder name{mark}")))
                 }
                 Decision::Run { prev, retry } => out.rows.push(Item {
                     repo: e.repo.clone(),
-                    repo_id: if e.id == Some(repo.id) { repo.id.to_string() } else { String::new() },
+                    repo_id: if e.id == Some(repo.id) {
+                        repo.id.to_string()
+                    } else {
+                        String::new()
+                    },
                     sha: b.sha.clone(),
                     branch: b.name.clone(),
                     project: p.path.clone(),
@@ -288,7 +329,11 @@ fn read_repo(api: &dyn Api, e: &WatchEntry, o: &Opts, cache: &mut walk::Cache) -
 fn order(mut rows: Vec<Item>, cap: usize) -> (Vec<Item>, usize) {
     let total = rows.len();
     rows.sort_by(|a, b| {
-        (a.date.unwrap_or(i64::MAX), &a.branch, &a.project).cmp(&(b.date.unwrap_or(i64::MAX), &b.branch, &b.project))
+        (a.date.unwrap_or(i64::MAX), &a.branch, &a.project).cmp(&(
+            b.date.unwrap_or(i64::MAX),
+            &b.branch,
+            &b.project,
+        ))
     });
     // After the global sort a repo's first appearance is its oldest row.
     let mut queues: Vec<VecDeque<Item>> = Vec::new();
@@ -338,7 +383,14 @@ impl Writer<'_> {
         }
         self.used += 1;
         loop {
-            match self.apis.pick(s.docker).post_status(&s.repo, &s.sha, &s.context, &s.state, &s.description, None) {
+            match self.apis.pick(s.docker).post_status(
+                &s.repo,
+                &s.sha,
+                &s.context,
+                &s.state,
+                &s.description,
+                None,
+            ) {
                 Ok(()) => return true,
                 Err(ApiError::RateLimited(_)) if !self.waited => {
                     self.waited = true;
@@ -350,7 +402,11 @@ impl Writer<'_> {
                     return false;
                 }
                 Err(e) => {
-                    self.problems.push(problem(self.red, &s.repo, &format!("status post failed ({})", reason(&e))));
+                    self.problems.push(problem(
+                        self.red,
+                        &s.repo,
+                        &format!("status post failed ({})", reason(&e)),
+                    ));
                     return false;
                 }
             }
@@ -375,7 +431,11 @@ pub fn finish(apis: &Apis, cand: Candidates, o: &Opts) -> Final {
         }
     }
     for repo in &refused {
-        problems.push(problem(&red, repo, "private repository, public runner repo and no log store"));
+        problems.push(problem(
+            &red,
+            repo,
+            "private repository, public runner repo and no log store",
+        ));
     }
     let (capped, waiting) = order(rows, o.cap);
     let mut w = Writer {
@@ -416,12 +476,33 @@ pub fn finish(apis: &Apis, cand: Candidates, o: &Opts) -> Final {
     }
     // FR-056: a delivery failure is ignored; the line only marks a tick that had candidate rows.
     if let Some(hb) = o.heartbeat.as_ref().filter(|_| o.log_store) {
-        let _ = hb(&format!("run={} tick items={} problems={}", o.run_id, kept.len(), problems.len()));
+        let _ = hb(&format!(
+            "run={} tick items={} problems={}",
+            o.run_id,
+            kept.len(),
+            problems.len()
+        ));
     }
-    let summary = summary(&kept, &cand.unchecked, &problems, [cand.checked, unchanged, waiting, deferred_writes]);
-    let fail_tick = (!problems.is_empty() || !cand.unchecked.is_empty()) && o.now.rem_euclid(3600) < FAIL_WINDOW;
-    let (matrix_docker, matrix): (Vec<Item>, Vec<Item>) = kept.into_iter().partition(|r| r.allow_docker);
-    Final { matrix, matrix_docker, problems, unchecked: cand.unchecked, waiting, deferred_writes, summary, fail_tick }
+    let summary = summary(
+        &kept,
+        &cand.unchecked,
+        &problems,
+        [cand.checked, unchanged, waiting, deferred_writes],
+    );
+    let fail_tick = (!problems.is_empty() || !cand.unchecked.is_empty())
+        && o.now.rem_euclid(3600) < FAIL_WINDOW;
+    let (matrix_docker, matrix): (Vec<Item>, Vec<Item>) =
+        kept.into_iter().partition(|r| r.allow_docker);
+    Final {
+        matrix,
+        matrix_docker,
+        problems,
+        unchecked: cand.unchecked,
+        waiting,
+        deferred_writes,
+        summary,
+        fail_tick,
+    }
 }
 
 /// Markdown with repo names only (FR-058): no branch, sha, project path or secret name.
@@ -437,11 +518,15 @@ fn summary(kept: &[Item], unchecked: &[String], problems: &[String], counts: [us
     ));
     if !problems.is_empty() {
         s.push_str("\nproblems:\n");
-        problems.iter().for_each(|p| s.push_str(&format!("- {p}\n")));
+        problems
+            .iter()
+            .for_each(|p| s.push_str(&format!("- {p}\n")));
     }
     if !unchecked.is_empty() {
         s.push_str("\nnot checked (rate limit):\n");
-        unchecked.iter().for_each(|r| s.push_str(&format!("- {r}\n")));
+        unchecked
+            .iter()
+            .for_each(|r| s.push_str(&format!("- {r}\n")));
     }
     s
 }

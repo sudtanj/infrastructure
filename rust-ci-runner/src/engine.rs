@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, BufReader, Read};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -77,13 +77,11 @@ impl Engine {
     }
 
     /// Runs the engine with a time limit. Returns stdout, or stderr as the error.
-    /// `container` is killed and removed when the limit passes.
     pub fn capture(
         &self,
         args: &[String],
         env: &[(String, String)],
         limit: Duration,
-        container: Option<&str>,
     ) -> Result<String, String> {
         let mut child = self
             .command(args, env)
@@ -101,9 +99,6 @@ impl Engine {
                 match child.try_wait() {
                     Ok(Some(st)) => break Ok(st),
                     Ok(None) if Instant::now() >= end => {
-                        if let Some(name) = container {
-                            self.kill(name);
-                        }
                         let _ = child.kill();
                         let _ = child.wait();
                         break Err(format!("{} timed out", self.bin));
@@ -122,12 +117,34 @@ impl Engine {
     }
 
     fn quick(&self, args: &[&str]) -> Result<String, String> {
-        self.capture(&strs(args), &[], Duration::from_secs(60), None)
+        self.capture(&strs(args), &[], Duration::from_secs(60))
     }
 
     pub fn kill(&self, name: &str) {
         let _ = self.quick(&["kill", name]);
         let _ = self.quick(&["rm", "-f", name]);
+    }
+
+    /// Removes `name` again and again while the `docker run` client is still alive. The client
+    /// returns only after the daemon is done with its create and start, so killing the client
+    /// first would let a slow create finish later and leave a `Created` container behind.
+    /// shortcut: after 30 s the client is killed anyway; a create slower than that leaks until
+    /// the run-label cleanup.
+    fn stop_and_remove(&self, child: &mut Child, name: &str) {
+        let stop = Instant::now() + Duration::from_secs(30);
+        loop {
+            self.kill(name);
+            if matches!(child.try_wait(), Ok(Some(_))) {
+                break;
+            }
+            if Instant::now() >= stop {
+                let _ = child.kill();
+                let _ = child.wait();
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
+        self.kill(name);
     }
 
     /// Removes the containers, networks and volumes that carry `label` (`key=value`).
@@ -161,7 +178,10 @@ impl Engine {
     /// Deletes `parent/name` as root inside a container: files that steps created as root
     /// cannot be removed by the runner's own user.
     pub fn remove_dir(&self, image: &str, parent: &Path, name: &str) -> Result<(), String> {
-        let p = parent.to_str().filter(|p| !p.contains(':')).ok_or("unusable path")?;
+        let p = parent
+            .to_str()
+            .filter(|p| !p.contains(':'))
+            .ok_or("unusable path")?;
         let mount = format!("{p}:/w");
         let target = format!("/w/{name}");
         let args: [&str; 9] = [
@@ -218,9 +238,7 @@ impl Engine {
                         })
                     }
                     Ok(None) if Instant::now() >= end => {
-                        self.kill(container);
-                        let _ = child.kill();
-                        let _ = child.wait();
+                        self.stop_and_remove(&mut child, container);
                         return State::Failed(s(timeout_msg));
                     }
                     Ok(None) => std::thread::sleep(Duration::from_millis(25)),
@@ -319,10 +337,13 @@ impl Sidecar {
             format!("factory-ci-{id}-dind"),
         );
         let label = format!("{LABEL}={id}");
-        ctx.log.out("runner", "stdout", "starting the docker sidecar");
+        ctx.log
+            .out("runner", "stdout", "starting the docker sidecar");
         let fail = |m: String| format!("cannot start the docker sidecar: {m}");
-        e.quick(&["network", "create", "--label", &label, &net]).map_err(fail)?;
-        e.quick(&["volume", "create", "--label", &label, &vol]).map_err(fail)?;
+        e.quick(&["network", "create", "--label", &label, &net])
+            .map_err(fail)?;
+        e.quick(&["volume", "create", "--label", &label, &vol])
+            .map_err(fail)?;
         // Plain TCP on the private network: the sidecar is reachable only from this run's
         // steps, so TLS would add certificate plumbing and no isolation.
         let data = format!("{vol}:/var/lib/docker");
@@ -343,7 +364,7 @@ impl Sidecar {
             ctx.dind_image,
         ];
         // The first start pulls the image, which can take minutes on a slow link.
-        e.capture(&strs(&args), &[], Duration::from_secs(900), None)
+        e.capture(&strs(&args), &[], Duration::from_secs(900))
             .map_err(fail)?;
         let ready = Instant::now() + Duration::from_secs(90);
         loop {
@@ -369,8 +390,20 @@ fn run_step(ctx: &RunCtx, name: &str, step: &Step, side: Option<&Sidecar>) -> St
     let container = format!("factory-ci-{}-{name}", ctx.run_id);
     let label = format!("{LABEL}={}", ctx.run_id);
     let mut a = strs(&["run", "--rm", "--name", &container, "--label", &label]);
-    a.extend(strs(&["--pids-limit", "512", "--security-opt", "no-new-privileges"]));
-    a.extend(strs(&["--cap-drop", "NET_RAW", "--cap-drop", "MKNOD", "--cap-drop", "SETFCAP"]));
+    a.extend(strs(&[
+        "--pids-limit",
+        "512",
+        "--security-opt",
+        "no-new-privileges",
+    ]));
+    a.extend(strs(&[
+        "--cap-drop",
+        "NET_RAW",
+        "--cap-drop",
+        "MKNOD",
+        "--cap-drop",
+        "SETFCAP",
+    ]));
     a.extend(strs(&["-v", &mount, "-w", "/workspace"]));
     let plain = format!("factory-ci-{}", ctx.run_id);
     match (step.docker, side) {
@@ -397,19 +430,25 @@ fn run_step(ctx: &RunCtx, name: &str, step: &Step, side: Option<&Sidecar>) -> St
     // One shell, stopping at the first failing command.
     let script = format!("set -e\n{}", step.commands.join("\n"));
     a.extend([s(&step.image), s("sh"), s("-c"), script]);
-    let own = step.timeout.map(|t| (Instant::now() + Duration::from_secs(t), t));
+    let own = step
+        .timeout
+        .map(|t| (Instant::now() + Duration::from_secs(t), t));
     let (end, msg) = match own {
         Some((at, t)) if at < ctx.deadline => (at, format!("timed out after {t}s")),
         _ => (ctx.deadline, s("run timed out")),
     };
-    ctx.engine.run_logged(&a, &env, name, &container, ctx.log, end, &msg)
+    ctx.engine
+        .run_logged(&a, &env, name, &container, ctx.log, end, &msg)
 }
 
 fn blocked(p: &Pipeline, states: &BTreeMap<String, State>, name: &str) -> Option<String> {
-    p.steps[name].depends_on.iter().find_map(|d| match states.get(d) {
-        Some(State::Failed(_)) | Some(State::Skipped(_)) => Some(d.clone()),
-        _ => None,
-    })
+    p.steps[name]
+        .depends_on
+        .iter()
+        .find_map(|d| match states.get(d) {
+            Some(State::Failed(_)) | Some(State::Skipped(_)) => Some(d.clone()),
+            _ => None,
+        })
 }
 
 /// Runs the graph: a step starts when its dependencies succeeded, up to `max_parallel` at
