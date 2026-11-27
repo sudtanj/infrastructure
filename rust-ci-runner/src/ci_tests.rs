@@ -1279,3 +1279,12 @@ fn github_server_url_is_ignored() {
     assert!(!w.text("git.calls").contains("evil"));
     assert_eq!(w.hub.api_calls().len(), 1, "the identity call went to the seam, not the env");
 }
+
+#[test]
+fn a_step_writing_over_10_mb_cannot_hide_the_result_lines() {
+    let mut w = W::new(&pipe(&["a"]));
+    w.docker_body = "case \"$1\" in run) head -c 11000000 /dev/zero | tr '\\0' x; echo;; esac".to_string();
+    assert_eq!(w.ok(), 0, "{}", w.stderr());
+    assert_eq!(norm(&w.stdout()), ["[runner] log store answered HTTP 204", "[a] started", "[a] success in Ns", "[runner] pipeline passed"]);
+    assert_public(&w);
+}

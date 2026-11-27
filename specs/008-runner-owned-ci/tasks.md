@@ -69,7 +69,7 @@
 
 Found by the review and security pass of Landing A. Each is one commit naming its ID.
 
-- [ ] R01 `log.rs` `emit`, `ci.rs`: in public mode count only the bytes printed, and never cut the fixed event and fault lines, so a step that writes more than 10 MB cannot hide `pipeline passed`. Test: a step writes over 10 MB and `[runner] pipeline passed` is still printed (FR-018, US1).
+- [X] R01 `log.rs` `emit`, `ci.rs`: in public mode count only the bytes printed, and never cut the fixed event and fault lines, so a step that writes more than 10 MB cannot hide `pipeline passed`. Test: a step writes over 10 MB and `[runner] pipeline passed` is still printed (FR-018, US1).
 - [ ] R02 `engine.rs` `run_capped`: put the child in its own process group and kill the group on timeout, so a grandchild holding the pipe cannot block the join. Test: a stub backgrounds `sleep` holding stdout.
 - [ ] R03 Run `cargo fmt --check` in the selftest and fix the drift it reports (`main.rs` `=>ExitCode` and any other).
 - [ ] R04 `Makefile`: `--locked` on the clippy call of the `lint` target.

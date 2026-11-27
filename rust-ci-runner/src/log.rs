@@ -173,14 +173,17 @@ impl Log {
         }
     }
 
-    /// False once the size limit is hit; the cut-off marker is printed and queued once.
+    /// False once the size limit is hit; the cut-off marker is printed and queued once. In public
+    /// mode the limit applies to step output only: the fixed event lines are short, bounded by the
+    /// pipeline, and never cut, so a long step cannot hide `pipeline passed`.
     fn emit(&self, g: &mut Inner, who: &str, stream: &str, piece: &str, print: bool) -> bool {
-        if g.cut {
+        let fixed = self.public && print;
+        if g.cut && !fixed {
             return false;
         }
         let msg = format!("[{who}] {piece}\n");
         // shortcut: write errors (disk full) are dropped; the run result is still kept.
-        if msg.len() as u64 > g.left {
+        if !fixed && msg.len() as u64 > g.left {
             g.cut = true;
             if !self.public {
                 let _ = writeln!(g.out, "[runner] {CUT_TEXT}");
@@ -191,7 +194,9 @@ impl Log {
             let _ = g.out.flush();
             return false;
         }
-        g.left -= msg.len() as u64;
+        if !fixed {
+            g.left -= msg.len() as u64;
+        }
         if print {
             let shown = if self.public { public_form(who, piece).map(|l| l + "\n") } else { Some(msg) };
             if let Some(m) = shown {
@@ -542,5 +547,26 @@ pub mod tests {
             assert!(l.starts_with("[runner] "), "{l:?}");
         }
         assert!(!out.text().contains("tok-1234") && !err.text().contains("tok-1234"));
+    }
+
+    #[test]
+    fn public_mode_never_cuts_the_event_lines() {
+        // Step output is counted against the limit but not printed; it must not hide the events.
+        let (out, err, rec) = (Buf::default(), Buf::default(), Arc::new(Rec::default()));
+        let log = Log::new(Box::new(out.clone()), Redactor::new([]), 100)
+            .with_sink(rec.clone())
+            .with_err(Box::new(err.clone()))
+            .public_events(true);
+        for _ in 0..10 {
+            log.out("a", "stdout", &"x".repeat(60));
+        }
+        log.event("a", "failed in 3s: exit code 1");
+        log.event("runner", "pipeline failed");
+        log.fault("runner fault");
+        assert_eq!(out.text(), "[a] failed in 3s\n[runner] pipeline failed\n");
+        assert_eq!(err.text(), "[runner] runner fault\n");
+        let shipped = pushed(&rec);
+        assert!(shipped.iter().any(|p| p.2 == "pipeline failed"), "{shipped:?}");
+        assert!(shipped.iter().filter(|p| p.0 == "a" && p.2.len() == 60).count() < 10, "step output is still cut");
     }
 }
