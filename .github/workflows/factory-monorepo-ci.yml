@@ -120,14 +120,30 @@ jobs:
           fi
       - name: run factory-monorepo pipeline
         env:
+          BWS_ACCESS_TOKEN: ${{ secrets.BWS_ACCESS_TOKEN }}
           REF: ${{ inputs.ref }}
           FACTORY_CI_SECRETS: ""
-          # Quiet mode needs a log store. This loopback one is a throwaway: shipping fails silently, and the flush can add up to 60 s.
-          FACTORY_CI_LOG_URL: http://127.0.0.1:9
-          FACTORY_CI_LOG_USER: ci
-          FACTORY_CI_LOG_TOKEN: unused-local-sink
         run: |
           set -u
+          set +x
+          fail() { echo "$1" >&2; exit 1; }
+          # Grafana Loki settings from Bitwarden: step output goes there, never to this public log.
+          json=$(timeout 60 "$RUNNER_TEMP/bin/bws" secret list -o json 2> /dev/null) \
+            || fail "the secret store is unreachable or rejected the access token"
+          unset BWS_ACCESS_TOKEN
+          for key in FACTORY_CI_LOG_URL FACTORY_CI_LOG_USER FACTORY_CI_LOG_TOKEN; do
+            n=$(printf '%s' "$json" | jq -r --arg k "$key" '[.[] | select(.key == $k)] | length') \
+              || fail "the secret store returned an unreadable list"
+            [ "$n" = 1 ] || fail "expected exactly one secret with key $key, found $n"
+            val=$(printf '%s' "$json" | jq -r --arg k "$key" '.[] | select(.key == $k) | .value // ""')
+            # One line of URL or token characters only: a newline or % could smuggle a workflow command.
+            case $val in
+              '' | *[!A-Za-z0-9_.=+/:-]*) fail "the secret $key is empty or has an unexpected shape" ;;
+            esac
+            [ "$key" != FACTORY_CI_LOG_TOKEN ] || echo "::add-mask::$val"
+            export "$key=$val"
+          done
+          unset json val
           log=$RUNNER_TEMP/runner.log
           rc=0
           "$GITHUB_WORKSPACE/rust-ci-runner/target/release/rust-ci-runner" run \
@@ -141,7 +157,7 @@ jobs:
             [ -z "$lines" ] || printf '%s\n' "$lines"
             # A fixed text: the log itself is never echoed.
             if [ "$rc" -ne 0 ] && [ -z "$lines" ]; then
-              echo "runner failed before running any step (see a run with a log store for details)"
+              echo "runner failed before running any step (details in Grafana Loki)"
             fi
           } | tee -a "$GITHUB_STEP_SUMMARY"
           exit "$rc"

@@ -21,7 +21,7 @@
 ### Session 2026-11-27 (review)
 
 - Q: Does the build use `--locked`? → A: No. `rust-ci-runner/Cargo.lock` is not on `main`, so `--locked` fails. Revisit when a lock file is committed.
-- Q: How does quiet mode work with no log store? → A: The runner refuses `--quiet-logs` without one, so a loopback store (`127.0.0.1:9`) is configured and discarded.
+- Q: How does quiet mode work with no log store? → A: The runner refuses `--quiet-logs` without one. First a loopback store was used; on 2026-11-27 the owner set up Grafana Cloud, so the real store from Bitwarden replaces it.
 - Q: Are docker steps allowed? → A: No. The job fails closed when the root `.factory-ci.toml` has `docker = true` (or cannot be read).
 - Q: What do readers see when the runner fails before any step? → A: One fixed line, never log text.
 
@@ -79,7 +79,7 @@ This repo and its logs are public, factory-monorepo is private. A reader of the 
 - **FR-005**: The workflow MUST install `bws` 2.1.0 from the official release, only if its SHA-256 equals the pinned digest and the archive lists exactly `bws`.
 - **FR-006**: The workflow MUST read the Bitwarden secret `FACTORY_CI_TOKEN` (exactly one match), mask it and its base64 form before any other use, and use it only to clone factory-monorepo at `ref` (depth 1). The token MUST NOT remain in `.git/config`, a step output or the runner's environment.
 - **FR-007**: The workflow MUST build `rust-ci-runner` from this repo with `cargo build --release` (no `--locked`: no `Cargo.lock` is committed, so dependencies float until one is), and check this repo out by pinned commit SHA without persisted credentials.
-- **FR-008**: The workflow MUST run `rust-ci-runner run --dir <clone>` with Docker, with the runner's stdout and stderr written to a file that is never uploaded. The runner gets `--quiet-logs` and an empty `FACTORY_CI_SECRETS`. Quiet mode needs a log store, so a throwaway loopback one is configured; shipping to it fails silently.
+- **FR-008**: The workflow MUST run `rust-ci-runner run --dir <clone>` with Docker, with the runner's stdout and stderr written to a file that is never uploaded. The runner gets `--quiet-logs` and an empty `FACTORY_CI_SECRETS`. Quiet mode needs a log store: the three Grafana Cloud Loki keys are read from Bitwarden in the run step, the token is masked, and `BWS_ACCESS_TOKEN` is unset before the runner starts. Step output goes to Loki only.
 - **FR-009**: The workflow MUST print, and write to the job summary, only lines that match a strict allow pattern for the runner's own step results (name, pass or fail, duration). It MUST NOT print step output. The job MUST exit with the runner's exit code. A failure reason after the duration is dropped. If the runner fails and no result line was printed, the workflow prints and summarises one fixed line, never the log.
 - **FR-010**: The workflow MUST NOT post commit statuses.
 - **FR-011**: The root `README.md` MUST say how to run the workflow, that it is a stopgap until the runner image is released, that logs are minimal on purpose, that docker steps are refused, that `FACTORY_CI_BWS_SERVER_URL` should stay unset, and that the `factory-ci` Bitwarden machine account should read only a project holding `FACTORY_CI_TOKEN`.
