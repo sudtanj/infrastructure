@@ -17,4 +17,4 @@ lint:
 	cargo clippy -- -D warnings
 
 build:
-	cargo build --release --target $(TARGET)
+	cargo build --locked --release --target $(TARGET)

@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: build the runner from source
         working-directory: rust-ci-runner
-        run: cargo build --release
+        run: cargo build --locked --release
       - name: run the fixture pipeline
         shell: bash
         run: |
@@ -66,24 +66,15 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      # Temporary: Cargo.lock is not committed yet. This step makes one and uploads it so the next
-      # commit can add it; then the step, the upload and this comment go away.
-      - name: generate Cargo.lock
-        working-directory: rust-ci-runner
-        run: cargo generate-lockfile
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: cargo-lock
-          path: rust-ci-runner/Cargo.lock
       - name: type-check the unit tests
         working-directory: rust-ci-runner
-        run: cargo test --lib --no-run
+        run: cargo test --locked --lib --no-run
       - name: clippy
         working-directory: rust-ci-runner
         run: cargo clippy --locked -- -D warnings
       - name: check the watch list
         working-directory: rust-ci-runner
-        run: cargo run -q -- plan --repos ../.github/factory-ci-repos.toml --check
+        run: cargo run --locked -q -- plan --repos ../.github/factory-ci-repos.toml --check
 
   workflow:
     runs-on: ubuntu-24.04
