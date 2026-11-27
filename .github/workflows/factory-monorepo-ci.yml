@@ -99,11 +99,28 @@ jobs:
         working-directory: rust-ci-runner
         run: |
           rustup show active-toolchain > /dev/null 2>&1 || rustup toolchain install
-          cargo build --release --locked
+          # shortcut: no Cargo.lock committed, deps float; commit one and add --locked when the runner build is pinned.
+          cargo build --release
+      - name: refuse docker steps
+        # A docker-in-docker step would give root on this VM and access to the job's secrets, BWS_ACCESS_TOKEN included.
+        run: |
+          set -u
+          rc=0
+          # The runner reads only the root .factory-ci.toml and refuses a symlink.
+          grep -qE '["'"'"']?docker["'"'"']?[[:space:]]*=[[:space:]]*true' "$RUNNER_TEMP/target/.factory-ci.toml" 2> /dev/null || rc=$?
+          # 0 = a match, 1 = none; anything else is a failed check and stops the job too.
+          if [ "$rc" -ne 1 ]; then
+            echo "docker = true steps are not allowed in this workflow, or the check failed; use the factory CI runner with allow_docker" >&2
+            exit 1
+          fi
       - name: run factory-monorepo pipeline
         env:
           REF: ${{ inputs.ref }}
           FACTORY_CI_SECRETS: ""
+          # Quiet mode needs a log store. This loopback one is a throwaway: shipping fails silently, and the flush can add up to 60 s.
+          FACTORY_CI_LOG_URL: http://127.0.0.1:9
+          FACTORY_CI_LOG_USER: ci
+          FACTORY_CI_LOG_TOKEN: unused-local-sink
         run: |
           set -u
           log=$RUNNER_TEMP/runner.log
@@ -117,5 +134,9 @@ jobs:
           {
             printf 'factory-monorepo %s: %s\n' "$REF" "$result"
             [ -z "$lines" ] || printf '%s\n' "$lines"
+            # A fixed text: the log itself is never echoed.
+            if [ "$rc" -ne 0 ] && [ -z "$lines" ]; then
+              echo "runner failed before running any step (see a run with a log store for details)"
+            fi
           } | tee -a "$GITHUB_STEP_SUMMARY"
           exit "$rc"

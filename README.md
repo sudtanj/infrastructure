@@ -48,6 +48,14 @@ To run it, open Actions, pick `factory-monorepo-ci`, choose `main` as the workfl
 
 The log is public, so it shows only each step's name, result and duration, plus `factory-monorepo <ref>: passed` or `failed`. The runner's full output goes to a file on the hosted runner and is never uploaded. The job exits with the runner's exit code and posts no commit status.
 
+
+Rules for this workflow:
+
+- Logs are minimal on purpose. The repo is public, factory-monorepo is private. If the runner fails before any step, you see one fixed line and nothing else.
+- Docker steps are refused. The job fails if the root `.factory-ci.toml` has `docker = true`, because a docker-in-docker step would give root on the VM and access to the job's secrets. Use the factory CI runner with `allow_docker` for such repos.
+- Keep `FACTORY_CI_BWS_SERVER_URL` unset unless you run your own Bitwarden server.
+- Give the Bitwarden machine account behind `factory-ci` read access only to a project that holds `FACTORY_CI_TOKEN`. The workflow lists every secret that account can read.
+
 Owner exception, 2026-11-27: building the runner with cargo in a plain workflow breaks the rule that compile, test and lint run only through the CI runner. The runner cannot build itself before it exists, so only its own build is exempt. factory-monorepo's steps still run through `rust-ci-runner`. Spec: `specs/005-plain-actions-ci/`.
 
 ## License

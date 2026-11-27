@@ -43,8 +43,9 @@ Steps, in order:
 2. Validate `REF` (from `env:`): `^[A-Za-z0-9._/-]+$`, no leading `-`, no `..`. Fails before any secret is read.
 3. Install `bws`: `curl -fsSL --proto '=https' --tlsv1.2 --max-time 120`; SHA-256 of the zip must equal `f59ee150e42b82128d437087e9bac920053c6bfddcb960d20ce9386e5ac9bba6` (the digest of the zip, per the comment in `.github/scripts/factory-ci-secrets.sh` on `origin/003-infrastructure-home`); `unzip -Z1` must list exactly `bws`; install to `$RUNNER_TEMP/bin/bws`, called by full path. `FACTORY_CI_BWS_SERVER_URL`, if set, must start with `https://`.
 4. Fetch and clone in one step, the only step that sees `BWS_ACCESS_TOKEN`: `bws secret list -o json | jq` for key `FACTORY_CI_TOKEN`, exactly one match; check the token shape `^[A-Za-z0-9_.-]{8,}$` (also blocks workflow-command injection); `::add-mask::` for the raw value and its base64 header form before any other use; `git clone --depth 1 --branch "$REF"` with the header passed through `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_0`/`GIT_CONFIG_VALUE_0` in that command's environment only, so it is in neither argv nor `.git/config`. Git's own stderr is discarded; the step prints its own message.
-5. `cargo build --release --locked --manifest-path rust-ci-runner/Cargo.toml`.
-6. Run `target/release/rust-ci-runner run --dir "$RUNNER_TEMP/target" --quiet-logs` with `FACTORY_CI_SECRETS=` (no step secret is readable), stdout and stderr to `$RUNNER_TEMP/runner.log`. This step has no token in its environment. Filter the file, print, append to `$GITHUB_STEP_SUMMARY`, exit with the runner's code.
+5. Build in `rust-ci-runner/` (so rustup reads its `rust-toolchain.toml`): `cargo build --release`, without `--locked` because no `Cargo.lock` is committed (comment in the workflow says when to add it).
+5a. Refuse docker steps (FR-012): fail unless `grep -qE` finds no `docker = true` (quotes and spacing tolerated) in the clone's root `.factory-ci.toml`, the only file the runner reads (`pipeline.rs`, symlink refused). A grep error or missing file also fails the job. Nothing is printed except a fixed message.
+6. Run `rust-ci-runner run --dir "$RUNNER_TEMP/target" --quiet-logs` with `FACTORY_CI_SECRETS=` (no step secret is readable) and a throwaway loopback log store (`FACTORY_CI_LOG_URL=http://127.0.0.1:9`, user and token placeholders): `job.rs` `log_config` refuses quiet mode without one, `ship.rs` accepts plain http to 127.0.0.1, shipping fails silently and the flush can add up to 60 s. Stdout and stderr go to `$RUNNER_TEMP/runner.log`. This step has no token in its environment. Filter the file, print, append to `$GITHUB_STEP_SUMMARY`, exit with the runner's code.
 
 Output filter. Read from `log.rs`, `engine.rs` and `job.rs`: every printed runner line is `[<who>] <text>`; with `--quiet-logs`, step and clone output is not printed at all, only `event` lines, whose text is fixed: `started`, `success in Ns`, `failed in Ns: <reason>`, `skipped: <why>`, and `pipeline passed` or `pipeline failed` for `runner`. Step names match `[A-Za-z0-9_-]{1,64}`. Filter:
 
@@ -52,7 +53,7 @@ Output filter. Read from `log.rs`, `engine.rs` and `job.rs`: every printed runne
 grep -E '^\[[A-Za-z0-9_-]{1,64}\] (started|success in [0-9]+s|failed in [0-9]+s(: .*)?|skipped(: .*)?|pipeline (passed|failed))$' | sed -E 's/^(\[[^]]+\] (failed in [0-9]+s|skipped)):.*/\1/'
 ```
 
-If the filter finds no `[runner] pipeline passed|failed` line, the summary line is `factory-monorepo <ref>: passed` or `failed` from the exit code alone.
+The summary line `factory-monorepo <ref>: passed` or `failed` comes from the exit code. If the exit code is non-zero and the filter printed no line, the fixed line `runner failed before running any step (see a run with a log store for details)` is added to the output and the summary; the log is never echoed.
 
 ## Project Structure
 
