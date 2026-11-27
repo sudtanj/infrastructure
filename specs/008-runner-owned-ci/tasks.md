@@ -79,6 +79,11 @@ Found by the review and security pass of Landing A. Each is one commit naming it
 - [X] R08 `ci.rs`: remove `ci-<run>-<rand>/` under `--work` after `cleanup_run`, as root through the container like `job.rs` `remove_ws`. Test: the directory is gone after the run.
 - [X] R09 `factory-ci-selftest.yml`: the guard also fails on `secrets:` (with `inherit`), `secrets[`, `toJSON(secrets`, `workflow_run`, `repository_dispatch`; `persist-credentials: false` on every checkout.
 - [X] R10 Document in `rust-ci-runner/README.md` and `plan.md` that `remove_var` leaves the process environment file under proc readable by the same uid (the runner container stays uid-isolated) and that the Loki host is not allowlisted (Bitwarden write access is a trust root).
+- [X] R11 `tests/common/mod.rs`: the stub `docker` finds its `STUB_*` settings without inherited environment (it reads its parent's), so `Engine::command` keeps `env_clear` and the production allowlist stays as it is.
+- [ ] R12 `tests/no_vendor.rs`: accept `bws` in `store.rs`, `ci.rs` and `engine.rs`; every other vendor name stays refused.
+- [ ] R13 `tests/executor.rs`: make it compile and pass, or delete it if it tests something that is gone.
+- [ ] R14 Selftest and `rust-ci-runner/.factory-ci.toml` run the integration tests (`cargo test --locked --tests`) so a broken one turns the run red.
+- [ ] R15 `rust-ci-runner/README.md`: the runner container runs as the VM user, not "its own uid".
 
 ## Dependencies
 

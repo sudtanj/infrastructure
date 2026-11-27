@@ -24,6 +24,16 @@ pub const JOB_TOKEN: &str = "tok-JOB-CRED-1";
 /// into the mounted workspace, or fails when `STUB_CLONE_FAIL` is set. Other `run` calls print
 /// `STUB_OUT` on stdout and `STUB_ERR` on stderr.
 const STUB: &str = r#"#!/bin/sh
+# The runner clears the environment of its docker child, so the settings come from the runner's own
+# (the parent process), not from ours.
+get() { tr '\0' '\n' < "/proc/$PPID/environ" | sed -n "s/^$1=//p" | head -n 1; }
+STUB_DIR=$(get STUB_DIR)
+STUB_OUT=$(get STUB_OUT)
+STUB_ERR=$(get STUB_ERR)
+STUB_FAIL=$(get STUB_FAIL)
+STUB_FAIL_CODE=$(get STUB_FAIL_CODE)
+STUB_CLONE_FAIL=$(get STUB_CLONE_FAIL)
+STUB_FIXTURE=$(get STUB_FIXTURE)
 d="$STUB_DIR"
 printf '%s\n' "$@" >> "$d/calls"
 echo -- >> "$d/calls"
