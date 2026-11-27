@@ -53,7 +53,8 @@ jobs:
         run: |
           set -eu
           DOCKER_CONFIG=$(mktemp -d); export DOCKER_CONFIG; trap 'rm -rf "$DOCKER_CONFIG"' EXIT
-          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null 2>&1 \
+            || { echo "ghcr.io login failed" >&2; exit 1; }
           mkdir -p "$RUNNER_TEMP/ci"
           docker run -q --rm --init --name "factory-ci-runner-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
             --user "$(id -u):$(id -g)" --group-add "$(stat -c %g /var/run/docker.sock)" \
