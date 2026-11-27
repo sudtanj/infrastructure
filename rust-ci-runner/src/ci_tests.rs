@@ -312,7 +312,7 @@ impl W {
         let d = self.root.display();
         let rec = |tool: &str| {
             format!(
-                "d='{d}'\nprintf '%s\\n' \"$@\" >> \"$d/{tool}.calls\"; echo ===== >> \"$d/{tool}.calls\"\n/usr/bin/env >> \"$d/{tool}.envs\"; echo ===== >> \"$d/{tool}.envs\"\n"
+                "d='{d}'\nprintf '%s\\n' \"$@\" '=====' >> \"$d/{tool}.calls\"\ne=$(/usr/bin/env); printf '%s\\n=====\\n' \"$e\" >> \"$d/{tool}.envs\"\n"
             )
         };
         let list: Vec<_> = self
