@@ -100,6 +100,12 @@ and stops agents from building what nobody specified.
 - Work happens on a branch and merges to `main` through a pull request.
 - A pull request merges only when its statuses are green and it links its feature folder under
   `specs/`.
+- Every change that alters what the repository holds, how it is set up or used, or its rules
+  MUST update the root `README.md` (and `rust-ci-runner/README.md` when the runner changes) in
+  the same pull request, and the GitHub repository description when the pull request merges,
+  so both match `main`. The last task in every feature's `tasks.md` does this, or states with
+  a reason that neither needs a change. Reviewers reject a pull request that leaves a README
+  stale.
 
 ## Governance
 
@@ -112,4 +118,4 @@ and stops agents from building what nobody specified.
 - Reviewers check pull requests against these principles; violations need either a fix or a
   justified exception recorded in the feature's `plan.md`.
 
-**Version**: 1.0.2 | **Ratified**: 2026-11-27 | **Last Amended**: 2026-11-27
+**Version**: 1.1.0 | **Ratified**: 2026-11-27 | **Last Amended**: 2026-11-27

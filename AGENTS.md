@@ -12,6 +12,7 @@ Every change in this repo goes through Spec Kit, for every agent and sub-agent i
 - Implement with `/speckit-implement`, and only tasks listed in `tasks.md`. Anything not listed goes back through spec, plan and tasks first.
 - A sub-agent brief must name the feature folder and the task IDs it covers. An agent that gets a brief without them stops and asks for them.
 - Every pull request links its feature folder. Reviewers reject one without it.
+- Every change that alters what the repo holds, how it is set up or used, or its rules updates the root `README.md` (and `rust-ci-runner/README.md` when the runner changes) in the same pull request and the GitHub repository description when it merges. The last task in `tasks.md` does this or says why neither needs a change.
 - Only the constitution, `CLAUDE.md` and `AGENTS.md` are exempt; they change through the constitution's Governance procedure.
 
 
