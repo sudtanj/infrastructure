@@ -140,6 +140,12 @@ QA writes tests first (T007 to T010); they fail until the impl tasks land. Each 
 | FR-036 | shell rows: short, non-hex, upper-case, 63, 65 and valid keys through plan, job, status and the blob functions (T040) |
 | FR-037 | hardening row: a fake runner records its environment per call; phase A has none of the three names, phase C has all (T041) |
 | FR-038 | hardening rows: no `bws` call for a row without names or id; one call with names; the store message when the token fails; docker rows follow the docker token (T042) |
+| FR-041 | docs-test row: the README does not say "32 characters" (T047) |
+| FR-042 | mutation rows `write-all` and `read-all` for `permissions` (T048) |
+| FR-043 | mutation row that deletes the `_DOCKER` guard (T049) |
+| FR-044 | mutation rows for one flow-style and one quoted `uses:` and `runs-on:` (T050) |
+| FR-045 | mutation rows: the mirror workflow copied without its guard; the release workflow without its `verify` check (T051) |
+| FR-046 | hardening rows: equal keys fail, different pass, docker key unset passes; README sentence (T052) |
 | SC-003 to SC-006 | quickstart Part 3 (T032 to T034) |
 
 ## Failure modes
@@ -256,6 +262,8 @@ Assume 003 shipped and broke. Five likeliest causes.
 - R-9. YAML escape sequences in trigger keys (for example a quoted key with an escape) pass the line-based lint. Covered only by the owner-only merge rule (D20): nobody else can merge a workflow change.
 - R-10. The `main` ruleset has 0 approvals, so the selftest is the only gate and the owner can merge their own red-free change without a second reader. Accepted for a one-person repo (D20).
 - R-11. The plan predicate of D19 (`secrets` or `repo_id`) is derived from the watch entry, not from the pipeline files; if a third route to a secret appears, the plan skips a store check it should run. The job still checks the store itself.
+- R-12. Round 3: flow-style and quoted `uses:` and `runs-on:` keys are read by the line regex (FR-044), but a full YAML parse stays deferred; anchors, multi-line flow maps and escape sequences remain a gap, covered by the owner-only merge rule (D20).
+- R-13. The plan's store-check predicate (D19) reads only the row's `secrets` and `repo_id`. A pipeline that names owner-scoped secrets on a row with empty `repo_id` skips the early check. The job still checks the store itself and refuses, so the cost is one `error` status instead of an early tick failure. No code change.
 
 **Deferred (no task in 003)**:
 - Replace the third-party `alpine/git` clone image with one built in this repo (security M1). Mitigation now: the clone runs with a mirrored image pinned by digest; T031 records how that digest was checked. The token it receives is described under the token split below.
@@ -269,7 +277,7 @@ Assume 003 shipped and broke. Five likeliest causes.
 - The concurrency slot of the tick is shared with a non-main dispatch (security L6): a dispatch from another branch can occupy the slot until its `plan` job fails the Environment rule.
 - `stop_and_remove` is not strictly bounded at 30 s (reviewer m3): the `shortcut:` comment in `engine.rs` records the limit.
 - YAML escape sequences in triggers: see R-9.
-- A test that fetched file content never reaches the summary `problems` text (security L1): add only if cheap during T008, otherwise deferred.
+- A test that fetched file content never reaches the summary `problems` text (security L7): add only if cheap during T008, otherwise deferred.
 
 ## DevOps assessment
 
@@ -296,7 +304,7 @@ The lead's security review (round 1) is folded in.
 - **Private repo name**: visible in the public watch list (002 FR-058, accepted). Committed docs never hold a private run URL, a Grafana hostname or a value (docs test (g)).
 - **Constitution**: Principles II and III hold. T026 clarifies the wording only.
 - **Round 2**: blob keys must be 64 lower-case hex (FR-036); phase A runs without the log credentials (FR-037); the lint bans `secrets: inherit` and `secrets[` in the selftest and pins the tick Environments per job (FR-035); the heartbeat pings `/fail` on a red tick (FR-034).
-- **Deferred**: see Open risks (M1, M3, M6, L3, L4, L6, audit, attestation, YAML lint and escapes, L1, m3).
+- **Deferred**: see Open risks (M1, M3, M6, L3, L4, L6, audit, attestation, YAML lint and escapes, L7, m3).
 
 ## Complexity Tracking
 

@@ -106,7 +106,7 @@ Decisions for `spec.md`. Each has the choice, why, and what was rejected. Live r
 
 ## D18. Deferred (no task in 003)
 
-Recorded in `plan.md` Open risks (round 2 adds M3 wording, L3, L4, L6, m3 and YAML escapes there): replace the third-party `alpine/git` clone image with one built in-repo; container escape reads the runner environment (narrow tokens and `allow_docker` off now); `cargo audit` or `cargo deny`; build provenance attestation; a YAML-parsing lint; splitting the clone token from the status token; a test that fetched file content never reaches the summary `problems` text (security L1), if cheap.
+Recorded in `plan.md` Open risks (round 2 adds M3 wording, L3, L4, L6, m3 and YAML escapes there): replace the third-party `alpine/git` clone image with one built in-repo; container escape reads the runner environment (narrow tokens and `allow_docker` off now); `cargo audit` or `cargo deny`; build provenance attestation; a YAML-parsing lint; splitting the clone token from the status token; a test that fetched file content never reaches the summary `problems` text (security L7), if cheap.
 
 ## D19. The plan's store check runs only when a row can use a secret (review round 2)
 

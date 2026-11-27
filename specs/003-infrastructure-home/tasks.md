@@ -96,6 +96,20 @@ Phase 1 is the gate: nothing else can be checked until the crate compiles. Phase
 
 **Checkpoint**: every selftest job is green with the round 2 changes, then T029 and T030.
 
+## Phase 7c: Review round 3 (lint and guard gaps; decisions R2-12 to R2-18 in the spec)
+
+**Goal**: close the reviewer and security findings of round 3, one task each, in this order. Test rows first inside each task and red before the change. Shell tests run on the VM with the stand-in `openssl` on `PATH` for the test run only.
+
+- [ ] T047 [US6] README blob-key wording (FR-041; R2-12): write a docs-test row in `.github/scripts/test-factory-ci-docs.sh` that fails when the README says "32 characters" (build the pattern so the test does not match itself); then change `README.md` (Setup secrets step, secrets table, troubleshooting table) to say 64 lower-case hex characters from `openssl rand -hex 32`. Files: `README.md`, `.github/scripts/test-factory-ci-docs.sh`. Proof: `bash .github/scripts/test-factory-ci-docs.sh`.
+- [ ] T048 [US1] Lint `permissions` shape (FR-042; R2-13): add mutation rows for `permissions: write-all` and `permissions: read-all` (workflow level and job level) to `--self-test`, then make the rule accept only `{}` or a block mapping of `scope: read|write|none`. Files: `.github/scripts/factory-ci-lint-workflow.sh`. Proof: `--self-test` prints `self-test ok`.
+- [ ] T049 [US1] Lint both blob-key guards (FR-043; R2-14): add a mutation row that deletes the `_DOCKER` guard line in the plan job, then check each variable name has a 64-hex guard. Files: `.github/scripts/factory-ci-lint-workflow.sh`. Proof: `--self-test`.
+- [ ] T050 [US1] Lint flow-style and quoted keys (FR-044; R2-15): add one flow-style and one quoted mutation row for `uses:` and one for `runs-on:`, then broaden the line regexes. Files: `.github/scripts/factory-ci-lint-workflow.sh`. Proof: `--self-test`.
+- [ ] T051 [US1] Lint release guard on every file (FR-045; R2-16): add a mutation row (the mirror workflow copied under another name without its guard) and one for the release workflow without its `is-ancestor` check, then check every scanned workflow with `environment: factory-ci-release`. Files: `.github/scripts/factory-ci-lint-workflow.sh`. Proof: `--self-test`.
+- [ ] T052 [US3] Equal blob keys (FR-046; R2-17): add rows to `.github/scripts/test-factory-ci-hardening.sh` (equal keys fail with both variable names and no value in the output, different keys pass, docker key unset passes), then add the check to `.github/scripts/factory-ci-plan.sh` and the plan guard step of `.github/workflows/factory-ci-tick.yml`, and one README sentence. Files: those three plus `README.md`. Proof: `bash .github/scripts/test-factory-ci-hardening.sh`.
+- [ ] T053 [US6] Label and risk records (R2-18): rename the deferred "security L1" to "security L7" in `plan.md` and `research.md`; record R-12 and R-13 in `plan.md`; FR-034 maps to T036 and T037 (the 13 heartbeat rows of aa6a307) and FR-035 to T039 (the lint mutation rows), both already in the coverage table. Files: `specs/003-infrastructure-home/*.md`. Proof: `grep -n "L7" specs/003-infrastructure-home/plan.md`.
+
+**Checkpoint**: every selftest job green, then T029 and T030.
+
 ## Phase 8: Close the pull request
 
 - [X] T028 Remove the temporary bootstrap workflow (FR-008, FR-009): delete `.github/workflows/factory-ci-bootstrap.yml` and its entry in the `no-cargo` allowlist of the lint, after the last fmt patch is applied. Needs T005 and every impl task above. After this, a review-time Rust edit that fails `cargo fmt --check` is fixed by applying the diff the failing step prints, by hand. Proof: green selftest with no bootstrap workflow; `grep -rn bootstrap .github` finds nothing but comments about the exception.
@@ -156,6 +170,12 @@ Phase 1 is the gate: nothing else can be checked until the crate compiles. Phase
 | FR-038 | T042 |
 | FR-039 | T045 |
 | FR-040 | T046 |
+| FR-041 | T047 |
+| FR-042 | T048 |
+| FR-043 | T049 |
+| FR-044 | T050 |
+| FR-045 | T051 |
+| FR-046 | T052 |
 | SC-001 | T005, T006, T028 |
 | SC-002 | T009, T015 |
 | SC-003 to SC-005 | T032, T033, T034 |
@@ -170,10 +190,13 @@ Phase 1 is the gate: nothing else can be checked until the crate compiles. Phase
 - T020 needs T010; T021 needs T007 to T009; T022 needs T020, T021 and T016; T023 needs T024.
 - T024 needs T014 and T019; T025 needs T024.
 - T026 and T027 need nothing.
+- T047 to T053 run in ID order (shared lint script and README); they need T039 to T042.
 - T037 needs T036; T038 needs T037; T039 needs nothing; T040 needs T039; T041 needs T040; T042 needs T041; T043 and T044 need nothing. T029 and T030 follow T028 and T036 to T044.
 - T031 needs the merge and the owner's Setup; T032 needs T031 (monorepo checks also need factory-monorepo PR 2); T033 and T034 need T032; T035 needs T032 to T034.
 
 Parallel groups: {T007, T008, T009}, {T015, T017, T018, T026, T027}, {T020, T021}, {T033, T034}, {T039, T043} (the shell chain T037 to T038 and T040 to T042 runs in ID order because of shared files).
+
+Round 3 shared files: README T047, T052; docs test T047; lint script T048 to T051; hardening test, plan script and tick workflow T052.
 
 Shared files in order: selftest workflow T001, T004, T006, T016, T022; release workflow T004, T006, T016, T019, T023; tick workflow T014, T018; lint script T015, T028; READMEs T024, T025; `Cargo.toml` T001; README T037, T038; docs test T037, T038; hardening test T036, T040, T041, T042; plan script T040, T041, T042; tick workflow T036, T040; lint script T039.
 
@@ -237,6 +260,13 @@ Each brief covers one feature folder, `specs/003-infrastructure-home/`, and the 
 **Acceptance**: each check has a recorded pass or fail with a one-line cause and no private identifier.
 **Constraints**: start only after the owner confirms Setup; monorepo checks wait for factory-monorepo PR 2. Do not tag a release or set a variable yourself; those are the owner's steps. A failed check opens a new task and reruns specify, plan, tasks and analyze as needed.
 
+### S10. Review round 3 (T047 to T053)
+
+**Goal**: the round 3 findings, in task order.
+**Files**: `README.md`, `.github/scripts/factory-ci-lint-workflow.sh`, `factory-ci-plan.sh`, `test-factory-ci-docs.sh`, `test-factory-ci-hardening.sh`, `.github/workflows/factory-ci-tick.yml`, spec folder.
+**Acceptance**: see T047 to T053; lint passes on the repo, also with `FACTORY_CI_LINT_STRICT=1`.
+**Constraints**: C1; test rows first; sentinel values only; CI budget 4 selftest runs.
+
 ### S9. Review round 2 (T036 to T044)
 
 **Goal**: the PR review findings, in task order. T036 and T044 are done; T037 to T043 are open.
@@ -245,6 +275,7 @@ Each brief covers one feature folder, `specs/003-infrastructure-home/`, and the 
 - T037: README step 11 says a red tick or failed plan pings `/fail` and alerts at once, and a late check means ticks stopped; the docs test asserts `/fail` and fails on a README without it.
 - T038: README has the `main` ruleset with 0 approvals, the selftest jobs as required checks, no force push, no deletion, an empty bypass list, the tag ruleset and the owner-only rationale; no `CODEOWNERS` in `README.md` or `.github/`; docs-test rows changed to match.
 - T039: the six lint changes of FR-035 each have a mutation row that fails for its named rule; the lint passes on the repo.
+- T047 to T053: each lint rule has a mutation row that fails for its named rule; `--self-test` prints `self-test ok`; the three shell tests pass with 0 failed.
 - T040: every guard on a blob key requires `^[0-9a-f]{64}$`; new shell rows cover short, non-hex, upper-case and valid keys.
 - T041: phase A runs without the three `FACTORY_CI_LOG_*` names and phase C with them (the check of D23 shows the plan binary ships logs only in phase C, so the skip clause does not apply).
 - T042: `fci_list` runs only when a row has `secrets_ok` and (`secrets` or `repo_id`); a Bitwarden outage with no such row passes; rows for each case.
