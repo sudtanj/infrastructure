@@ -21,10 +21,9 @@ Only `factory-ci-selftest` and `rust-ci-runner-release` run cargo directly. This
 
 In **Settings** for this repo:
 
-1. Create a `main` ruleset. Require a pull request with one approving review, and require the jobs of `factory-ci-selftest` as the only required status checks. Block force pushes. Leave bypass empty.
-2. Add a CODEOWNERS file at `.github/CODEOWNERS` that names your account as owner of `.github/`, `rust-ci-runner/` and `.factory-ci.toml`. In the `main` ruleset, require review from code owners.
-3. Create a tag ruleset that limits who can create `rust-ci-runner-v*` tags to you.
-4. Under **Actions > General**, require approval for all outside collaborators, set the default workflow token to read-only, and set run retention to 7 to 14 days.
+1. Create a `main` ruleset. Require a pull request with 0 approvals, and require the jobs of `factory-ci-selftest` as the only required status checks. Block force pushes and deletion. Leave bypass empty. Do not add a code-owner review rule: GitHub never lets an author approve their own pull request, and only the owner has write access, so only the owner can merge. The selftest is the gate.
+2. Create a tag ruleset that limits who can create `rust-ci-runner-v*` tags to you.
+3. Under **Actions > General**, require approval for all outside collaborators, set the default workflow token to read-only, and set run retention to 7 to 14 days.
 
 ### 2. Environments
 
@@ -134,7 +133,7 @@ The request returns 204. Turn on failure notifications. Set a reminder for day 7
 
 Create a healthchecks.io check with a period of 5 minutes and a grace of 60 minutes. Store its ping URL as `FACTORY_CI_HEARTBEAT_URL` in `factory-ci-plan`. Without it, nothing alerts you when ticks stop.
 
-The `verdict` job pings this URL after every tick on `main`, including a red one. The check goes late when ticks stop. It does not go late when a tick fails, so watch the `factory-ci-tick` runs for red.
+The `verdict` job pings this URL after every tick on `main`. A red tick or a failed plan pings the heartbeat `/fail` URL and alerts at once. A late check means ticks stopped.
 
 ### 12. Run the first tick by hand
 

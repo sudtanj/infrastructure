@@ -137,6 +137,7 @@ need() {
   local r=$1 label=$2; shift 2
   line_with "$r/README.md" "$@" || echo "e: README.md: no line for $label ($*)"
 }
+owners=CODEOW""NERS  # built from parts so this file never holds the word
 ck_e() {
   local r=$1 a b
   need "$r" "bootstrap exception (FR-020)" cargo selftest release
@@ -146,7 +147,10 @@ ck_e() {
   need "$r" "token permissions (FR-016)" Contents "Commit statuses" Metadata
   need "$r" "release Environment (FR-033)" factory-ci-release "rust-ci-runner-v*"
   need "$r" "main ruleset (FR-022)" ruleset main
-  need "$r" "CODEOWNERS (FR-022)" CODEOWNERS .github/
+  need "$r" "0 approvals (FR-022)" ruleset "0 approvals"
+  need "$r" "owner-only rationale (FR-022)" "own pull request" "only the owner"
+  need "$r" "heartbeat /fail (FR-034)" "/fail" heartbeat
+  ! grep -qF "$owners" "$r/README.md" 2> /dev/null || echo "e: README.md: still mentions $owners (no code-owner file)"
   need "$r" "tag ruleset (FR-022)" ruleset "rust-ci-runner-v*"
   need "$r" "blob keys (FR-022)" "openssl rand -hex 32"
   need "$r" "scheduler (FR-022)" cron-job.org POST
@@ -288,13 +292,14 @@ mk_fixture; eq "(d) GITHUB_TOKEN needs no README row" "" "$(ck_d "$F")"; rm -rf 
 mk_readme_e() {
   cat > "$F/README.md" <<'EOF'
 ## Setup
-Rulesets: a `main` ruleset, CODEOWNERS on `.github/`; a tag ruleset for `rust-ci-runner-v*`.
+Rulesets: a `main` ruleset with 0 approvals; a tag ruleset for `rust-ci-runner-v*`.
+GitHub never lets an author approve their own pull request, so only the owner can merge.
 Only the selftest and release workflows run cargo (bootstrap exception).
 `FACTORY_CI_TOKEN` covers factory-monorepo and infrastructure: Contents read, Commit statuses read and write, Metadata read.
 Blob keys: `openssl rand -hex 32`. Environment `factory-ci-release` takes `rust-ci-runner-v*`.
 The GHCR package is public: `gh api /users/sudtanj/packages/container/rust-ci-runner --jq .visibility`.
 Scheduler at cron-job.org: POST with Accept: application/vnd.github+json, Authorization: Bearer TOKEN, X-GitHub-Api-Version: 2022-11-28, body {"ref":"main"}.
-Heartbeat at healthchecks.io, grace 60 minutes.
+Heartbeat at healthchecks.io, grace 60 minutes. A red tick pings /fail.
 A repo without .factory-ci.toml gets nothing.
 Check with gh secret list.
 Rollback: a revert does not restore Environment secrets, the public package, Bitwarden contents, the scheduler token or the Grafana policy.
@@ -304,6 +309,10 @@ mk_fixture; mk_readme_e; eq "(e) a complete README passes" "" "$(ck_e "$F")"
 sed -i '/healthchecks.io/d' "$F/README.md"; has "(e) a missing heartbeat row fails" "$(ck_e "$F")" "heartbeat grace"
 mk_readme_e; sed -i 's/, X-GitHub-Api-Version: 2022-11-28//' "$F/README.md"; has "(e) a missing scheduler header fails" "$(ck_e "$F")" "scheduler header version"
 mk_readme_e; echo "The log credentials are not read from GitHub." >> "$F/README.md"; has "(e) the old sentence fails" "$(ck_e "$F")" "not read from GitHub"
+mk_readme_e; sed -i "s/ with 0 approvals//" "$F/README.md"; has "(e) a missing 0 approvals fails" "$(ck_e "$F")" "0 approvals"
+mk_readme_e; sed -i "/own pull request/d" "$F/README.md"; has "(e) a missing owner-only rationale fails" "$(ck_e "$F")" "owner-only rationale"
+mk_readme_e; sed -i "s| A red tick pings /fail.||" "$F/README.md"; has "(e) a README without /fail fails" "$(ck_e "$F")" "heartbeat /fail"
+mk_readme_e; echo "Add a $owners file." >> "$F/README.md"; has "(e) a code-owner file in the README fails" "$(ck_e "$F")" "still mentions"
 rm -rf "$F"
 # (f)
 mk_fixture; eq "(f) a clean runner README passes" "" "$(ck_f "$F")"; printf '## %s\n' "$setup" >> "$F/rust-ci-runner/README.md"; has "(f) the old heading fails" "$(ck_f "$F")" "still says"; rm -rf "$F"
