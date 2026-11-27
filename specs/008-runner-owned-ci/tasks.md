@@ -85,6 +85,12 @@ Found by the review and security pass of Landing A. Each is one commit naming it
 - [X] R14 Selftest and `rust-ci-runner/.factory-ci.toml` run the integration tests (`cargo test --locked --tests`) so a broken one turns the run red.
 - [X] R15 `rust-ci-runner/README.md`: the runner container runs as the VM user, not "its own uid".
 
+## Review fixes (Landing B)
+
+- [X] R16 `factory-monorepo-ci.yml`: `DOCKER_CONFIG=$(mktemp -d); export DOCKER_CONFIG` so `set -e` sees an `mktemp` failure; the runner container name adds `$GITHUB_RUN_ATTEMPT` so two attempts of one run cannot collide.
+- [X] R17 README: the workflow inputs and `FACTORY_CI_BWS_SERVER_URL` show on the public run page and step header, so they must never hold private values; the by-hand tick is named as the only other workflow holding `BWS_ACCESS_TOKEN`.
+- [ ] R18 [follow-up, new spec] Retire `factory-ci-tick.yml` and its `bws` install, or move it onto the `ci` image, so one workflow holds `BWS_ACCESS_TOKEN`. Until then the tick uses the same `factory-ci` Environment and its `main`-only branch rule.
+
 ## Dependencies
 
 - T001 done. T002 then T003 (same files). T005 then T006 (same file). T004, T007 independent of each other and of T002. T012 to T015 independent of Phases 2 and 3.

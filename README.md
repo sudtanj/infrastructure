@@ -44,7 +44,7 @@ The Grafana Loki credentials (`FACTORY_CI_LOG_URL`, `FACTORY_CI_LOG_USER`, `FACT
 
 `.github/workflows/factory-monorepo-ci.yml` runs the `.factory-ci.toml` pipeline of one repo with the released `rust-ci-runner` image. The workflow checks out this repo and starts one container, `docker run` of `RUNNER_IMAGE` (the env line at the top, pinned by tag and digest) with the host docker socket and a work directory mounted. The runner's `ci` command does the rest: it checks the repo and branch against `.github/factory-ci-repos.toml`, reads four settings from Bitwarden, probes Grafana Loki, checks the repo id against the GitHub API, fetches the branch, refuses docker steps and runs the pipeline. After each release, set the `RUNNER_IMAGE` line to the new digest in a reviewed commit.
 
-To run it, open Actions, pick `factory-monorepo-ci`, choose `main` as the workflow branch and fill in the inputs. Runs started from any other branch do nothing.
+To run it, open Actions, pick `factory-monorepo-ci`, choose `main` as the workflow branch and fill in the inputs. Runs started from any other branch do nothing. The inputs, and `FACTORY_CI_BWS_SERVER_URL` when set, show on the public run page and in the step header, so never put anything private in them. The by-hand tick (`factory-ci-tick.yml`) is the only other workflow that holds `BWS_ACCESS_TOKEN`; it is not in use and is due to be retired.
 
 | Input | Default | Meaning |
 | --- | --- | --- |

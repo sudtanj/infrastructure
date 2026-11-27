@@ -52,10 +52,10 @@ jobs:
           PROJECT: ${{ inputs.project }}
         run: |
           set -eu
-          export DOCKER_CONFIG=$(mktemp -d); trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+          DOCKER_CONFIG=$(mktemp -d); export DOCKER_CONFIG; trap 'rm -rf "$DOCKER_CONFIG"' EXIT
           printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null
           mkdir -p "$RUNNER_TEMP/ci"
-          docker run -q --rm --init --name "factory-ci-runner-$GITHUB_RUN_ID" \
+          docker run -q --rm --init --name "factory-ci-runner-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
             --user "$(id -u):$(id -g)" --group-add "$(stat -c %g /var/run/docker.sock)" \
             --cap-drop ALL --security-opt no-new-privileges --read-only \
             --tmpfs /tmp:rw,size=64m -e HOME=/tmp \
