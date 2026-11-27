@@ -7,6 +7,7 @@ pub mod plan;
 pub mod projects;
 pub mod redact;
 pub mod ship;
+pub mod store;
 pub mod text;
 pub mod util;
 pub mod walk;
@@ -40,3 +41,5 @@ mod walk_tests;
 mod watch_tests;
 #[cfg(test)]
 mod job_tests;
+#[cfg(test)]
+mod store_tests;

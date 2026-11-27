@@ -65,7 +65,7 @@ fn pump(r: impl Read, mut f: impl FnMut(&str)) {
     }
 }
 
-fn read_capped(r: impl Read, cap: u64) -> String {
+pub(crate) fn read_capped(r: impl Read, cap: u64) -> String {
     let mut out = String::new();
     let _ = r.take(cap).read_to_string(&mut out);
     out

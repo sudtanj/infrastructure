@@ -136,7 +136,6 @@ fn engine_child_env_is_the_allowlist() {
 // ---- parse_list (T006): FR-010, I8 ----
 
 #[test]
-#[ignore = "test-first"]
 fn one_secret_per_key_is_returned() {
     let mut rows = GOOD.to_vec();
     rows.push(("SOMETHING_ELSE", "ignored-value"));
@@ -154,7 +153,6 @@ fn one_secret_per_key_is_returned() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn zero_or_two_matches_name_key_and_count_only() {
     let without = |k: &str| GOOD.iter().filter(|(n, _)| *n != k).cloned().collect::<Vec<_>>();
     for k in KEYS {
@@ -173,7 +171,6 @@ fn zero_or_two_matches_name_key_and_count_only() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn value_shapes_are_refused() {
     for k in KEYS {
         for bad in ["", "abc", "a\nb", "a\rb", "a\0b", " lead-value", "trail-value ", "\tvalue-tab", "line\n"] {
@@ -187,7 +184,6 @@ fn value_shapes_are_refused() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn matches_other_than_one_never_return_a_value() {
     // I8: every key count in 0..=3, in random order. Ok only when all four counts are 1.
     let mut x: u64 = 17;
@@ -218,7 +214,6 @@ fn matches_other_than_one_never_return_a_value() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn secrets_debug_prints_no_value() {
     let s = parse_list(&list(&GOOD)).ok().unwrap();
     let d = format!("{s:?}");
@@ -230,7 +225,6 @@ fn secrets_debug_prints_no_value() {
 // ---- fetch (T006): FR-009 ----
 
 #[test]
-#[ignore = "test-first"]
 fn token_goes_in_env_not_argv() {
     let sb = Sandbox::new();
     fetch(&sb.ok(), ACCESS, Some("https://vault.bitwarden.eu"), LONG).ok().expect("fetch");
@@ -239,7 +233,6 @@ fn token_goes_in_env_not_argv() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn bws_child_env_is_the_allowlist() {
     let sb = Sandbox::new();
     fetch(&sb.ok(), ACCESS, None, LONG).ok().expect("fetch");
@@ -261,7 +254,6 @@ fn bws_child_env_is_the_allowlist() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn rejected_token_is_not_retried() {
     for msg in [
         "Error: 400 Bad Request",
@@ -281,7 +273,6 @@ fn rejected_token_is_not_retried() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn unreachable_is_retried_once() {
     let sb = Sandbox::new();
     let bws = sb.bws("", "echo 'Error: connection refused' >&2; exit 1");
@@ -298,7 +289,6 @@ fn unreachable_is_retried_once() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn slow_bws_times_out_within_the_limit() {
     let sb = Sandbox::new();
     // `exec`: the sleep is the child, so the kill at the limit also closes the pipes
@@ -310,7 +300,6 @@ fn slow_bws_times_out_within_the_limit() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn server_url_must_be_https_on_an_allowed_host() {
     for ok in ["https://vault.bitwarden.com", "https://vault.bitwarden.eu"] {
         let sb = Sandbox::new();
@@ -335,7 +324,6 @@ fn server_url_must_be_https_on_an_allowed_host() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn garbage_output_is_unreadable_and_not_echoed() {
     let cases: [(&str, &str); 5] = [
         ("not json LEAK-OUT-77", "exit 0"),
