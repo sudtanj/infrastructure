@@ -5,7 +5,13 @@ image = "rust:1.90"
 commands = ["rustup component add clippy rustfmt", "cargo fmt --check", "cargo clippy --locked -- -D warnings"]
 timeout = 1200
 
+# A step container has --pids-limit 512. The tests of ship, job and github each start mock HTTP servers whose
+# threads never exit, so one test process holds about 600 threads. Three processes stay under the limit.
 [steps.test]
 image = "rust:1.90"
-commands = ["cargo test --locked || { cat /sys/fs/cgroup/pids.current /sys/fs/cgroup/pids.max; ps -eLf | wc -l; ps -eo comm | sort | uniq -c | sort -rn | head; exit 1; }"]
+commands = [
+  "cargo test --locked -- --skip ship_tests:: --skip job_tests::",
+  "cargo test --locked --lib ship_tests::",
+  "cargo test --locked --lib job_tests::",
+]
 timeout = 1800

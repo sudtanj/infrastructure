@@ -159,7 +159,6 @@ jobs:
       - name: run the pipeline of the runner
         run: FACTORY_CI_SHA=$(git rev-parse HEAD) "$CARGO_TARGET_DIR/release/rust-ci-runner" run --dir rust-ci-runner
       - name: run the pipeline of the repository
-        if: always()
         run: FACTORY_CI_SHA=$(git rev-parse HEAD) "$CARGO_TARGET_DIR/release/rust-ci-runner" run --dir .
 
   workflow:
