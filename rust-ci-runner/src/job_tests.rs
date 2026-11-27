@@ -334,3 +334,60 @@ fn an_engine_that_cannot_be_started_is_an_error_not_a_failure() {
     assert_eq!(g.last()["state"], "error", "{}", desc(&g));
     assert!(desc(&g).contains("could not start"), "{}", desc(&g));
 }
+
+// ---- 008 T007 (test-first): `local` fails when a passing run dropped log lines. FR-017 ----
+// Assumed seam: `job::local_with(dir, step, engine, quiet, env: Env, timing: ship::Timing) -> Result<bool, String>`;
+// `local` calls it with the process environment and `Timing::default()`.
+
+fn dead_loki(code: u16) -> String {
+    let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+    let port = server.server_addr().to_ip().unwrap().port();
+    std::thread::spawn(move || {
+        for mut rq in server.incoming_requests() {
+            let mut body = String::new();
+            let _ = rq.as_reader().read_to_string(&mut body);
+            let _ = rq.respond(tiny_http::Response::from_string("").with_status_code(code));
+        }
+    });
+    format!("http://127.0.0.1:{port}")
+}
+
+fn quiet_run(sb: &Sandbox, fixture: &Path, run_exit: i32, loki_code: u16) -> Result<bool, String> {
+    let engine = sb.dir.join("engine-q.sh");
+    std::fs::write(&engine, format!("#!/bin/sh\ncase \"$1\" in run) exit {run_exit};; esac\nexit 0\n")).unwrap();
+    std::fs::set_permissions(&engine, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let url = dead_loki(loki_code);
+    let env = move |k: &str| -> Option<String> {
+        match k {
+            "FACTORY_CI_LOG_URL" => Some(url.clone()),
+            "FACTORY_CI_LOG_USER" => Some("u-1234".into()),
+            "FACTORY_CI_LOG_TOKEN" => Some("t-1234".into()),
+            _ => None,
+        }
+    };
+    let timing = crate::ship::Timing {
+        batch: std::time::Duration::from_millis(50),
+        retry_window: std::time::Duration::from_millis(300),
+        backoff: std::time::Duration::from_millis(20),
+        request_timeout: std::time::Duration::from_millis(500),
+        ..crate::ship::Timing::default()
+    };
+    crate::job::local_with(fixture, None, &engine.display().to_string(), true, &env, timing)
+}
+
+#[test]
+#[ignore = "test-first"]
+fn run_quiet_logs_fails_when_a_passing_run_dropped_lines() {
+    let sb = Sandbox::new("qdrop");
+    let fx = sb.fixture(&[(".factory-ci.toml", &pipeline(&[("a", "")]))]);
+    // the store answers 500 until the retry window ends: lines are dropped, the pipeline passed
+    assert_eq!(quiet_run(&sb, &fx, 0, 500), Err("log shipping dropped lines".to_string()));
+    // a store that takes the lines: a pass stays a pass
+    let sb = Sandbox::new("qok");
+    let fx = sb.fixture(&[(".factory-ci.toml", &pipeline(&[("a", "")]))]);
+    assert_eq!(quiet_run(&sb, &fx, 0, 204), Ok(true));
+    // a failed pipeline stays a plain failure, dropped lines or not
+    let sb = Sandbox::new("qfail");
+    let fx = sb.fixture(&[(".factory-ci.toml", &pipeline(&[("a", "")]))]);
+    assert_eq!(quiet_run(&sb, &fx, 1, 500), Ok(false));
+}

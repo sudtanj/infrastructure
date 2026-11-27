@@ -397,3 +397,122 @@ fn nothing_goes_out_when_nothing_was_pushed() {
     assert_eq!(l.count(), 0);
     assert!(!s.dropped());
 }
+
+// ---- 008 T002, T003 (test-first): URL normalisation and probe. FR-015, FR-016; I3 ----
+
+fn url_of(raw: &str) -> String {
+    from(&[("FACTORY_CI_LOG_URL", raw), N, T]).unwrap().unwrap().url
+}
+
+#[test]
+#[ignore = "test-first"]
+fn url_loses_the_push_path_and_slashes() {
+    for (raw, want) in [
+        ("https://h.example.com/loki/api/v1/push", "https://h.example.com"),
+        ("https://h.example.com/loki/api/v1/push/", "https://h.example.com"),
+        ("https://h.example.com/", "https://h.example.com"),
+        ("https://h.example.com//", "https://h.example.com"),
+        ("https://h.example.com:3100/loki/api/v1/push", "https://h.example.com:3100"),
+        ("https://h.example.com/pre/loki/api/v1/push", "https://h.example.com/pre"),
+    ] {
+        assert_eq!(url_of(raw), want, "{raw}");
+    }
+}
+
+#[test]
+#[ignore = "test-first"]
+fn url_normalisation_is_idempotent() {
+    // I3: also for random mixes of slashes and the push path
+    let mut x: u64 = 11;
+    for _ in 0..200 {
+        let mut raw = String::from("https://h.example.com");
+        for _ in 0..4 {
+            x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            raw.push_str(["/", "/loki/api/v1/push", "/pre", "//"][((x >> 33) % 4) as usize]);
+        }
+        let once = url_of(&raw);
+        assert_eq!(url_of(&once), once, "{raw}");
+        assert!(!once.ends_with('/') && !once.ends_with("/loki/api/v1/push"), "{raw} -> {once}");
+    }
+}
+
+#[test]
+#[ignore = "test-first"]
+fn url_with_another_path_is_kept() {
+    assert_eq!(url_of("https://h.example.com/loki/api/v1"), "https://h.example.com/loki/api/v1");
+    assert_eq!(url_of("https://h.example.com/loki/api/v1/pushed"), "https://h.example.com/loki/api/v1/pushed");
+    assert_eq!(url_of("https://h.example.com/a/b"), "https://h.example.com/a/b");
+}
+
+const LIMIT: Duration = Duration::from_millis(800);
+
+#[test]
+#[ignore = "test-first"]
+fn probe_204_is_ok() {
+    let l = ok_loki();
+    assert_eq!(crate::ship::probe(&cfg(&l.url), "0123456789abcdef", LIMIT), Ok(204));
+    assert_eq!(l.count(), 1);
+}
+
+#[test]
+#[ignore = "test-first"]
+fn probe_401_reports_the_code() {
+    for code in [401u16, 403] {
+        let l = loki(move |_| (code, Duration::ZERO));
+        assert_eq!(crate::ship::probe(&cfg(&l.url), "0123456789abcdef", LIMIT), Err(code));
+        assert_eq!(l.count(), 1, "{code} is not retried");
+    }
+}
+
+#[test]
+#[ignore = "test-first"]
+fn probe_with_no_answer_reports_000_in_time() {
+    // Nothing listens on port 1: every attempt is refused at once. One retry after 2 s.
+    let start = Instant::now();
+    assert_eq!(crate::ship::probe(&cfg("http://127.0.0.1:1"), "0123456789abcdef", LIMIT), Err(0));
+    let took = start.elapsed();
+    assert!(took >= Duration::from_secs(2) && took < Duration::from_secs(8), "{took:?}");
+    // A server that hangs is cut at the limit, not left to the default timeout.
+    let l = loki(|_| (204, Duration::from_secs(30)));
+    let start = Instant::now();
+    assert_eq!(crate::ship::probe(&cfg(&l.url), "0123456789abcdef", LIMIT), Err(0));
+    assert!(start.elapsed() < Duration::from_secs(8), "{:?}", start.elapsed());
+}
+
+#[test]
+#[ignore = "test-first"]
+fn probe_retries_once_on_5xx_and_429() {
+    for code in [500u16, 503, 429] {
+        let l = loki(move |i| (if i == 0 { code } else { 204 }, Duration::ZERO));
+        assert_eq!(crate::ship::probe(&cfg(&l.url), "0123456789abcdef", LIMIT), Ok(204), "{code}");
+        assert_eq!(l.count(), 2, "{code}");
+    }
+    let l = loki(|_| (502, Duration::ZERO));
+    assert_eq!(crate::ship::probe(&cfg(&l.url), "0123456789abcdef", LIMIT), Err(502));
+    assert_eq!(l.count(), 2, "one retry, not more");
+    let l = loki(|_| (400, Duration::ZERO));
+    assert_eq!(crate::ship::probe(&cfg(&l.url), "0123456789abcdef", LIMIT), Err(400));
+    assert_eq!(l.count(), 1, "400 is final");
+}
+
+#[test]
+#[ignore = "test-first"]
+fn probe_posts_one_line_with_the_five_labels_and_basic_auth() {
+    let l = ok_loki();
+    assert!(crate::ship::probe(&cfg(&l.url), "0123456789abcdef", LIMIT).is_ok());
+    let seen = l.seen.lock().unwrap().clone();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].url, "/loki/api/v1/push");
+    assert!(seen[0].ctype.starts_with("application/json"), "{}", seen[0].ctype);
+    assert_eq!(seen[0].auth, format!("Basic {}", crate::util::base64(format!("{USER}:{TOKEN}").as_bytes())));
+    let vals = l.values();
+    assert_eq!(vals.len(), 1);
+    let (labels, ts, line) = &vals[0];
+    let mut keys: Vec<_> = labels.as_object().unwrap().keys().cloned().collect();
+    keys.sort();
+    assert_eq!(keys, ["project", "repo", "service_name", "step", "stream"]);
+    assert_eq!(labels["service_name"].as_str(), Some("factory-ci"));
+    assert_eq!((labels["project"].as_str(), labels["step"].as_str(), labels["stream"].as_str()), (Some("probe"), Some("probe"), Some("stdout")));
+    assert!(ts.len() >= 18 && ts.bytes().all(|b| b.is_ascii_digit()), "{ts}");
+    assert!(line.starts_with("run=0123456789abcdef "), "{line}");
+}

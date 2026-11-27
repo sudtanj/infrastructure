@@ -229,3 +229,51 @@ fn generated_lists_validate_and_an_unknown_key_breaks_them() {
         assert!(mentions(&problems(&bad), "zzz_unknown"), "{bad}");
     }
 }
+
+// ---- 008 T007 (test-first): `watch::read(&Path) -> Result<Vec<WatchEntry>, String>`. FR-007 shared ----
+
+fn temp_file(bytes: &[u8]) -> std::path::PathBuf {
+    let p = std::env::temp_dir().join(format!("fci-watch-{}.toml", crate::util::random_id()));
+    std::fs::write(&p, bytes).unwrap();
+    p
+}
+
+#[test]
+#[ignore = "test-first"]
+fn read_helper_parses_and_caps_like_the_old_load_list() {
+    let p = temp_file(b"[[watch]]\nrepo = \"o/r\"\nid = 7\nbranches = [\"main\"]\n");
+    let v = crate::watch::read(&p).unwrap();
+    assert_eq!((v.len(), v[0].id), (1, Some(7)));
+    // a parse problem comes back joined, one per line
+    let q = temp_file(b"[[watch]]\nrepo = \"bad\"\nbogus = 1\n");
+    let e = crate::watch::read(&q).unwrap_err();
+    assert!(e.lines().count() >= 2 && e.contains("bogus"), "{e}");
+    // missing file
+    let gone = std::env::temp_dir().join(format!("fci-watch-none-{}", crate::util::random_id()));
+    let e = crate::watch::read(&gone).unwrap_err();
+    assert!(e.starts_with("cannot read "), "{e}");
+    // not UTF-8
+    let u = temp_file(&[b'#', 0xff, 0xfe, b'\n']);
+    assert_eq!(crate::watch::read(&u).unwrap_err(), "watch list is not valid UTF-8");
+    // one byte over the cap is refused, at the cap it is read
+    let big = temp_file(&vec![b'#'; crate::watch::MAX_BYTES + 1]);
+    let e = crate::watch::read(&big).unwrap_err();
+    assert!(e.contains("larger than"), "{e}");
+    let edge = temp_file(&vec![b'#'; crate::watch::MAX_BYTES]);
+    assert!(crate::watch::read(&edge).unwrap().is_empty());
+    for f in [p, q, u, big, edge] {
+        let _ = std::fs::remove_file(f);
+    }
+}
+
+#[test]
+#[ignore = "test-first"]
+fn entries_without_branches_match_every_ref() {
+    let v = parse(&one("id = 1")).unwrap();
+    let long = "z".repeat(200);
+    for r in ["main", "feat/x/y", "v1.2.3", "a", long.as_str()] {
+        assert!(v[0].matches_branch(r), "{r}");
+    }
+    let v = parse(&one("branches = [\"main\"]")).unwrap();
+    assert!(v[0].matches_branch("main") && !v[0].matches_branch("main2") && !v[0].matches_branch("feat/main"));
+}

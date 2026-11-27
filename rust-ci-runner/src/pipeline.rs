@@ -467,4 +467,14 @@ commands = ["x"]
         assert_eq!(p.docker_problems(false), ["step img needs docker but repo does not allow it"]);
         assert!(parse(GOOD).unwrap().docker_problems(false).is_empty());
     }
+
+    // 008 T004 (test-first): `runner` is reserved so a step cannot forge `[runner] pipeline passed`. FR-018.
+    #[test]
+    #[ignore = "test-first"]
+    fn step_named_runner_is_refused() {
+        let v = bad("[steps.runner]\nimage = \"x\"\ncommands = [\"y\"]\n");
+        assert!(has(&v, "runner"), "{v:?}");
+        assert!(parse("[steps.runner2]\nimage = \"x\"\ncommands = [\"y\"]\n").is_ok());
+        assert!(parse("[steps.Runner]\nimage = \"x\"\ncommands = [\"y\"]\n").is_ok());
+    }
 }
