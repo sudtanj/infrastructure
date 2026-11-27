@@ -8,15 +8,20 @@ fn no_source_file_but_pipeline_rs_names_the_vendor() {
     // `pipeline.rs` holds the reserved `BWS_` prefix. The `ci` command is the one place that reads
     // Bitwarden: `store.rs` and `ci.rs`, the engine's token scrub, `main.rs` (token and usage) and the
     // fixed fault lines in `log.rs`. Test files may name anything.
-    let allowed = ["pipeline.rs", "store.rs", "ci.rs", "engine.rs", "main.rs", "log.rs"];
+    let allowed = [
+        "pipeline.rs",
+        "store.rs",
+        "ci.rs",
+        "engine.rs",
+        "main.rs",
+        "log.rs",
+    ];
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut offenders = vec![];
     for entry in std::fs::read_dir(&src).unwrap() {
         let path = entry.unwrap().path();
         let name = path.file_name().unwrap().to_string_lossy().to_string();
-        if !name.ends_with(".rs")
-            || allowed.contains(&name.as_str())
-            || name.ends_with("_tests.rs")
+        if !name.ends_with(".rs") || allowed.contains(&name.as_str()) || name.ends_with("_tests.rs")
         {
             continue;
         }
