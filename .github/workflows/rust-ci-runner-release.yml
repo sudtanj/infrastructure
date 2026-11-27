@@ -134,7 +134,6 @@ jobs:
           provenance: mode=max
           tags: |
             ${{ steps.tags.outputs.image }}:${{ steps.tags.outputs.version }}
-            ${{ steps.tags.outputs.image }}:latest
       # Runs the pushed digest with the flags of factory-monorepo-ci.yml. No release exists until it passes.
       - name: smoke test the image
         shell: bash
@@ -163,6 +162,12 @@ jobs:
           docker cp "$id:/rust-ci-runner" ./runner-from-image
           docker rm "$id" > /dev/null
           test -s ./runner-from-image
+      # `latest` moves only after the smoke test passed; it points at the same digest.
+      - name: tag latest
+        env:
+          IMAGE: ${{ steps.tags.outputs.image }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: docker buildx imagetools create --tag "$IMAGE:latest" "$IMAGE@$DIGEST"
       - name: release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
