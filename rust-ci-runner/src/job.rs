@@ -14,6 +14,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Answers the variables a command reads; `main` passes the process environment.
+
+type Setup = (Opts, HttpApi, Vec<String>, Option<LogConfig>, String);
 pub type Env<'a> = &'a dyn Fn(&str) -> Option<String>;
 
 const RETRY: &str = " (retry)";
@@ -648,7 +650,7 @@ pub fn job(args: &[String], env: Env) -> i32 {
     if let Some((names, reason)) = &o.prepare {
         return prepare_job(&o, env, image, names, reason);
     }
-    let setup = || -> Result<(Opts, HttpApi, Vec<String>, Option<LogConfig>, String), String> {
+    let setup = || -> Result<Setup, String> {
         let mut o = o;
         let image = image?;
         let cfg = log_config(env, o.quiet)?;
