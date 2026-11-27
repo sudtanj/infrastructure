@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The plan step (contracts/tick-workflow.md, plan-output.md; FR-045, FR-059). Run from this repo's checkout.
 #   A  rust-ci-runner plan --repos ... --rows-out CAND     GitHub reads only
-#   between A and C, only when CAND holds rows: check the store, mask the log credentials from the environment
+#   between A and C, only when a row can use a secret: check the store, mask the log credentials from the environment
 #   C  rust-ci-runner plan --rows-in CAND ...               refusals, cap, posts
 # then each final row is encrypted and only {n, blob}, counts and fail_tick reach $GITHUB_OUTPUT.
 # A failure appends its reason to $GITHUB_STEP_SUMMARY, writes no output and exits 1. An idle tick
@@ -28,8 +28,8 @@ fail() {
   exit 1
 }
 
-# R6: a short key makes the blob guessable offline; the tick guard step checks it too.
-[ "${#FACTORY_CI_BLOB_KEY}" -ge 32 ] || fail "FACTORY_CI_BLOB_KEY is shorter than 32 characters"
+# R6, FR-036: a weak key makes the blob guessable offline; the tick guard step checks it too.
+[[ $FACTORY_CI_BLOB_KEY =~ ^[0-9a-f]{64}$ ]] || fail "FACTORY_CI_BLOB_KEY is not 64 lower-case hex characters"
 case ${FACTORY_CI_BWS_SERVER_URL:-} in ''|https://*) ;; *) fail "FACTORY_CI_BWS_SERVER_URL must start with https://" ;; esac
 fci_log_env || fail "$FCI_ERR"
 runner=$(command -v rust-ci-runner) || fail "rust-ci-runner not found"
@@ -38,18 +38,23 @@ run() {
   env -u BWS_ACCESS_TOKEN -u BWS_ACCESS_TOKEN_DOCKER -u FACTORY_CI_BLOB_KEY -u FACTORY_CI_BLOB_KEY_DOCKER "$runner" "$@"
 }
 
-run plan --repos .github/factory-ci-repos.toml --rows-out "$cand" || fail "plan failed before any status was posted"
+# Phase A reads GitHub only, so it runs without the log credentials (FR-037); phase C keeps them.
+( unset FACTORY_CI_LOG_URL FACTORY_CI_LOG_USER FACTORY_CI_LOG_TOKEN; run plan --repos .github/factory-ci-repos.toml --rows-out "$cand" ) || fail "plan failed before any status was posted"
 total=$(jq '.rows | length' "$cand") || fail "plan wrote an unreadable candidate file"
 
 if [ "$total" -gt 0 ]; then
   plain=$(jq '[.rows[] | select(.allow_docker | not)] | length' "$cand")
   docker=$((total - plain))
-  [ "$docker" -eq 0 ] || [ "${#FACTORY_CI_BLOB_KEY_DOCKER}" -ge 32 ] ||
-    fail "FACTORY_CI_BLOB_KEY_DOCKER is shorter than 32 characters"
-  if [ "$plain" -gt 0 ] && [ -n "${BWS_ACCESS_TOKEN:-}" ]; then
+  # A job reaches a store only through shared names or an owner-scoped key, and only when secrets_ok (FR-038).
+  can_use='[.rows[] | select(.secrets_ok == true and ((.secrets // "") != "" or (.repo_id // "") != ""))]'
+  plain_use=$(jq "$can_use | map(select(.allow_docker | not)) | length" "$cand")
+  docker_use=$(jq "$can_use | map(select(.allow_docker)) | length" "$cand")
+  [ "$docker" -eq 0 ] || [[ ${FACTORY_CI_BLOB_KEY_DOCKER:-} =~ ^[0-9a-f]{64}$ ]] ||
+    fail "FACTORY_CI_BLOB_KEY_DOCKER is not 64 lower-case hex characters"
+  if [ "$plain_use" -gt 0 ] && [ -n "${BWS_ACCESS_TOKEN:-}" ]; then
     fci_list "${FACTORY_CI_BWS_PROJECT:-}" "$BWS_ACCESS_TOKEN" || fail "$FCI_ERR"
   fi
-  if [ "$docker" -gt 0 ] && [ -n "${BWS_ACCESS_TOKEN_DOCKER:-}" ]; then
+  if [ "$docker_use" -gt 0 ] && [ -n "${BWS_ACCESS_TOKEN_DOCKER:-}" ]; then
     fci_list "${FACTORY_CI_BWS_PROJECT_DOCKER:-}" "$BWS_ACCESS_TOKEN_DOCKER" || fail "$FCI_ERR"
   fi
   if [ -n "$FCI_HAVE_LOGS" ]; then

@@ -28,7 +28,7 @@ eq() { if [ "$2" = "$3" ]; then pass; else fail "$1: want [$2] got [$3]"; fi; }
 has() { case $2 in *"$3"*) pass ;; *) fail "$1: [$3] not in [$2]" ;; esac; }
 lacks() { case $2 in *"$3"*) fail "$1: [$3] found in [$2]" ;; *) pass ;; esac; }
 
-KEY=test-key-0123456789-abcdefghijklmnop
+KEY=7f3a9c1e5b8d20467f3a9c1e5b8d20467f3a9c1e5b8d20467f3a9c1e5b8d2046
 export FACTORY_CI_BLOB_KEY=$KEY
 
 # ---------------------------------------------------------------- fci_log_env unit (FR-010 to FR-012; I1, P1, P2)
@@ -378,6 +378,14 @@ done
 # A malformed list fails before any store call.
 plan_world; cand_row; : > "$W/state/plan.a.fail"; run_plan
 eq "malformed list: non-zero" 1 "$([ "$RC" -ne 0 ] && echo 1 || echo 0)"; eq "malformed list: no store call" 0 "$(bwscalls)"; eq "malformed list: phase C not started" A "$(tr '\n' ' ' < "$W/state/phases" | sed 's/ $//')"; rm -rf "$W"
+
+# FR-036: a blob key that is not 64 lower-case hex is refused by name; no store call, nothing runs.
+for v in abc "$(printf 'g%.0s' $(seq 64))" "$(printf 'A%.0s' $(seq 64))"; do
+  plan_world; cand_row; run_plan FACTORY_CI_BLOB_KEY="$v"
+  eq "bad blob key plan: non-zero" 1 "$([ "$RC" -ne 0 ] && echo 1 || echo 0)"; eq "bad blob key plan: no store call" 0 "$(bwscalls)"
+  has "bad blob key plan: names the variable" "$(cat "$W/gh_summary")" "FACTORY_CI_BLOB_KEY is not 64 lower-case hex"
+  lacks "bad blob key plan: value hidden" "$OUT$ERR$(cat "$W/gh_summary")" "$v"; rm -rf "$W"
+done
 
 printf '%s checks, %s failed\n' "$total" "$failed"
 [ "$failed" -eq 0 ]

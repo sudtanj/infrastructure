@@ -20,8 +20,9 @@ eq() { if [ "$2" = "$3" ]; then pass; else fail "$1: want [$2] got [$3]"; fi; }
 has() { case $2 in *"$3"*) pass ;; *) fail "$1: [$3] not in [$2]" ;; esac; }
 lacks() { case $2 in *"$3"*) fail "$1: [$3] found in [$2]" ;; *) pass ;; esac; }
 
-KEY=test-key-0123456789-abcdefghijklmnop
-KEYD=docker-key-0123456789-abcdefghijklmnop
+KEY=7f3a9c1e5b8d20467f3a9c1e5b8d20467f3a9c1e5b8d20467f3a9c1e5b8d2046
+KEYD=4e9d0b62a7c15f384e9d0b62a7c15f384e9d0b62a7c15f384e9d0b62a7c15f38
+KEYW=91c07e5a3d2b8f6491c07e5a3d2b8f6491c07e5a3d2b8f6491c07e5a3d2b8f64
 export FACTORY_CI_BLOB_KEY=$KEY
 # shellcheck source=/dev/null
 . "$here/factory-ci-blob.sh"
@@ -164,10 +165,10 @@ row=$(printf '%s' "$BLOB" | fci_blob_decrypt)
 eq "blob round trip: repo" o/r "$(jq -r .repo <<<"$row")"; eq "blob round trip: branch" feature-xyz "$(jq -r .branch <<<"$row")"
 for needle in "$KEY" feature-xyz svc-secret NPM_TOKEN o/r 0123456789abcdef; do lacks "ciphertext hides $needle" "$BLOB" "$needle"; done
 eq "ciphertext is a single line" 1 "$(printf '%s\n' "$BLOB" | wc -l | tr -d ' ')"
-bad=$(printf '%s' "$BLOB" | FACTORY_CI_BLOB_KEY=another-key fci_blob_decrypt 2>/dev/null); rc=$?
+bad=$(printf '%s' "$BLOB" | FACTORY_CI_BLOB_KEY=$KEYW fci_blob_decrypt 2>/dev/null); rc=$?
 eq "wrong key: no plaintext" "" "$bad"
 # the job wrapper with the wrong key: reason "job did not finish", nothing runs
-run_job FACTORY_CI_BLOB_KEY=another-key
+run_job FACTORY_CI_BLOB_KEY=$KEYW
 eq "wrong key: job exit" 1 "$([ "$RC" -ne 0 ] && echo 1 || echo 0)"; has "wrong key: reason" "$(reason)" "job did not finish"
 eq "wrong key: no runner call" 0 "$(count runner)"; eq "wrong key: no store call" 0 "$(bwscalls)"; lacks "wrong key: nothing printed" "$OUT$ERR" "o/r"
 rm -rf "$W"
@@ -202,24 +203,74 @@ rm -rf "$W"
 
 # ---------------------------------------------------------------- blob key length and cost (R6)
 eq "the blob uses 600000 iterations to encrypt and decrypt" 2 "$(grep -c -e '-iter 600000' "$here/factory-ci-blob.sh")"
-K31=kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk; K32=${K31}k
-eq "test key lengths" "31 32" "${#K31} ${#K32}"
-plan_world; cand_row; run_plan FACTORY_CI_BLOB_KEY=$K31
-eq "31-character blob key: refused" 1 "$([ "$RC" -ne 0 ] && echo 1 || echo 0)"; eq "31-character blob key: nothing ran" 0 "$(count runner)"
-has "31-character blob key: reason in the summary" "$(cat "$W/gh_summary")" "shorter than 32"; eq "31-character blob key: no output" "" "$(cat "$W/gh_out")"
-rm -rf "$W"
-plan_world; cand_row; echo '[{"repo":"o/r","allow_docker":false,"n":0}]' > "$W/state/rows.json"; run_plan FACTORY_CI_BLOB_KEY=$K32
-eq "32-character blob key: accepted" 0 "$RC"
-b=$(sed -n 's/^matrix=//p' "$W/gh_out" | jq -r '.include[0].blob')
-eq "32-character blob key: round trip" o/r "$(printf '%s' "$b" | FACTORY_CI_BLOB_KEY=$K32 fci_blob_decrypt | jq -r .repo)"
-rm -rf "$W"
-# a docker row needs a docker key of 32 characters, refused before any status is posted
-for dk in "$K31" ""; do
-  plan_world; cand_row; jq '.rows[0].allow_docker = true' "$W/state/cand.json" > "$W/t" && mv "$W/t" "$W/state/cand.json"
-  run_plan FACTORY_CI_BLOB_KEY_DOCKER="$dk"
-  eq "docker row with a docker key of ${#dk} characters: refused" 1 "$([ "$RC" -ne 0 ] && echo 1 || echo 0)"
-  eq "docker key of ${#dk} characters: no status posted" A "$(phases)"; rm -rf "$W"
+# FR-036: a blob key is 64 lower-case hex characters, for every caller; each bad shape is refused by name, never by value
+h16=0123456789abcdef; h64=$h16$h16$h16$h16
+BKL=(short nonhex upper 63 65 empty)
+BKV=(abc "$(printf 'g%.0s' $(seq 64))" "$(printf 'A%.0s' $(seq 64))" "${h64%?}" "${h64}0" "")
+for i in "${!BKL[@]}"; do
+  l=${BKL[$i]}; v=${BKV[$i]}
+  for var in FACTORY_CI_BLOB_KEY FACTORY_CI_BLOB_KEY_DOCKER; do
+    plan_world; cand_row; [ "$var" = FACTORY_CI_BLOB_KEY ] || { jq '.rows[0].allow_docker = true' "$W/state/cand.json" > "$W/t" && mv "$W/t" "$W/state/cand.json"; }
+    run_plan "$var=$v"
+    eq "plan $var $l: refused" 1 "$([ "$RC" -ne 0 ] && echo 1 || echo 0)"; has "plan $var $l: names the variable" "$(cat "$W/gh_summary")" "$var is not 64 lower-case hex"
+    [ -z "$v" ] || lacks "plan $var $l: value hidden" "$OUT$ERR$(cat "$W/gh_summary")" "$v"
+    rm -rf "$W"
+  done
+  e=$(printf '{}' | FACTORY_CI_BLOB_KEY=$v fci_blob_encrypt 2>&1); rc=$?
+  eq "blob encrypt $l: refused" 1 "$([ "$rc" -ne 0 ] && echo 1 || echo 0)"; has "blob encrypt $l: names the variable" "$e" "FACTORY_CI_BLOB_KEY is not 64 lower-case hex"
+  [ -z "$v" ] || lacks "blob encrypt $l: value hidden" "$e" "$v"
+  e=$(printf '%s' "$BLOB" | FACTORY_CI_BLOB_KEY=$v fci_blob_decrypt 2>&1); rc=$?
+  eq "blob decrypt $l: refused" 1 "$([ "$rc" -ne 0 ] && echo 1 || echo 0)"; has "blob decrypt $l: names the variable" "$e" "FACTORY_CI_BLOB_KEY is not 64 lower-case hex"
 done
+plan_world; cand_row; echo '[{"repo":"o/r","allow_docker":false,"n":0}]' > "$W/state/rows.json"; run_plan FACTORY_CI_BLOB_KEY=$h64
+eq "64-hex blob key: accepted" 0 "$RC"
+b=$(sed -n 's/^matrix=//p' "$W/gh_out" | jq -r '.include[0].blob')
+eq "64-hex blob key: round trip" o/r "$(printf '%s' "$b" | FACTORY_CI_BLOB_KEY=$h64 fci_blob_decrypt | jq -r .repo)"
+rm -rf "$W"
+# the tick guard steps: plan (both keys), run and run-docker each test the 64-hex shape, none the old length
+tick="$here/../workflows/factory-ci-tick.yml"
+eq "tick: four guards test 64 lower-case hex" 4 "$(grep -c '=~ \^\[0-9a-f\]{64}\$' "$tick")"
+eq "tick: no 32-character guard left" 0 "$(grep -c -e '-ge 32' "$tick")"
+
+# ---------------------------------------------------------------- plan phase A without the log credentials (FR-037; D23)
+# Phase A reads GitHub only, so it never holds the three FACTORY_CI_LOG_* names; phase C, which ships the log line, keeps them.
+LOGS=(FACTORY_CI_LOG_URL=https://loki.example.com FACTORY_CI_LOG_USER=u-1234 FACTORY_CI_LOG_TOKEN=t-12345)
+plan_world; cand_row; run_plan "${LOGS[@]}"
+eq "phase A: plan passes" 0 "$RC"; eq "phase A: both phases ran" "A C" "$(phases)"
+eq "phase A: sees none of the three log names" 0 "$(grep -c '^FACTORY_CI_LOG_' "$W/state/runner.env.1")"
+eq "phase C: sees all three log names" 3 "$(grep -c '^FACTORY_CI_LOG_' "$W/state/runner.env.2")"
+rm -rf "$W"
+plan_world; cand_row; run_plan
+eq "no log credentials: plan passes" 0 "$RC"; eq "no log credentials: both phases ran" "A C" "$(phases)"; eq "no log credentials: phase A sees none" 0 "$(grep -c '^FACTORY_CI_LOG_' "$W/state/runner.env.1")"
+rm -rf "$W"
+
+# ---------------------------------------------------------------- the store check only when a row can use a secret (FR-038; D19)
+# A job reaches the store only with shared names (`secrets`) or an owner-scoped key (`repo_id`), and only when secrets_ok.
+# cand_with FILTER: cand_row, then a jq filter on its one row.
+cand_with() { cand_row; jq "$1" "$W/state/cand.json" > "$W/t" && mv "$W/t" "$W/state/cand.json"; }
+store_case() {  # store_case LABEL WANT_RC WANT_CALLS JQ_FILTER [VAR=value]...
+  local l=$1 rc=$2 calls=$3 filter=$4; shift 4
+  plan_world; cand_with "$filter"; echo down > "$W/state/bws.mode"; run_plan "$@"
+  eq "$l: exit" "$rc" "$RC"; eq "$l: store calls" "$calls" "$(bwscalls)"; rm -rf "$W"
+}
+store_ok() {  # same with a working store
+  local l=$1 calls=$2 filter=$3; shift 3
+  plan_world; cand_with "$filter"; run_plan "$@"
+  eq "$l: exit" 0 "$RC"; eq "$l: store calls" "$calls" "$(bwscalls)"; rm -rf "$W"
+}
+store_case "no names, no id, store down" 0 0 '.rows[0].repo_id = "" | .rows[0].secrets = ""'
+store_ok "shared names, store up" 1 '.rows[0].repo_id = "" | .rows[0].secrets = "NPM_TOKEN"'
+store_case "repo id, store down" 1 1 '.rows[0].repo_id = "123" | .rows[0].secrets = ""'
+store_case "secrets_ok false, names and id, store down" 0 0 '.rows[0].secrets_ok = false | .rows[0].secrets = "NPM_TOKEN"'
+plan_world; cand_with '.rows[0].repo_id = "123"'; echo down > "$W/state/bws.mode"; run_plan
+has "repo id, store down: the store message" "$(cat "$W/gh_summary")" "secret store unreachable"; rm -rf "$W"
+D='.rows[0].allow_docker = true'; DT=BWS_ACCESS_TOKEN_DOCKER=bws-docker-XX7
+store_ok "docker row with an id, docker token" 1 "$D | .rows[0].repo_id = \"123\"" "$DT"
+plan_world; cand_with "$D | .rows[0].repo_id = \"123\""; run_plan "$DT"
+eq "docker row: the docker token is the one used" bws-docker-XX7 "$(cat "$W/state/bws.token.1")"; rm -rf "$W"
+store_case "docker row without names or id, docker token, store down" 0 0 "$D | .rows[0].repo_id = \"\" | .rows[0].secrets = \"\"" "$DT"
+store_ok "docker row with an id, no docker token" 0 "$D | .rows[0].repo_id = \"123\""
+store_ok "docker row only: the plain store is not asked" 0 "$D | .rows[0].repo_id = \"\" | .rows[0].secrets = \"NPM_TOKEN\""
 plan_world; cand_row; run_plan FACTORY_CI_BLOB_KEY_DOCKER=
 eq "no docker row needs no docker key" 0 "$RC"; rm -rf "$W"
 
@@ -285,7 +336,7 @@ rm -rf "$W"
 
 # ---------------------------------------------------------------- status script
 run_status() {
-  OUT=$(env -i PATH="$W/bin:/usr/bin:/bin" HOME="$W" RUNNER_TEMP="$W/rt" ITEM_BLOB="$BLOB" FACTORY_CI_BLOB_KEY="$KEY" FACTORY_CI_TOKEN=gh-token-ZZ9 \
+  OUT=$(env -i PATH="$W/bin:/usr/bin:/bin" HOME="$W" RUNNER_TEMP="$W/rt" ITEM_BLOB="$BLOB" FACTORY_CI_BLOB_KEY="$KEY" FACTORY_CI_TOKEN=gh-token-ZZ9 "$@" \
     bash "$here/factory-ci-status.sh" 2> "$W/err"); RC=$?
   ERR=$(cat "$W/err")
 }
@@ -297,6 +348,17 @@ has "status: default reason" "$sa" "--description job did not finish"; has "stat
 echo "clone failed" > "$W/rt/fci-reason"; rm -f "$W/state/runner.count"; run_status
 has "status: reason from the file" "$(tr '\n' ' ' < "$W/state/runner.argv.1")" "--description clone failed"; rm -rf "$W"
 new_world_hard; mkrow; run_status; lacks "status: no --retry by default" "$(tr '\n' ' ' < "$W/state/runner.argv.1")" "--retry"; rm -rf "$W"
+# FR-036: the status and job wrappers refuse a bad blob key through the blob functions; nothing runs, the value stays hidden
+for i in "${!BKL[@]}"; do
+  l=${BKL[$i]}; v=${BKV[$i]}
+  new_world_hard; mkrow; run_status FACTORY_CI_BLOB_KEY="$v"
+  eq "status key $l: refused" 1 "$([ "$RC" -ne 0 ] && echo 1 || echo 0)"; eq "status key $l: no runner call" 0 "$(count runner)"
+  [ -z "$v" ] || lacks "status key $l: value hidden" "$OUT$ERR" "$v"
+  run_job FACTORY_CI_BLOB_KEY="$v"
+  eq "job key $l: refused" 1 "$([ "$RC" -ne 0 ] && echo 1 || echo 0)"; eq "job key $l: no runner call" 0 "$(count runner)"
+  [ -z "$v" ] || lacks "job key $l: value hidden" "$OUT$ERR$(reason)" "$v"
+  rm -rf "$W"
+done
 
 # ---------------------------------------------------------------- placeholder checksum (lint)
 tmp=$(mktemp -d); cp "$here"/factory-ci-*.sh "$tmp"/; sed -i 's/^BWS_SHA256=.*/BWS_SHA256=REPLACE_ME/' "$tmp/factory-ci-secrets.sh"

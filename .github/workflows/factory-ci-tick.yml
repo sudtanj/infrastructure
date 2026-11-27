@@ -47,10 +47,10 @@ jobs:
             printf '%s' "$val" | grep -Eq '@sha256:[0-9a-f]{64}$' \
               || { echo "$v is not pinned with @sha256" >&2; exit 1; }
           done
-          [ "${#FACTORY_CI_BLOB_KEY}" -ge 32 ] \
-            || { echo "the blob key is shorter than 32 characters" >&2; exit 1; }
-          [ -z "$FACTORY_CI_BLOB_KEY_DOCKER" ] || [ "${#FACTORY_CI_BLOB_KEY_DOCKER}" -ge 32 ] \
-            || { echo "the docker blob key is shorter than 32 characters" >&2; exit 1; }
+          [[ $FACTORY_CI_BLOB_KEY =~ ^[0-9a-f]{64}$ ]] \
+            || { echo "FACTORY_CI_BLOB_KEY is not 64 lower-case hex characters" >&2; exit 1; }
+          [ -z "$FACTORY_CI_BLOB_KEY_DOCKER" ] || [[ $FACTORY_CI_BLOB_KEY_DOCKER =~ ^[0-9a-f]{64}$ ]] \
+            || { echo "FACTORY_CI_BLOB_KEY_DOCKER is not 64 lower-case hex characters" >&2; exit 1; }
       - name: fetch runner
         env:
           OWNER: ${{ github.repository_owner }}
@@ -148,8 +148,8 @@ jobs:
             printf '%s' "$val" | grep -Eq '@sha256:[0-9a-f]{64}$' \
               || { echo "$v is not pinned with @sha256" >&2; exit 1; }
           done
-          [ "${#FACTORY_CI_BLOB_KEY}" -ge 32 ] \
-            || { echo "the blob key is shorter than 32 characters" >&2; exit 1; }
+          [[ $FACTORY_CI_BLOB_KEY =~ ^[0-9a-f]{64}$ ]] \
+            || { echo "FACTORY_CI_BLOB_KEY is not 64 lower-case hex characters" >&2; exit 1; }
       - name: fetch runner
         env:
           OWNER: ${{ github.repository_owner }}
@@ -251,8 +251,8 @@ jobs:
             printf '%s' "$val" | grep -Eq '@sha256:[0-9a-f]{64}$' \
               || { echo "$v is not pinned with @sha256" >&2; exit 1; }
           done
-          [ "${#FACTORY_CI_BLOB_KEY}" -ge 32 ] \
-            || { echo "the blob key is shorter than 32 characters" >&2; exit 1; }
+          [[ $FACTORY_CI_BLOB_KEY =~ ^[0-9a-f]{64}$ ]] \
+            || { echo "FACTORY_CI_BLOB_KEY is not 64 lower-case hex characters" >&2; exit 1; }
       - name: fetch runner
         env:
           OWNER: ${{ github.repository_owner }}
