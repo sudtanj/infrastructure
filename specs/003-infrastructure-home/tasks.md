@@ -92,6 +92,7 @@ Phase 1 is the gate: nothing else can be checked until the crate compiles. Phase
 - [X] T043 [P] [US5] Remove the dead `container` parameter of `capture()` (FR-008; R2-7, research D24): in `rust-ci-runner/src/engine.rs` delete the `container: Option<&str>` parameter, its `if let Some(name) = container { self.kill(name); }` branch and its doc line; update the callers, which all pass `None` (`quick`, and the call near line 372; `grep -n 'capture(' rust-ci-runner/src rust-ci-runner/tests`). `kill` stays (other callers). No other Rust change. Files: `rust-ci-runner/src/engine.rs`. Proof: green `check`, `pipeline` and `own-pipelines` selftest jobs; `cargo fmt --check` passes (apply the diff the failing step prints by hand, the bootstrap workflow is gone). CI budget: 4 runs, then stop and report.
 - [X] T044 [US5] Contract drift (FR-019, FR-030; R2-8): `specs/003-infrastructure-home/contracts/pipeline-files.md` now shows the `test` step as three `cargo test --locked` commands with the pids-limit reason and the two timeouts; T020's text above says the same; T005 holds the deviation note (budget extended to 8 runs). Files: `specs/003-infrastructure-home/contracts/pipeline-files.md`, `specs/003-infrastructure-home/tasks.md`. Done in this amendment. Proof: `grep -n 'ship_tests' specs/003-infrastructure-home/contracts/pipeline-files.md rust-ci-runner/.factory-ci.toml` shows the same three commands.
 - [X] T045 [US6] Repository identity (FR-039; R2-10): root `README.md` intro and the constitution preamble (version 1.0.2, PATCH, wording only; no principle changes, no component must change to comply) say the repo is the open-source home of sudtanj's infrastructure and DevOps tools; the GitHub description is set with `gh repo edit sudtanj/infrastructure --description`. Files: `README.md`, `.specify/memory/constitution.md`. Proof: `head -3 README.md`; `gh repo view sudtanj/infrastructure --json description`.
+- [X] T046 [US6] Fit notice (FR-040; R2-11): a paragraph after the first paragraph of the root `README.md` says the tools are tailored to the owner's needs, may not fit every use case, and carry no promise of support or stable interfaces. Files: `README.md`. Proof: `sed -n 5p README.md`.
 
 **Checkpoint**: every selftest job is green with the round 2 changes, then T029 and T030.
 
@@ -154,6 +155,7 @@ Phase 1 is the gate: nothing else can be checked until the crate compiles. Phase
 | FR-037 | T041 |
 | FR-038 | T042 |
 | FR-039 | T045 |
+| FR-040 | T046 |
 | SC-001 | T005, T006, T028 |
 | SC-002 | T009, T015 |
 | SC-003 to SC-005 | T032, T033, T034 |

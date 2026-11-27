@@ -2,6 +2,8 @@
 
 sudtanj's open-source infrastructure and DevOps tools, MIT licensed. Today the repo holds the factory CI runner (`rust-ci-runner`) and every GitHub Actions workflow for sudtanj's repositories. The runner is a Rust binary. A scheduled tick finds new commits in the repos listed in `.github/factory-ci-repos.toml`, runs the steps each repo declares in its `.factory-ci.toml` inside containers, and posts commit statuses. Logs go to Grafana Loki.
 
+
+These tools are built for my own repositories and needs. They are public so others can read and reuse them, but they may not fit your use case: expect defaults, names and limits chosen for one owner, and no promise of support or stable interfaces. Fork and adapt freely under the license.
 Docs:
 
 - `specs/003-infrastructure-home/`: the spec, plan, tasks, data model and quickstart for this setup.

@@ -46,6 +46,7 @@ Answers come from the lead's brief. Nothing blocked on the user; open questions 
 - R2-8: `rust-ci-runner/.factory-ci.toml` runs `cargo test` in three processes because of the pids limit; the contract and T020 say so (FR-019, T044). The compile-loop budget of D9 was extended to 8 runs; T005 records it.
 - R2-9: Deferred and recorded in `plan.md` Open risks, no task: the token split and the `alpine/git` clone container (security M3), the secret-name charset and reserved shell names (L3), the release verify job's dependence on the tag ruleset (L4), the concurrency slot shared with non-main dispatch (L6), `stop_and_remove` not strictly bounded at 30 s (reviewer m3), YAML escape sequences in triggers (covered only by the owner-only merge rule).
 - R2-10: The owner asked that the repository present itself as the open-source home of their infrastructure and DevOps tools, not only of the CI runner. The README intro, the constitution preamble (PATCH 1.0.2, wording only) and the GitHub repository description say so (FR-039).
+- R2-11: The owner asked the README to tell the public that these tools are tailored to the owner's needs and may not fit every use case (FR-040).
 
 ### What this feature changes in 002
 
@@ -277,6 +278,7 @@ After the owner finishes Setup, the live checks that 002 could not run (T046, T0
 - **FR-037**: The plan script MUST call the plan binary for phase A with `FACTORY_CI_LOG_URL`, `FACTORY_CI_LOG_USER` and `FACTORY_CI_LOG_TOKEN` removed from its environment. Phase A (`plan::candidates`) only reads and never ships logs (checked in `rust-ci-runner/src/plan.rs`); the log line is sent from phase C (`plan::finish`), so the credentials are removed for phase A only. A test MUST prove phase A sees none of the three names and phase C sees all three.
 - **FR-038**: The plan MUST check the Bitwarden store (`fci_list`) only when at least one candidate row can use a secret: its `secrets_ok` is true and it has shared secret names (`secrets` not empty) or an owner id (`repo_id` not empty). A Bitwarden outage then does not fail a tick whose rows list no secret. The purpose of the check stays (D1): a revoked or wrong token fails one tick early instead of one `error` status per item.
 - **FR-039**: The first paragraph of the root `README.md`, the preamble of `.specify/memory/constitution.md` and the GitHub repository description MUST say that this repository is the open-source (MIT) home of sudtanj's infrastructure and DevOps tools, and that it holds the factory CI runner and every GitHub Actions workflow today.
+- **FR-040**: The root `README.md` MUST say, right after its first paragraph, that the tools are tailored to the owner's repositories and needs, may not fit every use case, and come with no promise of support or stable interfaces.
 
 ### Key Entities
 
