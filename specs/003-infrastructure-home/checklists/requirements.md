@@ -31,4 +31,4 @@
 
 ## Notes
 
-- Six open questions (OQ-1 to OQ-6) carry defaults and do not block planning.
+- Two open questions (OQ-4, OQ-5) carry defaults and do not block planning; OQ-1, OQ-2, OQ-3 and OQ-6 were closed in review round 1.

@@ -32,12 +32,30 @@ Covers FR-010 to FR-016. Matrix of names and Environments: `../data-model.md`.
 | `run` | `job` | same |
 | `run-docker` | `job` | same |
 
-No other step gets them. In the three jobs, `fetch runner` replaces its bare `docker create` with:
+No other step gets them. The hardening test (T008) counts `secrets.FACTORY_CI_LOG_` in the file: exactly 9 (three names in three steps), and checks the three `env` blocks. Step containers never receive them: the `job.rs` `LOG_VARS` handling has a test (name recorded by T008), or T008 adds one case in `tests/job_rules.rs`.
+
+In the three jobs, `fetch runner` replaces its bare `docker create` with:
 
 ```sh
 id=$(docker create "ghcr.io/$owner/rust-ci-runner@$RUNNER_IMAGE_DIGEST" 2> /dev/null) \
   || { echo "the runner image is not pullable; make the GHCR package public" >&2; exit 1; }
 ```
+
+In the three `install bws` steps, before any download, the server URL guard:
+
+```sh
+case $FACTORY_CI_BWS_SERVER_URL in ''|https://*) ;; *) echo "FACTORY_CI_BWS_SERVER_URL must start with https://" >&2; exit 1 ;; esac
+```
+
+The same check runs in `factory-ci-plan.sh` and `factory-ci-job.sh` before the first `bws` call (they run even when the install step was skipped).
+
+## Environments of the other workflows
+
+| Workflow | Job | Environment |
+| --- | --- | --- |
+| `rust-ci-runner-release.yml` | `publish` | `factory-ci-release` |
+| `factory-ci-mirror-images.yml` | `mirror` | `factory-ci-release`, plus `if: github.ref == 'refs/heads/main'` |
+| `factory-ci-selftest.yml`, `factory-ci-bootstrap.yml` | all | none |
 
 ## Invariants
 

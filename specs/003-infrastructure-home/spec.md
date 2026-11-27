@@ -20,7 +20,19 @@ Answers come from the lead's brief. Nothing blocked on the user; open questions 
 - Q: May a workflow run cargo directly? → A: Only the selftest and release workflows, because no runner exists yet to build the first one. The README, both workflow headers and `plan.md` state this exception (FR-020).
 - Q: Which image does the tick pull, and must it be public? → A: `ghcr.io/sudtanj/rust-ci-runner`, published from this repo. The package must be public or the tick cannot pull it (FR-004).
 
-- Clarify pass: the coverage scan found no question that the brief did not answer. Six non-blocking questions are recorded as OQ-1 to OQ-6 with defaults.
+- Clarify pass: the coverage scan found no question that the brief did not answer. Non-blocking questions are recorded under Open Questions with defaults.
+
+### Review round 1, 2026-11-27 (lead decisions after the critic, devops and security reviews)
+
+- D1: `rust-version` is `1.90`, the value of the toolchain pin. The owner asked for the field in 002 T081; 1.82 was never checked against the dependencies (FR-007).
+- D2: The temporary first-compile job lives in its own workflow `factory-ci-bootstrap.yml`, runs only for same-repo pull requests, and is deleted before merge. The selftest never uploads artifacts, reads a secret or names an Environment (FR-009, FR-029).
+- D3: Required checks on `main` are the selftest jobs only. The runner's `factory-ci*` statuses stay informational (README, FR-022).
+- D4: The selftest also builds the release binaries for both musl targets and builds the image without pushing it, so a release problem shows before the tag (FR-028).
+- D5: Tests that need a real container engine carry `#[ignore]`; the runner pipeline runs `cargo test --locked`; the selftest host job adds `-- --include-ignored` (FR-030).
+- D6: A watched repo with no `.factory-ci.toml` is skipped by the plan: no status, no job (checked in `plan.rs`). The README says so. factory-monorepo's root file is on its PR 2 and not on `main` yet, so the live check waits for that PR (SC-003).
+- D7: The two Loki tokens: `factory-ci-docker` holds its own `FACTORY_CI_LOG_TOKEN` (FR-010).
+- D8: Release publish and image mirror run in a fourth Environment, `factory-ci-release`, with no secrets (FR-033).
+- D9: The compile loop has a budget of 5 selftest runs, then the engineer stops and the plan is revisited (FR-008).
 
 ### What this feature changes in 002
 
@@ -52,7 +64,7 @@ The owner opens the repo and finds no leftover from the monorepo: no "do not use
 
 ### User Story 2 - The first compile and a green selftest (Priority: P1)
 
-The crate has never compiled. The pull request for this feature triggers `factory-ci-selftest.yml` (it changes `rust-ci-runner/**`). That run is the first compile. The same pull request commits `Cargo.lock`, builds with `--locked`, formats the code and declares `rust-version = "1.82"`.
+The crate has never compiled. The pull request for this feature triggers `factory-ci-selftest.yml` (it runs on every pull request). That run is the first compile. The same pull request commits `Cargo.lock`, builds with `--locked`, formats the code and declares `rust-version = "1.90"`.
 
 **Why this priority**: Nothing else ships while the code does not build. 002 T045 and T081 waited for this.
 
@@ -60,11 +72,12 @@ The crate has never compiled. The pull request for this feature triggers `factor
 
 **Acceptance Scenarios**:
 
-1. **Given** no `Cargo.lock` in the repo and no local cargo, **When** a temporary selftest job runs `cargo generate-lockfile` and `cargo fmt`, **Then** it uploads `Cargo.lock` and a format patch as an artifact, and the engineer commits both.
+1. **Given** no `Cargo.lock` in the repo and no local cargo, **When** the temporary bootstrap workflow runs on a same-repo pull request, **Then** it uploads `Cargo.lock` and a format patch of `.rs` files as an artifact, and the engineer commits both after reading the diff.
 2. **Given** `Cargo.lock` committed, **When** the Makefile, the selftest and the release workflow run cargo, **Then** each call carries `--locked`, and a stale lock fails the build.
-3. **Given** the temporary job is no longer needed, **When** the lock and the patch are committed, **Then** the job is removed in the same pull request.
-4. **Given** a compile or test failure in the first run, **When** the engineer reads the public run log, **Then** the fix lands at its source, never by loosening a test, and the loop repeats until the run is green.
-5. **Given** `rust-ci-runner/Cargo.toml`, **When** it is read, **Then** it holds `rust-version = "1.82"`.
+3. **Given** the bootstrap workflow is no longer needed, **When** the lock and the patch are committed, **Then** the workflow file is deleted in the same pull request.
+4. **Given** a compile or test failure in the first run, **When** the engineer reads the public run log, **Then** the fix lands at its source, never by loosening a test. The loop has a budget of 5 runs; a fast `cargo check --locked --all-targets` job gives the compile errors first.
+5. **Given** `rust-ci-runner/Cargo.toml`, **When** it is read, **Then** it holds `rust-version = "1.90"`.
+6. **Given** the selftest, **When** it runs, **Then** it also builds both musl release binaries with the release workflow's linker settings and builds the image without pushing it.
 
 ---
 
@@ -101,6 +114,7 @@ The runner watches `sudtanj/factory-monorepo` (private). Its build, lint and tes
 1. **Given** the watch list, **When** the plan reads the monorepo entry, **Then** the repo is treated as private, which needs log shipping, and runs without `allow_docker`.
 2. **Given** a monorepo with a root `.factory-ci.toml` and one in each of `a/` and `b/`, **When** only `a/` changes, **Then** the root project and `a` run and `b` gets "unchanged since" (002 US2, US3).
 3. **Given** this repo, **When** its workflows are listed, **Then** none checks out or builds the monorepo.
+4. **Given** a watched repo with no `.factory-ci.toml` (factory-monorepo until its PR 2 merges), **When** a tick runs, **Then** the plan skips it: no status, no job. The README says so.
 
 ---
 
@@ -114,15 +128,15 @@ Once running, the runner builds, lints and tests itself through `rust-ci-runner/
 
 **Acceptance Scenarios**:
 
-1. **Given** `rust-ci-runner/.factory-ci.toml`, **When** the runner runs it, **Then** format, clippy and the tests that need no Docker pass with `--locked`.
-2. **Given** the root `.factory-ci.toml`, **When** the runner runs it, **Then** the shell tests and the workflow lint pass.
+1. **Given** `rust-ci-runner/.factory-ci.toml`, **When** the runner runs it, **Then** format, clippy and `cargo test --locked` pass; the tests that need a real container engine carry `#[ignore]` and run only in the selftest host job with `-- --include-ignored`.
+2. **Given** the root `.factory-ci.toml`, **When** the runner runs it in its container image, **Then** the shell tests and the workflow lint pass, including the git calls the tests make.
 3. **Given** the README, **When** the owner looks for the bootstrap exception, **Then** it says: the selftest and release workflows run cargo directly, and no other workflow may.
 
 ---
 
 ### User Story 6 - The README says what to do by hand (Priority: P2)
 
-The README Setup section lists which secrets and variables go in which Environment, and the manual steps: create the Environments, set the secrets, make the GHCR packages public, set up the scheduler that calls the tick, create the Bitwarden machine accounts.
+The README Setup section lists which secrets and variables go in which Environment, and the manual steps: repository rules, create the Environments, set the secrets, make the GHCR packages public, set up the scheduler that calls the tick, create the Bitwarden machine accounts, and the rollback.
 
 **Why this priority**: A public repo shows its whole setup (Principle II). The owner cannot script these steps, so the list must be exact.
 
@@ -132,7 +146,8 @@ The README Setup section lists which secrets and variables go in which Environme
 
 1. **Given** the workflows, **When** every `secrets.NAME` and `vars.NAME` is extracted (except `GITHUB_TOKEN`), **Then** each appears in the README Setup tables with its Environment, and each README name is read by a workflow.
 2. **Given** a workflow change that reads a new secret, **When** the README is not updated, **Then** the test fails.
-3. **Given** the Setup section, **When** the owner follows it from top to bottom, **Then** the order works: Environments, Bitwarden, Grafana, tokens, secrets, merge, release, make public, variables, mirror, scheduler, first tick.
+3. **Given** the Setup section, **When** the owner follows it from top to bottom, **Then** the order works: repository rules, Environments, Bitwarden, Grafana, tokens, secrets, merge, release, make public, variables, mirror, scheduler, first tick, and only then deletion of the old Bitwarden log keys.
+4. **Given** every `environment:` name in the workflows, **When** compared with the README, **Then** the sets are equal.
 
 ---
 
@@ -154,12 +169,16 @@ After the owner finishes Setup, the live checks that 002 could not run (T046, T0
 ### Edge Cases
 
 - A second `Cargo.lock` appears from a dependency change without `--locked`: the next build fails on a stale lock, which is the intent.
-- The first compile has many errors: each push of the loop costs one public run; no local build exists (1 GB of RAM).
+- The first compile has many errors: each push of the loop costs one public run; no local build exists (1 GB of RAM). After 5 runs the engineer stops and the plan is revisited.
+- A fork's pull request runs the bootstrap workflow: it does not run (same-repo pull requests only), so a fork cannot produce the artifact the engineer commits.
+- The first push to GHCR makes a private package: the tick cannot pull it until the owner switches it to public.
+- A watched repo has no `.factory-ci.toml`: the plan skips it silently.
+- The Bitwarden server URL variable does not start with `https://`: the tick refuses it before any download or call.
 - The Environments do not exist when the tick first runs: GitHub creates them without a branch rule and without secrets, and the plan fails its guard. The README says to create them first and restrict them to `main`.
 - A log secret is set in the plan Environment but missing in `factory-ci-docker`: the docker job refuses with "log credentials incomplete" (an `error` status with one retry).
 - The private monorepo entry and no log credentials: the plan refuses the repo and fails the tick.
 - A fork's pull request runs the selftest: it gets no secrets and `contents: read` only.
-- A workflow dispatched from a branch other than `main` gets no Environment secrets, and the `plan` job is skipped.
+- A workflow dispatched from a branch other than `main`: the Environment refuses the job, `plan` does not run, and `verdict` ends red. No secret is read.
 - `workflow_dispatch` token for the scheduler leaks: it can only start ticks; the tick still reads secrets only on `main`.
 
 ## Requirements *(mandatory)*
@@ -177,41 +196,60 @@ After the owner finishes Setup, the live checks that 002 could not run (T046, T0
 **First compile**
 
 - **FR-006**: `rust-ci-runner/Cargo.lock` MUST be committed, and every `cargo build`, `test`, `clippy` and `fetch` call in the Makefile, the selftest and release workflows and the pipeline files MUST use `--locked` where the subcommand accepts it.
-- **FR-007**: `cargo fmt --check` MUST pass, and `rust-ci-runner/Cargo.toml` MUST hold `rust-version = "1.82"`.
-- **FR-008**: The selftest workflow MUST pass on the pull request that implements this feature, covering build, format check, clippy, tests, the fixture pipeline, the watch-list check, the workflow lint and the shell tests.
-- **FR-009**: The lock file and the format patch MUST come from a temporary selftest job that uploads them as an artifact, because nothing can run cargo locally. The job MUST be removed before merge.
+- **FR-007**: `cargo fmt --check` MUST pass, and `rust-ci-runner/Cargo.toml` MUST hold `rust-version = "1.90"`, the value of the toolchain pin (D1).
+- **FR-008**: The selftest workflow MUST pass on the pull request that implements this feature, covering a fast `cargo check --locked --all-targets` job, build, format check, clippy, tests, the fixture pipeline, the watch-list check, the workflow lint and the shell tests. The compile-fix loop has a budget of 5 runs; after that the plan is revisited.
+- **FR-009**: The lock file and the format patch MUST come from a temporary workflow `factory-ci-bootstrap.yml`, because nothing can run cargo locally. It MUST run only for same-repo pull requests; run `cargo generate-lockfile` only when no lock exists, with `rust-version` already set and `CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback`; format with `cargo fmt || true`; limit the patch to `rust-ci-runner/*.rs`; upload only `rust-ci-runner/Cargo.lock` and `fmt.patch` (no hidden files, 3-day retention, `if: always()`) with the already pinned `actions/upload-artifact`. The engineer MUST download only from the run of the same pull request, apply with `git apply --include='rust-ci-runner/*'`, and read the diff before committing. The workflow file MUST be deleted before merge.
 
 **Bootstrap secrets**
 
-- **FR-010**: Log credentials MUST come from the Environment secrets `FACTORY_CI_LOG_URL`, `FACTORY_CI_LOG_USER` and `FACTORY_CI_LOG_TOKEN`, set in `factory-ci-plan`, `factory-ci` and `factory-ci-docker`. No script MUST read them from Bitwarden.
+- **FR-010**: Log credentials MUST come from the Environment secrets `FACTORY_CI_LOG_URL`, `FACTORY_CI_LOG_USER` and `FACTORY_CI_LOG_TOKEN`, set in `factory-ci-plan`, `factory-ci` and `factory-ci-docker`. `factory-ci-docker` holds its own `FACTORY_CI_LOG_TOKEN` (a separate Grafana access policy token, so the docker Environment can be cut off alone); URL and user are the same values. No script MUST read them from Bitwarden.
 - **FR-011**: All three set means shipping is on, none means off, and a partial set MUST fail the tick at the start of the plan (before any GitHub read), naming the missing names. A job given a partial set MUST refuse before it runs a step.
 - **FR-012**: Each log credential MUST be masked before use, and a value with a trimmed line under 4 characters MUST be refused. The three values MUST NOT reach any step container.
 - **FR-013**: Pipeline secrets MUST come from Bitwarden only, with no GitHub-secret fallback. A job MUST make a Bitwarden call only when its pipeline lists at least one secret. An idle tick makes no Bitwarden call.
 - **FR-014**: The three `FACTORY_CI_LOG_*` names and `BWS_ACCESS_TOKEN` stay reserved: a pipeline that lists them is rejected before any container starts.
 - **FR-015**: No bootstrap secret value, no private repo name detail, branch, SHA, project path or secret name MUST appear in public logs, summaries, statuses, artifacts or outputs (002 FR-059). A test with sentinel values MUST prove it for the plan and job scripts.
-- **FR-016**: The README MUST say the `FACTORY_CI_TOKEN` fine-grained token covers both watched repos (Contents read, Commit statuses read and write, Metadata read).
+- **FR-016**: The README MUST say the `FACTORY_CI_TOKEN` fine-grained token covers exactly the watched repos and holds only Contents read, Commit statuses read and write, and Metadata read. The runner uses one token for the clone and the statuses; splitting it is deferred (plan, Open risks).
 
 **Pipeline files**
 
-- **FR-017**: factory-monorepo's build, lint and test MUST run only as runner pipeline steps from `.factory-ci.toml` files: one at its root for repo-wide checks, one in each top-level project folder. No Actions workflow, here or there, builds or tests that repo.
+- **FR-017**: factory-monorepo's build, lint and test MUST run only as runner pipeline steps from `.factory-ci.toml` files: one at its root for repo-wide checks, one in each top-level project folder. No Actions workflow, here or there, builds or tests that repo. A watched repo with no `.factory-ci.toml` is skipped by the plan with no status and no job, and the README says so.
 - **FR-018**: The pipeline format MUST stay TOML in `.factory-ci.toml`.
-- **FR-019**: This repo MUST hold `rust-ci-runner/.factory-ci.toml` (format, lint and the tests that need no Docker) and a root `.factory-ci.toml` (shell tests and workflow lint).
+- **FR-019**: This repo MUST hold `rust-ci-runner/.factory-ci.toml` (format, lint and `cargo test --locked`) and a root `.factory-ci.toml` (shell tests and workflow lint). The root step's image MUST provide `git` and trust the mounted checkout (`git config --global --add safe.directory '*'`), or the docs test MUST use a fixed file list that excludes `target/`; the `own-pipelines` job proves it.
 - **FR-020**: Only the selftest and release workflows MAY run cargo directly, because no runner exists yet to build the first one. The README, the header of each of those two workflows and `plan.md` MUST say so, and a lint rule MUST fail any other workflow that runs `cargo`.
-- **FR-021**: Before merge, the selftest MUST run both pipeline files with the freshly built runner, so a broken pipeline file never reaches the first tick.
+- **FR-021**: Before merge, a selftest job `own-pipelines` MUST run both pipeline files with the freshly built runner (built there or passed as an artifact), with `FACTORY_CI_SHA`, `FACTORY_CI_EVENT` and `FACTORY_CI_BRANCH` set as the fixture step sets them and a separate `CARGO_TARGET_DIR`, so a broken pipeline file never reaches the first tick.
 
 **README and constitution**
 
-- **FR-022**: The root README Setup MUST list every secret and variable with the Environment or scope that holds it, and the manual steps: create the three Environments limited to `main`, set the secrets, make the runner image and mirrored image packages public, set up the external scheduler for the tick, create the Bitwarden machine accounts and projects, create the Grafana Cloud token and the fine-grained GitHub tokens.
-- **FR-023**: Every `secrets.NAME` and `vars.NAME` a workflow reads (except `GITHUB_TOKEN`) MUST appear in the README Setup tables and every name there MUST be read by a workflow. A shell test MUST enforce both ways.
+- **FR-022**: The root README Setup MUST list every secret and variable with the Environment or scope that holds it, and the manual steps, in the order that works:
+  - Repository rules: a `main` ruleset (pull request and review required, the selftest jobs as the only required checks, no force push, no bypass); CODEOWNERS on `.github/`, `rust-ci-runner/` and `.factory-ci.toml`; a tag ruleset limiting who creates `rust-ci-runner-v*`; Actions settings (approval for all outside collaborators, read-only default workflow token, run retention 7 to 14 days).
+  - Environments: `factory-ci-plan`, `factory-ci`, `factory-ci-docker` limited to `main` with admin bypass off; `factory-ci-release` (no secrets) limited to `main` and the tag pattern `rust-ci-runner-v*`.
+  - Accounts: Bitwarden machine accounts (read-only, one project each, token expiry set); a Grafana access policy with `logs:write` only, a usage alert on ingest, one token for the plan and `factory-ci` and a separate one for `factory-ci-docker`, rotated with the move; fine-grained GitHub tokens as in FR-016; blob keys from `openssl rand -hex 32`, rotated with the tokens.
+  - After Setup, `gh secret list` at repo and org level shows none of the bootstrap names: they live only in Environments.
+  - GHCR: the first push is private; switch it to public in the UI; check with `gh api /users/sudtanj/packages/container/rust-ci-runner --jq .visibility`; confirm the release digest came from a run on `main`.
+  - Scheduler: cron-job.org, `POST` to the dispatch endpoint with headers `Accept: application/vnd.github+json`, `Authorization: Bearer <token>` and `X-GitHub-Api-Version: 2022-11-28`, body `{"ref":"main"}`, expect 204, failure notification on, fine-grained token with Actions write on this repo only, a renewal reminder at day 75.
+  - Heartbeat: healthchecks.io with a grace of 60 minutes or more, pinged at `/fail` when the plan failed or the tick is red.
+  - What a watched repo without `.factory-ci.toml` gets (nothing), and that the old Bitwarden `FACTORY_CI_LOG_*` keys are deleted only after quickstart checks 1 to 5 and 8 pass and some days of green ticks.
+  - Rollback: pause the scheduler first, revert the lock and `--locked` together, and write down the previous `RUNNER_IMAGE_DIGEST`; the README lists what a revert does not restore (Environment secrets, the public package, Bitwarden contents, the scheduler token, the Grafana policy).
+  - Notes: watch `ubuntu-24.04` deprecation notices; rerun the mirror after a Docker Hub rate limit; keep this repo public or lengthen the tick period (cost).
+- **FR-023**: Every `secrets.NAME` and `vars.NAME` a workflow reads (except `GITHUB_TOKEN`) MUST appear in the README Setup tables and every name there MUST be read by a workflow. Every `environment:` name in the workflows MUST appear in the README and the reverse. A shell test MUST enforce both ways.
 - **FR-024**: `rust-ci-runner/README.md` MUST point to the root README for setup and keep only runner behaviour, commands and the pipeline format.
 - **FR-025**: 002 tasks T045 and T081 MUST be done by this feature, T046, T054 and T065 MUST be tracked here as blocked on Setup, and 002's `tasks.md` MUST point to the 003 task for each.
 - **FR-026**: The constitution MUST change by Governance PATCH 1.0.1 so that "repository secrets and variables" also covers this repo's Environment secrets and variables.
 
-- **FR-027**: No workflow in this repo MUST use the `pull_request_target` trigger. The workflow lint MUST fail a copy that does, for every workflow file in the directory. A public repo's fork pull requests then never run with secrets.
+- **FR-027**: No workflow in this repo MUST use the `pull_request_target` trigger, in block, list (`on: [pull_request_target]`) or map (`on: {pull_request_target: ...}`) form. The workflow lint MUST fail a copy that does, for every workflow file in the directory. A public repo's fork pull requests then never run with secrets.
+
+**Selftest, release and tick hardening**
+
+- **FR-028**: The selftest MUST build the release binaries for both musl targets with the release workflow's compiler and linker settings and build the image with `docker buildx build` without pushing it. The release workflow MUST run `rustup toolchain install` before `make build`. The release workflow gets no `workflow_dispatch` trigger.
+- **FR-029**: The selftest MUST run on every pull request (no `paths:` filter) and on `workflow_dispatch`, have `concurrency: {group: selftest-${{ github.ref }}, cancel-in-progress: true}`, use `persist-credentials: false` on every checkout, and never use `secrets.`, `environment:`, `workflow_run` or `id-token`. The lint MUST fail a copy that does. The selftest MUST lint the whole `.github/workflows/` directory with `FACTORY_CI_LINT_STRICT=1`.
+- **FR-030**: Tests that need a real container engine MUST carry `#[ignore]`. The runner pipeline runs `cargo test --locked`; the selftest host job adds `-- --include-ignored`.
+- **FR-031**: `FACTORY_CI_BWS_SERVER_URL`, when set, MUST start with `https://`; the tick MUST refuse any other value before it downloads or calls anything.
+- **FR-032**: A shell test MUST scan the committed docs (README files, `research.md`, `quickstart.md`) for private identifiers: no run URL of a private repo, no Grafana hostname, no token or key pattern. The live-check results template in `research.md` says so.
+- **FR-033**: The release `publish` job and the image mirror job MUST run in the Environment `factory-ci-release`. The mirror job MUST run only when `github.ref == 'refs/heads/main'`.
 
 ### Key Entities
 
-- **Environment**: a GitHub Environment of this repo (`factory-ci-plan`, `factory-ci`, `factory-ci-docker`), limited to `main`, holding bootstrap secrets.
+- **Environment**: a GitHub Environment of this repo. `factory-ci-plan`, `factory-ci` and `factory-ci-docker` are limited to `main` and hold bootstrap secrets. `factory-ci-release` holds none and is limited to `main` and the release tag pattern.
 - **Bootstrap secret**: an Actions secret the runner needs before it can read Bitwarden: tokens, blob keys, log credentials, heartbeat URL.
 - **Repository variable**: a non-secret Actions variable: image digests, Bitwarden project IDs, status link.
 - **Pipeline file**: a `.factory-ci.toml` at a repo root or in a top-level folder.
@@ -223,8 +261,8 @@ After the owner finishes Setup, the live checks that 002 could not run (T046, T0
 
 - **SC-001**: The selftest workflow is green on the pull request, and the pull request holds `Cargo.lock`.
 - **SC-002**: The stale-wording test, the `ubuntu-24.04` lint and the README-versus-workflows test pass in the shell job, and each fails on a mutated copy.
-- **SC-003**: After Setup, one manual tick posts a `factory-ci` status on `sudtanj/infrastructure` and on `sudtanj/factory-monorepo` within 15 minutes.
-- **SC-004**: A line a monorepo step prints is searchable in Loki within 30 seconds, and a signed-out reader of the public run log finds none of: a log credential, a branch, a SHA, a project path, a secret name.
+- **SC-003**: After Setup, one manual tick posts a `factory-ci` status on `sudtanj/infrastructure` within 15 minutes. The same holds for `sudtanj/factory-monorepo` once its PR 2 (the root `.factory-ci.toml`) is merged; until then the plan skips that repo and the check waits.
+- **SC-004**: Once factory-monorepo PR 2 is merged, a line a monorepo step prints is searchable in Loki within 30 seconds, and a signed-out reader of the public run log finds none of: a log credential, a branch, a SHA, a project path, a secret name.
 - **SC-005**: With no Bitwarden token set, a pipeline that lists no secret still runs and ships logs.
 - **SC-006**: Setup takes the owner one pass through the README, with no step missing (checked by the quickstart).
 
@@ -232,12 +270,10 @@ After the owner finishes Setup, the live checks that 002 could not run (T046, T0
 
 None block the plan. Each has a default the plan uses.
 
-- **OQ-1 (scheduler)**: Which external scheduler calls the tick every 5 minutes? Default: cron-job.org, a plain HTTPS POST with a fine-grained token (Actions write, this repo only). The owner may pick another; nothing in this repo depends on the choice.
-- **OQ-2 (docker for this repo)**: Does this repo's own entry get `allow_docker`? Default: no. The integration tests that need Docker stay in the selftest workflow; the pipeline file runs the rest.
-- **OQ-3 (log token per Environment)**: Same Loki credentials in all three Environments, or a separate token for `factory-ci-docker`? Default: the same values, because the docker Environment already holds root-on-host trust. A separate token is a README note.
 - **OQ-4 (variables scope)**: Repository variables or per-Environment variables? Default: repository variables, because none is secret.
 - **OQ-5 (selftest duplicates)**: Drop the selftest's shell and lint jobs once the runner runs the same checks? Default: keep them until the runner has passed 10 ticks; a later feature removes them.
-- **OQ-6 (required checks)**: Which statuses does `main` require? Default: the selftest check, plus `factory-ci` and `factory-ci/rust-ci-runner` after the first green tick.
+
+Closed by the lead (review round 1): OQ-1 scheduler is cron-job.org; OQ-2 `allow_docker` is off on both entries (tests that need an engine are `#[ignore]`d, FR-030); OQ-3 is two Loki tokens, one for `factory-ci-docker` (FR-010); OQ-6 is selftest jobs only as required checks (D3).
 
 ## Assumptions
 
@@ -247,3 +283,6 @@ None block the plan. Each has a default the plan uses.
 - The engineer can read public run logs and download artifacts with `gh`.
 - factory-monorepo's pipeline files are written in that repo under its own constitution (v1.2.0, Principle VII). This feature records the contract and the watch entry only.
 - The package visibility switch and every account step are manual and stay in the README.
+- `rust-version = "1.90"` follows the toolchain pin. The owner asked for the field in 002 T081; the earlier value 1.82 was never checked against the dependencies.
+- factory-monorepo's root `.factory-ci.toml` is on its PR 2 (branch `001-repo-skeleton-impl`), not on `main`. Until it merges the runner skips that repo.
+- One fine-grained token serves the clone and the statuses; splitting it needs a runner change and is deferred.

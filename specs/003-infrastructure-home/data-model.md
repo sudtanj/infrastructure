@@ -6,9 +6,11 @@ No stored data. These are the configuration objects the feature touches.
 
 | Field | Value |
 | --- | --- |
-| name | `factory-ci-plan`, `factory-ci`, `factory-ci-docker` |
-| deployment branches | `main` only |
-| jobs | `plan` and `verdict` use `factory-ci-plan`; `run` uses `factory-ci`; `run-docker` uses `factory-ci-docker` |
+| name | `factory-ci-plan`, `factory-ci`, `factory-ci-docker`, `factory-ci-release` |
+| deployment branches | `main` only; `factory-ci-release` also allows the tag pattern `rust-ci-runner-v*` |
+| admin bypass | off |
+| jobs | `plan` and `verdict` use `factory-ci-plan`; `run` uses `factory-ci`; `run-docker` uses `factory-ci-docker`; release `publish` and the image mirror use `factory-ci-release` (no secrets) |
+| selftest and bootstrap | name no Environment |
 
 ## Bootstrap secret (name, Environments)
 
@@ -23,9 +25,9 @@ No stored data. These are the configuration objects the feature touches.
 | `FACTORY_CI_HEARTBEAT_URL` | optional | yes | no | no |
 | `FACTORY_CI_LOG_URL` | all three or none; required for a private watched repo | yes | yes | yes |
 | `FACTORY_CI_LOG_USER` | same | yes | yes | yes |
-| `FACTORY_CI_LOG_TOKEN` | same | yes | yes | yes |
+| `FACTORY_CI_LOG_TOKEN` | same; `factory-ci-docker` holds a second, separate token (own Grafana access policy, `logs:write` only) | yes | yes | yes (own value) |
 
-`GITHUB_TOKEN` is supplied by GitHub.
+`GITHUB_TOKEN` is supplied by GitHub. None of these names exists at repository or organisation level; `gh secret list` shows none of them after Setup.
 
 ## Repository variable
 
@@ -36,7 +38,7 @@ No stored data. These are the configuration objects the feature touches.
 | `FACTORY_CI_DIND_IMAGE` | yes | same |
 | `FACTORY_CI_BWS_PROJECT` | for pipelines with secrets | after Bitwarden setup |
 | `FACTORY_CI_BWS_PROJECT_DOCKER` | with `allow_docker` rows | same |
-| `FACTORY_CI_BWS_SERVER_URL` | outside the US cloud | same |
+| `FACTORY_CI_BWS_SERVER_URL` | outside the US cloud; must start with `https://` | same |
 | `FACTORY_CI_LOG_LINK` | optional | Explore URL with `{run_id}` |
 
 ## Watch entry
