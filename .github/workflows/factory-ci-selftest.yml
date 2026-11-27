@@ -1,7 +1,19 @@
 name: factory-ci-selftest
 
+# Exception to "only the release workflow compiles the runner" (feature 008, owner decision): pull requests
+# return 403 here and both landings are direct pushes, so this workflow compiles and type-checks the
+# runner, and builds the image without pushing it, before the code reaches main. It runs on pull requests
+# and on pushes to every branch except main. It holds no secret: the step in the workflow job below fails
+# when this file gains one, a deployment gate or a privileged trigger.
 on:
   pull_request:
+    paths:
+      - "rust-ci-runner/**"
+      - ".github/workflows/factory-ci*.yml"
+      - ".github/factory-ci-repos.toml"
+      - ".github/scripts/**"
+  push:
+    branches-ignore: [main]
     paths:
       - "rust-ci-runner/**"
       - ".github/workflows/factory-ci*.yml"
@@ -34,6 +46,18 @@ jobs:
           test -z "$(docker ps -aq --filter label=factory-ci.run)"
           test -z "$(docker network ls -q --filter label=factory-ci.run)"
           test -z "$(docker volume ls -q --filter label=factory-ci.run)"
+      # The image is built for both architectures and not pushed. The arm64 binary is a stand-in copy of
+      # the amd64 one: the Dockerfile only copies it. A wrong bws hash or a broken stage fails here.
+      - name: stage the image context
+        run: |
+          mkdir -p image/amd64 image/arm64
+          cp rust-ci-runner/target/release/rust-ci-runner image/amd64/rust-ci-runner
+          cp rust-ci-runner/target/release/rust-ci-runner image/arm64/rust-ci-runner
+          cp rust-ci-runner/Dockerfile image/Dockerfile
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: build the image for amd64 and arm64, no push
+        run: docker buildx build --platform linux/amd64,linux/arm64 image
 
   list:
     runs-on: ubuntu-24.04
@@ -42,11 +66,24 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - name: build the runner from source
+      # Temporary: Cargo.lock is not committed yet. This step makes one and uploads it so the next
+      # commit can add it; then the step, the upload and this comment go away.
+      - name: generate Cargo.lock
         working-directory: rust-ci-runner
-        run: cargo build --release
+        run: cargo generate-lockfile
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cargo-lock
+          path: rust-ci-runner/Cargo.lock
+      - name: type-check the unit tests
+        working-directory: rust-ci-runner
+        run: cargo test --lib --no-run
+      - name: clippy
+        working-directory: rust-ci-runner
+        run: cargo clippy --locked -- -D warnings
       - name: check the watch list
-        run: rust-ci-runner/target/release/rust-ci-runner plan --repos .github/factory-ci-repos.toml --check
+        working-directory: rust-ci-runner
+        run: cargo run -q -- plan --repos ../.github/factory-ci-repos.toml --check
 
   workflow:
     runs-on: ubuntu-24.04
@@ -57,6 +94,18 @@ jobs:
           persist-credentials: false
       - name: lint the tick and release workflows
         run: .github/scripts/factory-ci-lint-workflow.sh .github/workflows/factory-ci-tick.yml .github/workflows/rust-ci-runner-release.yml
+      # The patterns use [x] so this step does not match itself.
+      - name: this workflow holds no secret, gate or privileged trigger
+        run: |
+          f=.github/workflows/factory-ci-selftest.yml
+          if grep -En '[e]nvironment:|[i]d-token|[p]ull_request_target' "$f"; then
+            echo "factory-ci-selftest must not use these" >&2
+            exit 1
+          fi
+          if grep -En '[s]ecrets\.[A-Z_]' "$f" | grep -v 'secrets\.GITHUB_TOKEN'; then
+            echo "factory-ci-selftest may use no secret other than GITHUB_TOKEN" >&2
+            exit 1
+          fi
 
   shell:
     runs-on: ubuntu-24.04
