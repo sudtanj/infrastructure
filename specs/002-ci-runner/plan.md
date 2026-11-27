@@ -385,7 +385,7 @@ Hand-rolled generators with a fixed seed, no new crate. QA turns each into a tes
 - I12. The state `job` posts last is one of `success`, `failure`, `error`, never `pending`.
 - I13. After the first `RateLimited` answer, `plan` makes no further read call.
 - I14. Every field of a matrix row passes its validator (sha, names, folder rule, run id).
-- I15. A Loki payload has exactly the four labels, values sorted by timestamp, and no line over 16 KB.
+- I15. A Loki payload has exactly the four labels plus `service_name` (009), values sorted by timestamp, and no line over 16 KB.
 - I16. Any shipper failure mode leaves the `JobResult.state` equal to the state with shipping off.
 - I17. No printed line in quiet mode contains step output; no printed line starts with `::`; when B is public and no log store resolved, no step output of a private repo is printed or run (H3).
 - I20. Only statuses created by the token's user count: for any status set with foreign creators mixed in, the decision equals the decision with the foreign ones removed (M1).

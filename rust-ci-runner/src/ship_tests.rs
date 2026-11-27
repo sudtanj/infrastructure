@@ -279,7 +279,7 @@ fn payload_invariants_hold_for_random_pushes() {
     let vals = l.values();
     assert_eq!(vals.len(), 200);
     for (labels, _, line) in &vals {
-        assert_eq!(labels.as_object().unwrap().len(), 4);
+        assert_eq!(labels.as_object().unwrap().len(), 5);
         assert!(line.len() <= 16 * 1024 + 128, "{} bytes", line.len());
     }
 }
