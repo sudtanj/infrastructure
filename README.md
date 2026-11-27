@@ -9,7 +9,7 @@ Docs:
 - `specs/003-infrastructure-home/`: the spec, plan, tasks, data model and quickstart for this setup.
 - `rust-ci-runner/README.md`: how the runner works, its commands, the pipeline format and its limits.
 - `specs/002-ci-runner/`: the spec, plan, tasks and quickstart of the runner.
-- `.specify/memory/constitution.md`: the rules for changing this repo. Every change goes through Spec Kit.
+- `.specify/memory/constitution.md`: the rules for changing this repo. Every change goes through Spec Kit, and every change to what the repo holds, how it is set up or its rules updates this README in the same pull request and the GitHub description when it merges.
 
 ## Setup
 
