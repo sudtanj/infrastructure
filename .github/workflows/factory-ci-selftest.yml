@@ -115,5 +115,7 @@ jobs:
         run: .github/scripts/test-factory-ci-secrets.sh
       - name: shell tests of the hardening rules
         run: .github/scripts/test-factory-ci-hardening.sh
+      - name: shell checks of the factory-monorepo-ci workflow
+        run: .github/scripts/test-factory-monorepo-ci.sh
       - name: the lint catches a broken copy of each rule
         run: .github/scripts/factory-ci-lint-workflow.sh --self-test .github/workflows/factory-ci-tick.yml .github/workflows/rust-ci-runner-release.yml
