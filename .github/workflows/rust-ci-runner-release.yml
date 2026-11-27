@@ -56,6 +56,9 @@ jobs:
         env:
           PACKAGES: ${{ matrix.packages }}
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $PACKAGES
+      - name: install the pinned toolchain
+        working-directory: rust-ci-runner
+        run: rustup toolchain install
       - name: build
         working-directory: rust-ci-runner
         env:

@@ -1,0 +1,41 @@
+name: factory-ci-bootstrap
+
+# Bootstrap exception, temporary: there is no local cargo, so this job produces the lock
+# file and the rustfmt diff and hands them over as an artifact. It runs for same-repo pull
+# requests only, with read access and no secret. Deleted before merge (003 T028).
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: install the pinned toolchain
+        working-directory: rust-ci-runner
+        run: rustup toolchain install
+      - name: generate the lock file when it is absent
+        working-directory: rust-ci-runner
+        env:
+          CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: fallback
+        run: test -f Cargo.lock || cargo generate-lockfile
+      - name: format and capture the diff
+        run: |
+          cargo fmt --manifest-path rust-ci-runner/Cargo.toml || true
+          git diff -- 'rust-ci-runner/*.rs' > fmt.patch
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: bootstrap
+          path: |
+            rust-ci-runner/Cargo.lock
+            fmt.patch
+          include-hidden-files: false
+          retention-days: 3
