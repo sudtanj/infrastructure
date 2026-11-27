@@ -48,7 +48,7 @@ Create these before step 4.
 - **Grafana Cloud Loki.** Create two access policies that hold `logs:write` only, with one token each. Use the first token for `factory-ci-plan` and `factory-ci`. Use the second for `factory-ci-docker`, so you can cut off the docker Environment alone. Add a usage alert on ingest.
 - **`FACTORY_CI_TOKEN`:** one fine-grained token for `sudtanj/factory-monorepo` and `sudtanj/infrastructure` only. Permissions: Contents read, Commit statuses read and write, Metadata read. Expiry 90 days; rotate before day 80. Create `FACTORY_CI_TOKEN_DOCKER` the same way only if a watched repo sets `allow_docker = true`.
 - **Scheduler token.** One fine-grained token for `sudtanj/infrastructure` only, with Actions write. It goes into the scheduler (step 10), not into GitHub.
-- **Blob keys.** Generate each key with `openssl rand -hex 32`. Each key must have 32 characters or more. `FACTORY_CI_BLOB_KEY_DOCKER` must differ from `FACTORY_CI_BLOB_KEY`.
+- **Blob keys.** Generate each key with `openssl rand -hex 32`. Each key must be 64 lower-case hex characters, which is what that command prints. `FACTORY_CI_BLOB_KEY_DOCKER` must differ from `FACTORY_CI_BLOB_KEY`.
 
 Rotate the tokens and blob keys together, before day 80.
 
@@ -62,7 +62,7 @@ Add each secret to the Environments marked `yes`, under **Settings > Environment
 | `FACTORY_CI_TOKEN_DOCKER` | yes | no | yes | Only with `allow_docker` repos |
 | `BWS_ACCESS_TOKEN` | yes | yes | no | Default Bitwarden project; needed only for pipelines with secrets |
 | `BWS_ACCESS_TOKEN_DOCKER` | yes | no | yes | Docker Bitwarden project; only with `allow_docker` repos |
-| `FACTORY_CI_BLOB_KEY` | yes | yes | no | `openssl rand -hex 32`, 32 characters or more |
+| `FACTORY_CI_BLOB_KEY` | yes | yes | no | `openssl rand -hex 32`, 64 lower-case hex characters |
 | `FACTORY_CI_BLOB_KEY_DOCKER` | yes | no | yes | Optional: only with `allow_docker` repos; a different value from `FACTORY_CI_BLOB_KEY` |
 | `FACTORY_CI_HEARTBEAT_URL` | yes | no | no | Optional: the heartbeat ping URL, step 11 |
 | `FACTORY_CI_LOG_URL` | yes | yes | yes | Grafana Cloud Loki base URL |
@@ -150,7 +150,7 @@ If a step fails, read the `plan` step first. It names the problem.
 | `no secret store configured` | A pipeline lists a secret, but `BWS_ACCESS_TOKEN` is not set in that job's Environment. Set it, or remove the secret from the pipeline. |
 | `secrets not allowed on this branch` | The branch is not in the watch entry's `secret_branches`. Add it, or remove the secret from the step. |
 | `FACTORY_CI_BWS_SERVER_URL must start with https://` | Use an `https://` URL, or unset the variable inside the US cloud. |
-| The plan stops at its check for the blob key | `FACTORY_CI_BLOB_KEY` is missing or shorter than 32 characters in `factory-ci-plan`. |
+| The plan stops at its check for the blob key | `FACTORY_CI_BLOB_KEY` is missing or not 64 lower-case hex characters in `factory-ci-plan`. |
 
 ### 13. Check that no bootstrap secret sits at repo level
 

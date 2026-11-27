@@ -175,6 +175,7 @@ ck_e() {
   [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] || echo "e: README.md: the scheduler must come before the heartbeat"
   # the old sentence must be gone
   ! grep -qiF "are not read from GitHub" "$r/README.md" 2> /dev/null || echo "e: README.md: still says the log credentials are not read from GitHub"
+  ! grep -qF "32 characters" "$r/README.md" 2> /dev/null || echo "e: README.md: still says 32 characters for a blob key (FR-041)"
   return 0
 }
 
@@ -309,6 +310,7 @@ mk_fixture; mk_readme_e; eq "(e) a complete README passes" "" "$(ck_e "$F")"
 sed -i '/healthchecks.io/d' "$F/README.md"; has "(e) a missing heartbeat row fails" "$(ck_e "$F")" "heartbeat grace"
 mk_readme_e; sed -i 's/, X-GitHub-Api-Version: 2022-11-28//' "$F/README.md"; has "(e) a missing scheduler header fails" "$(ck_e "$F")" "scheduler header version"
 mk_readme_e; echo "The log credentials are not read from GitHub." >> "$F/README.md"; has "(e) the old sentence fails" "$(ck_e "$F")" "not read from GitHub"
+mk_readme_e; echo "Each key must have 32 characters or more." >> "$F/README.md"; has "(e) the old key length fails" "$(ck_e "$F")" "32 characters"
 mk_readme_e; sed -i "s/ with 0 approvals//" "$F/README.md"; has "(e) a missing 0 approvals fails" "$(ck_e "$F")" "0 approvals"
 mk_readme_e; sed -i "/own pull request/d" "$F/README.md"; has "(e) a missing owner-only rationale fails" "$(ck_e "$F")" "owner-only rationale"
 mk_readme_e; sed -i "s| A red tick pings /fail.||" "$F/README.md"; has "(e) a README without /fail fails" "$(ck_e "$F")" "heartbeat /fail"
