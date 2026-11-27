@@ -45,11 +45,11 @@ pub struct Seams {
 }
 
 impl Seams {
-    pub fn production(env: &dyn Fn(&str) -> Option<String>) -> Seams {
-        let var = |k: &str, default: &str| env(k).filter(|v| !v.is_empty()).unwrap_or_else(|| default.to_string());
+    /// Fixed values: nothing in the environment can point the runner at another `bws` or engine.
+    pub fn production() -> Seams {
         Seams {
-            bws: var("FACTORY_CI_BWS", "bws"),
-            engine: var("FACTORY_CI_ENGINE", "docker"),
+            bws: "/usr/local/bin/bws".to_string(),
+            engine: "docker".to_string(),
             git: "git".to_string(),
             clone_base: "https://github.com".to_string(),
             protocol: "https".to_string(),

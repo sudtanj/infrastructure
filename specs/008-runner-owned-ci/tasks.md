@@ -74,7 +74,7 @@ Found by the review and security pass of Landing A. Each is one commit naming it
 - [ ] R03 Run `cargo fmt --check` in the selftest and fix the drift it reports (`main.rs` `=>ExitCode` and any other).
 - [X] R04 `Makefile`: `--locked` on the clippy call of the `lint` target.
 - [X] R05 Release workflow: push only `:<version>` before the smoke step, tag `:latest` after the smoke step passes.
-- [ ] R06 `ci.rs`: in production read neither `FACTORY_CI_BWS` nor `FACTORY_CI_ENGINE`; use `/usr/local/bin/bws` and `docker`. Tests inject through `Seams`.
+- [X] R06 `ci.rs`: in production read neither `FACTORY_CI_BWS` nor `FACTORY_CI_ENGINE`; use `/usr/local/bin/bws` and `docker`. Tests inject through `Seams`.
 - [ ] R07 `pipeline.rs`: `ci` joins the reserved step names, with a test.
 - [ ] R08 `ci.rs`: remove `ci-<run>-<rand>/` under `--work` after `cleanup_run`, as root through the container like `job.rs` `remove_ws`. Test: the directory is gone after the run.
 - [ ] R09 `factory-ci-selftest.yml`: the guard also fails on `secrets:` (with `inherit`), `secrets[`, `toJSON(secrets`, `workflow_run`, `repository_dispatch`; `persist-credentials: false` on every checkout.

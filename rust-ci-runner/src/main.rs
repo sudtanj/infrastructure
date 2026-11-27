@@ -15,7 +15,7 @@ const USAGE: &str = "usage:
   rust-ci-runner status --repo OWNER/NAME --sha SHA --project PATH --run-id ID --state error|failure|success --description TEXT [--retry]  post one status
   rust-ci-runner help
 
-environment: FACTORY_CI_ENGINE=docker|podman (default docker; `job` and `ci` also accept a path); `ci` reads BWS_ACCESS_TOKEN, and optionally FACTORY_CI_BWS, FACTORY_CI_BWS_SERVER_URL, FACTORY_CI_DIND_IMAGE, GITHUB_RUN_ID; `plan`, `job` and `status` read FACTORY_CI_TOKEN. `run` reads secrets from
+environment: FACTORY_CI_ENGINE=docker|podman (default docker; `job` also accepts a path; `ci` always uses docker); `ci` reads BWS_ACCESS_TOKEN, and optionally FACTORY_CI_BWS_SERVER_URL, FACTORY_CI_DIND_IMAGE, GITHUB_RUN_ID; `plan`, `job` and `status` read FACTORY_CI_TOKEN. `run` reads secrets from
 the environment variables named in the pipeline file.";
 
 fn fail(msg: &str) -> ExitCode {
@@ -209,7 +209,7 @@ fn run_ci(args: &[String]) -> ExitCode {
     let token = std::env::var("BWS_ACCESS_TOKEN").unwrap_or_default();
     std::env::remove_var("BWS_ACCESS_TOKEN");
     std::panic::set_hook(Box::new(|_| {}));
-    let seams = ci::Seams::production(&env);
+    let seams = ci::Seams::production();
     ExitCode::from(ci::run(args, &token, &env, &seams, Box::new(std::io::stdout()), Box::new(std::io::stderr())) as u8)
 }
 
