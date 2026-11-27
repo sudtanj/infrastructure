@@ -6,6 +6,60 @@ use std::sync::{Arc, Mutex};
 const MAX_PIECE: usize = 16 * 1024;
 const CUT_TEXT: &str = "log cut off at the size limit";
 
+/// Every text `Log::fault` prints in public mode (FR-019). The two `secret <KEY>:` lines follow a rule.
+pub const FAULTS: &[&str] = &[
+    "bad arguments",
+    "repository or ref not in the watch list",
+    "BWS_ACCESS_TOKEN is not set",
+    "secret store unreachable",
+    "secret store rejected the access token",
+    "log store check failed: check FACTORY_CI_LOG_URL (host only, e.g. https://logs-prod-xxx.grafana.net), FACTORY_CI_LOG_USER (numeric user id) and FACTORY_CI_LOG_TOKEN (needs logs:write)",
+    "log store check failed",
+    "cannot reach the container engine",
+    "repository identity check failed",
+    "clone failed",
+    "pipeline file refused",
+    "docker steps are refused",
+    "runner fault",
+    "internal error",
+];
+
+const SECRET_KEYS: [&str; 4] = ["FACTORY_CI_TOKEN", "FACTORY_CI_LOG_URL", "FACTORY_CI_LOG_USER", "FACTORY_CI_LOG_TOKEN"];
+
+fn is_fault(text: &str) -> bool {
+    if FAULTS.contains(&text) {
+        return true;
+    }
+    let Some((key, rest)) = text.strip_prefix("secret ").and_then(|r| r.split_once(": ")) else {
+        return false;
+    };
+    SECRET_KEYS.contains(&key)
+        && (rest == "unusable value" || rest.strip_prefix("expected 1, found ").is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())))
+}
+
+/// The one place the public output grammar lives (FR-018): the line to print, or `None`. The reason
+/// after `failed in Ns` and `skipped` is cut; `runner` alone says the pipeline and log store lines.
+pub fn public_form(who: &str, text: &str) -> Option<String> {
+    if !(1..=64).contains(&who.len()) || !who.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+        return None;
+    }
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let secs = |s: &str, p: &str| s.strip_prefix(p).and_then(|r| r.strip_suffix('s')).is_some_and(digits);
+    if who == "runner" {
+        let ok = ["pipeline passed", "pipeline failed", "log lines were dropped"].contains(&text)
+            || text.strip_prefix("log store answered HTTP ").is_some_and(|c| c.len() == 3 && digits(c));
+        return ok.then(|| format!("[runner] {text}"));
+    }
+    let head = text.split_once(':').map_or(text, |(h, _)| h);
+    if text == "started" || secs(text, "success in ") {
+        Some(format!("[{who}] {text}"))
+    } else if head == "skipped" || secs(head, "failed in ") {
+        Some(format!("[{who}] {head}"))
+    } else {
+        None
+    }
+}
+
 /// Receives every redacted piece the log keeps, for shipping to a log store.
 pub trait Sink: Send + Sync {
     fn push(&self, who: &str, stream: &str, text: &str);
@@ -18,10 +72,12 @@ pub struct Log {
     red: Redactor,
     sink: Option<Arc<dyn Sink>>,
     quiet: bool,
+    public: bool,
 }
 
 struct Inner {
     out: Box<dyn Write + Send>,
+    err: Box<dyn Write + Send>,
     left: u64,
     cut: bool,
 }
@@ -31,17 +87,27 @@ impl Log {
         Log {
             inner: Mutex::new(Inner {
                 out,
+                err: Box::new(std::io::stderr()),
                 left: limit,
                 cut: false,
             }),
             red,
             sink: None,
             quiet: false,
+            public: false,
         }
     }
 
     pub fn with_sink(mut self, sink: Arc<dyn Sink>) -> Log {
         self.sink = Some(sink);
+        self
+    }
+
+    /// The stream `fault` writes to.
+    pub fn with_err(self, err: Box<dyn Write + Send>) -> Log {
+        if let Ok(mut g) = self.inner.lock() {
+            g.err = err;
+        }
         self
     }
 
@@ -51,13 +117,30 @@ impl Log {
         self
     }
 
+    /// Public: only `event` lines that match `public_form` and `fault` lines print; the sink gets all.
+    pub fn public_events(mut self, public: bool) -> Log {
+        self.public = public;
+        self
+    }
+
+    /// Prints `[runner] <text>` on the fault stream when `text` is in `FAULTS`; drops anything else.
+    pub fn fault(&self, text: &str) {
+        if !is_fault(text) {
+            return;
+        }
+        if let Ok(mut g) = self.inner.lock() {
+            let _ = writeln!(g.err, "[runner] {text}");
+            let _ = g.err.flush();
+        }
+    }
+
     pub fn line(&self, who: &str, text: &str) {
         self.out(who, "stdout", text);
     }
 
-    /// Step or clone output: printed unless quiet, shipped with its stream.
+    /// Step or clone output: printed unless quiet or public, shipped with its stream.
     pub fn out(&self, who: &str, stream: &str, text: &str) {
-        self.write(who, stream, text, !self.quiet);
+        self.write(who, stream, text, !self.quiet && !self.public);
     }
 
     /// A runner event (started, result, duration): always printed. Callers pass fixed text.
@@ -96,7 +179,9 @@ impl Log {
         // shortcut: write errors (disk full) are dropped; the run result is still kept.
         if msg.len() as u64 > g.left {
             g.cut = true;
-            let _ = writeln!(g.out, "[runner] {CUT_TEXT}");
+            if !self.public {
+                let _ = writeln!(g.out, "[runner] {CUT_TEXT}");
+            }
             if let Some(s) = &self.sink {
                 s.push("runner", "stdout", CUT_TEXT);
             }
@@ -105,8 +190,11 @@ impl Log {
         }
         g.left -= msg.len() as u64;
         if print {
-            let _ = g.out.write_all(msg.as_bytes());
-            let _ = g.out.flush();
+            let shown = if self.public { public_form(who, piece).map(|l| l + "\n") } else { Some(msg) };
+            if let Some(m) = shown {
+                let _ = g.out.write_all(m.as_bytes());
+                let _ = g.out.flush();
+            }
         }
         if let Some(s) = &self.sink {
             s.push(who, stream, piece);
@@ -308,7 +396,6 @@ pub mod tests {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn public_mode_prints_only_the_closed_grammar() {
         let (log, out, err, _rec) = public(&["hunter2"]);
         log.event("build", "started");
@@ -337,7 +424,6 @@ pub mod tests {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn public_mode_drops_the_reason_after_failed_and_skipped() {
         // US2.3
         let (log, out, _err, _rec) = public(&[]);
@@ -356,7 +442,6 @@ pub mod tests {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn public_mode_ships_the_full_text() {
         // The sink keeps the reason; only the printed line is cut.
         let (log, _out, _err, rec) = public(&["hunter2"]);
@@ -368,7 +453,6 @@ pub mod tests {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn public_mode_refuses_a_bad_name() {
         let (log, out, _err, _rec) = public(&[]);
         let long = "n".repeat(65);
@@ -383,7 +467,6 @@ pub mod tests {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn fault_accepts_only_the_fixed_list() {
         let (log, out, err, _rec) = public(&[]);
         assert_eq!(FAULTS.len(), 14);
@@ -434,7 +517,6 @@ pub mod tests {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn every_public_line_starts_with_a_bracket_for_hostile_input() {
         // I1 over a generated mix of names and texts.
         let (log, out, err, _rec) = public(&["tok-1234"]);

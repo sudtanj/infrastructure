@@ -131,8 +131,8 @@ impl Pipeline {
                     "step name '{name}' must be 1 to 64 letters, digits, '-' or '_'"
                 ));
             }
-            // The runner's own containers are called factory-ci-<run>-clone and -dind.
-            if name == "clone" || name == "dind" {
+            // The runner's own containers are called factory-ci-<run>-clone and -dind; `runner` is the name of its public lines.
+            if name == "clone" || name == "dind" || name == "runner" {
                 bad.push(format!("step name '{name}' is reserved"));
             }
             if s.image.trim().is_empty() {
@@ -470,7 +470,6 @@ commands = ["x"]
 
     // 008 T004 (test-first): `runner` is reserved so a step cannot forge `[runner] pipeline passed`. FR-018.
     #[test]
-    #[ignore = "test-first"]
     fn step_named_runner_is_refused() {
         let v = bad("[steps.runner]\nimage = \"x\"\ncommands = [\"y\"]\n");
         assert!(has(&v, "runner"), "{v:?}");
