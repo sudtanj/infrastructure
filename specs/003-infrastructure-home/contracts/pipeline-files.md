@@ -31,11 +31,21 @@ Keep the existing header comment. Both entries use defaults: all branches, no sh
 [steps.lint]
 image = "rust:1.90"
 commands = ["rustup component add clippy rustfmt", "cargo fmt --check", "cargo clippy --locked -- -D warnings"]
+timeout = 1200
 
 [steps.test]
 image = "rust:1.90"
-commands = ["cargo test --locked"]   # tests that need a container engine are #[ignore]d (T010)
+# A step container has --pids-limit 512. The tests of ship, job and github start mock HTTP servers (tiny_http)
+# whose threads never exit, so one test process holds about 600 threads. Three processes stay under the limit.
+commands = [
+  "cargo test --locked -- --skip ship_tests:: --skip job_tests::",
+  "cargo test --locked --lib ship_tests::",
+  "cargo test --locked --lib job_tests::",
+]   # tests that need a container engine are #[ignore]d (T010)
+timeout = 1800
 ```
+
+The `test` step runs `cargo test` in three processes (everything else, then `ship_tests`, then `job_tests`) because the `tiny_http` mock servers exceed the 512 pids limit of a step container in one process. A new test module that starts mock servers goes into its own process or into one of these two.
 
 `.factory-ci.toml` (root):
 

@@ -4,7 +4,7 @@
 
 **Tests**: required by the constitution (Principle V). Test tasks come first in their phase and fail until the matching impl task lands.
 
-**Format**: `- [ ] T### [P?] [US#] description with path`. `[P]` means the task touches different files from every other open task of its group and can run in parallel with them. Paths are from the repo root. Review round 1 (critic, devops, security; lead decisions in `spec.md`) renumbered every task; no ID from the first draft survives.
+**Format**: `- [ ] T### [P?] [US#] description with path`. `[P]` means the task touches different files from every other open task of its group and can run in parallel with them. Paths are from the repo root. Review round 1 (critic, devops, security; lead decisions in `spec.md`) renumbered every task; no ID from the first draft survives. Review round 2 adds T036 to T044 in Phase 7b.
 
 ## Common constraints (every task and brief)
 
@@ -18,7 +18,7 @@
 
 ## Phases and order
 
-Phase 1 is the gate: nothing else can be checked until the crate compiles. Phase 2 (tests) runs in parallel with Phase 1 after T001, except T010, which edits Rust test files and waits for T005. Phases 3 to 7 are impl; files shared between tasks run in the order of the task IDs. Phase 8 closes the pull request. Phase 9 is blocked on the owner's Setup (and, for the monorepo checks, on factory-monorepo PR 2) and stays open after merge.
+Phase 1 is the gate: nothing else can be checked until the crate compiles. Phase 2 (tests) runs in parallel with Phase 1 after T001, except T010, which edits Rust test files and waits for T005. Phases 3 to 7 are impl; files shared between tasks run in the order of the task IDs. Phase 7b (review round 2) comes before Phase 8 closes the pull request. Phase 9 is blocked on the owner's Setup (and, for the monorepo checks, on factory-monorepo PR 2) and stays open after merge.
 
 ---
 
@@ -30,7 +30,7 @@ Phase 1 is the gate: nothing else can be checked until the crate compiles. Phase
 - [X] T002 [US2] New `.github/workflows/factory-ci-bootstrap.yml` (temporary; FR-009; research D4): `pull_request`, one `ubuntu-24.04` job guarded by `if: github.event.pull_request.head.repo.full_name == github.repository`, `permissions: contents: read`, no Environment, no secret; `rustup toolchain install`; `generate-lockfile` only when `rust-ci-runner/Cargo.lock` is absent, with `CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback`; `cargo fmt || true`; `git diff -- 'rust-ci-runner/*.rs' > fmt.patch`; upload with `actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02` (the pin the release workflow uses), `if: always()`, paths `rust-ci-runner/Cargo.lock` and `fmt.patch` only, `include-hidden-files: false`, `retention-days: 3`. Header comment says it is the bootstrap exception and is deleted by T028. Proof: the YAML reads back clean.
 - [X] T003 [US2] Push the branch and open the pull request as a draft. Wait for the run of this pull request. Download the artifact with `gh run download <run-id>` from that run only (FR-009). Read `fmt.patch` and the lock diff before applying anything. If the bootstrap job fails, fix it and rerun. Proof: `Cargo.lock` and `fmt.patch` are on the engineer's disk and the diff was read; the task notes name the run ID. Notes: first bootstrap run 45952679858 (artifact read, lock and fmt.patch applied; later bootstrap runs gave an empty patch).
 - [X] T004 [US2] Land the lock (FR-006, FR-009; 002 T081): commit `rust-ci-runner/Cargo.lock`; apply the patch with `git apply --include='rust-ci-runner/*' fmt.patch`; add `--locked` to every cargo call that accepts it in `rust-ci-runner/Makefile` (`fetch`, `test`, `clippy`, `build`), the selftest (including the `check` job) and `.github/workflows/rust-ci-runner-release.yml`. Lock and `--locked` land in one commit. Proof: `grep -n cargo` on the three files shows `--locked` on every build, test, clippy, check and fetch line (`fmt` stays without it).
-- [X] T005 [US2] Compile-fix loop (FR-008; 002 T045): push, read `gh run view --log-failed`, fix every error in the log at its source, never by loosening or deleting a test, push again. Budget: 5 selftest runs; after the fifth red run, stop and report so the plan is revisited. After each Rust fix, take the fresh `fmt.patch` from the bootstrap run and apply it the same way. Record each class of failure in the task notes. Proof: every selftest job green, `cargo fmt --check` included. Notes (open, budget spent after 5 red selftest runs, 45952679834, 45952999801, 45953515782, 45953881768, 45954341009): E0308 array size in `tests/executor.rs`; unused `std::io::Read` in 4 test files; clippy `type_complexity` in `job.rs`; `job_rules` test expected the unsanitized comma (FR-051 sanitizer turns it into `_`); aarch64 `build-release` needed `libc6-dev-arm64-cross`. Still red: last step "no containers, networks or volumes are left" after `cargo test` ran in the same job. Budget extended by 3 selftest runs (coordinator): cause of the leak is a runner bug in `engine.rs` `run_logged`, where a timeout during container creation killed the client before the daemon finished the create and left a `Created` container; fix is `stop_and_remove`: `rm -f` the container repeatedly while the client is still alive (it exits only when the daemon is done), client killed after 30 s. A first version that killed the client first and polled `inspect` for 5 s still leaked (run 45956119997). Result: run 45956696628 green for `pipeline`, `check`, `list`, `workflow` and both `build-release` jobs (fmt patch empty); `shell` red only on the test-first scripts of T007 to T009.
+- [X] T005 [US2] Compile-fix loop (FR-008; 002 T045): push, read `gh run view --log-failed`, fix every error in the log at its source, never by loosening or deleting a test, push again. Budget: 5 selftest runs; after the fifth red run, stop and report so the plan is revisited. After each Rust fix, take the fresh `fmt.patch` from the bootstrap run and apply it the same way. Record each class of failure in the task notes. Proof: every selftest job green, `cargo fmt --check` included. Notes (open, budget spent after 5 red selftest runs, 45952679834, 45952999801, 45953515782, 45953881768, 45954341009): E0308 array size in `tests/executor.rs`; unused `std::io::Read` in 4 test files; clippy `type_complexity` in `job.rs`; `job_rules` test expected the unsanitized comma (FR-051 sanitizer turns it into `_`); aarch64 `build-release` needed `libc6-dev-arm64-cross`. Still red: last step "no containers, networks or volumes are left" after `cargo test` ran in the same job. Budget extended by 3 selftest runs (coordinator): cause of the leak is a runner bug in `engine.rs` `run_logged`, where a timeout during container creation killed the client before the daemon finished the create and left a `Created` container; fix is `stop_and_remove`: `rm -f` the container repeatedly while the client is still alive (it exits only when the daemon is done), client killed after 30 s. A first version that killed the client first and polled `inspect` for 5 s still leaked (run 45956119997). Result: run 45956696628 green for `pipeline`, `check`, `list`, `workflow` and both `build-release` jobs (fmt patch empty); `shell` red only on the test-first scripts of T007 to T009. Deviation (R2-8): the compile-loop budget of D9 was extended to 8 selftest runs in total (5, then 3 by the coordinator).
 - [X] T006 [US2] Release dry run (FR-028; D14): add a selftest job `build-release` with the release workflow's matrix (both musl targets, same packages, same `CC_*` and `CARGO_TARGET_*_LINKER` environment), `make build`, stage the binaries as the release workflow does, `docker buildx build` with `push: false` using the pinned `docker/setup-buildx-action` and no login; add `rustup toolchain install` before `make build` in `.github/workflows/rust-ci-runner-release.yml`; add no `workflow_dispatch` to the release workflow. Proof: green `build-release` job.
 
 **Checkpoint**: the selftest is green with `--locked`.
@@ -59,11 +59,11 @@ Phase 1 is the gate: nothing else can be checked until the crate compiles. Phase
 - [X] T016 [US1] [US2] Pin and lint the directory (FR-003, FR-029): `ubuntu-24.04` in `.github/workflows/factory-ci-selftest.yml` (1 place) and `.github/workflows/rust-ci-runner-release.yml` (3 places); the selftest `workflow` job lints the whole `.github/workflows/` directory with `FACTORY_CI_LINT_STRICT=1`. Needs T004, T006 and T015. Proof: `grep -rn 'ubuntu-latest' .github` prints nothing; green `workflow` job.
 - [X] T017 [US1] `.github/factory-ci-repos.toml` (FR-002, FR-017): add the two entries of `contracts/pipeline-files.md`, keep the header comment. Proof: the selftest `list` job (`plan --check`); T009 (b).
 - [X] T018 [US1] Wording (FR-001, FR-005), excluding the two READMEs: comments and strings in `.github/workflows/factory-ci-tick.yml` ("B is public" becomes "this repo is public"), `.github/scripts/factory-ci-plan.sh` ("B's checkout"), the other scripts, the lint header, `rust-ci-runner/tests/fixtures/selftest/.factory-ci.toml` if it needs it; `grep -rnP '(?<!factory-)monorepo|\bB\b'` over `.github` and `rust-ci-runner` (outside Rust test data) decides what to fix. In `.github/scripts/test-factory-ci-hardening.sh` point the README checks at the root `README.md`. Proof: T009 (a) passes for these paths.
-- [X] T019 [US1] Release and mirror (FR-004, FR-033): `.github/workflows/rust-ci-runner-release.yml` `publish` job gets `environment: factory-ci-release`, and the digest summary step adds the line "Make the GHCR package public once, then set RUNNER_IMAGE_DIGEST"; `.github/workflows/factory-ci-mirror-images.yml` `mirror` job gets `environment: factory-ci-release` and `if: github.ref == 'refs/heads/main'`. Needs T016. Proof: the lint passes; T009 (d) once T024 lands. Also (lead request): the tick `verdict` heartbeat pings `<url>/fail` on a red tick or a failed plan, the plain URL otherwise; lint rule `verdict-ping` checks it.
+- [X] T019 [US1] Release and mirror (FR-004, FR-033): `.github/workflows/rust-ci-runner-release.yml` `publish` job gets `environment: factory-ci-release`, and the digest summary step adds the line "Make the GHCR package public once, then set RUNNER_IMAGE_DIGEST"; `.github/workflows/factory-ci-mirror-images.yml` `mirror` job gets `environment: factory-ci-release` and `if: github.ref == 'refs/heads/main'`. Needs T016. Proof: the lint passes; T009 (d) once T024 lands. The heartbeat note moved to T036.
 
 ## Phase 5: The runner tests itself (US5)
 
-- [X] T020 [US5] `rust-ci-runner/.factory-ci.toml` (FR-018, FR-019, FR-030): steps `lint` and `test` as in `contracts/pipeline-files.md`, `test` running `cargo test --locked`. Needs T010. Proof: T022's job runs it.
+- [X] T020 [US5] `rust-ci-runner/.factory-ci.toml` (FR-018, FR-019, FR-030): steps `lint` and `test` as in `contracts/pipeline-files.md`; `test` runs `cargo test --locked` in three processes (all but `ship_tests` and `job_tests`, then each of the two), because the `tiny_http` mock servers exceed the 512 pids limit of a step container in one process (commit 943e73e); `lint` has `timeout = 1200` and `test` `timeout = 1800`. Needs T010. Proof: T022's job runs it.
 - [X] T021 [US5] `.factory-ci.toml` at the repo root (FR-018, FR-019): steps `shell` and `lint-workflows` with `git` in the package list and `git config --global --add safe.directory '*'`; read the scripts for the package list; a comment on any test that needs the host and stays out. Needs T007 to T009 for the script names. Proof: T022's job runs it.
 - [X] T022 [US5] `.github/workflows/factory-ci-selftest.yml` (FR-021, FR-030; D8): add the `own-pipelines` job (builds the runner or takes it as an artifact from `pipeline`; sets `FACTORY_CI_SHA`, `FACTORY_CI_EVENT=push`, `FACTORY_CI_BRANCH=selftest`; separate `CARGO_TARGET_DIR`) running `rust-ci-runner run --dir rust-ci-runner` and `run --dir .`; add a step that downloads the pinned `bws` archive and compares its SHA-256 with `BWS_SHA256` (002 T054, CI half). Needs T020, T021 and T016. Proof: green selftest; the log shows `cargo test --locked` passing in the container without an engine and the root pipeline passing with `git`.
 - [X] T023 [US5] State the bootstrap exception (FR-020): one paragraph in the header comment of `.github/workflows/rust-ci-runner-release.yml` (the selftest and bootstrap headers are done in T001 and T002); the README text lives in T024; this task checks the headers and the README agree. Needs T024. Proof: T009 (e).
@@ -78,10 +78,26 @@ Phase 1 is the gate: nothing else can be checked until the crate compiles. Phase
 - [X] T026 Constitution PATCH 1.0.1 (FR-026, research D13): `.specify/memory/constitution.md` Principle II and "Repository Structure and Constraints" say "GitHub Actions secrets and variables of this repository, repository-level or in its Environments"; bump `Version` to 1.0.1 and `Last Amended` to the date of the change; the PR body states the reason and lists the README and workflows as the components that comply. Proof: grep of the version line.
 - [X] T027 [US7] 002 pointers (FR-025): in `specs/002-ci-runner/tasks.md` mark T045 and T081 as done by 003 T005 and T004, and T046, T054 and T065 as moved to 003 T032, T033 and T034, each with a one-line note (edit only those lines and the status note at the top of the file); add a short "Superseded in part by 003" block to the top of `specs/002-ci-runner/spec.md` listing the rows of the table in 003 `spec.md`. Proof: grep for each ID shows the pointer.
 
+## Phase 7b: Review round 2 (before T029 and T030; decisions R2-1 to R2-9 in the spec)
+
+**Goal**: the PR review findings, each as a task with its files, FR and proof. Test rows come first inside each shell task and fail until the change lands. Shell tests may run on the VM with a stand-in `openssl` (a script on `PATH` that echoes a fixed ciphertext and accepts `-pass env:`); nothing else runs locally.
+
+- [X] T036 [US6] Heartbeat requirement (FR-034; R2-1; `contracts/tick-workflow.md`): the `verdict` job pings `<url>/fail` on a red tick, a failed or cancelled plan, or `fail_tick=1`, and the plain URL otherwise. Files: `.github/workflows/factory-ci-tick.yml`, `.github/scripts/factory-ci-lint-workflow.sh` (rule `verdict-ping`), `.github/scripts/test-factory-ci-hardening.sh`, `specs/003-infrastructure-home/contracts/tick-workflow.md`. Already done: the engineer's tick change plus QA's 13 rows in commit aa6a307 (fake `curl`: green, fail, idle, off-main, no URL, curl error). Moved out of T019. Proof: the `shell` job is green on the hardening test.
+- [ ] T037 [US6] README heartbeat text and docs-test row (FR-034, FR-022; R2-1): in `README.md` Setup step 11, replace the sentences that say a failed tick does not make the check late and that you must watch the `factory-ci-tick` runs. Say instead: a red tick or a failed plan pings `/fail` and alerts at once; a late check means ticks stopped. Add a row to `.github/scripts/test-factory-ci-docs.sh` (README keyword rows, test (e)) asserting `/fail` appears in `README.md`, with a mutation check (README copy without `/fail` fails). Files: `README.md`, `.github/scripts/test-factory-ci-docs.sh`. Write the docs-test row first. Needs T036. Proof: docs test green; mutation row red on the broken copy.
+- [ ] T038 [US6] Merge rules for a one-person repo (FR-022; R2-2, research D20): in `README.md` Setup step 1 make item 1 the `main` ruleset (pull request required, 0 approvals, the selftest jobs as the only required status checks, no force push, no deletion, empty bypass list), delete item 2 (CODEOWNERS and code-owner review), keep the tag ruleset and Actions settings, renumber, and add the reason: GitHub never lets an author approve their own pull request, only the owner has write access, so only the owner can merge, and the selftest is the gate. Remove every other CODEOWNERS mention in the README. In `.github/scripts/test-factory-ci-docs.sh` drop the CODEOWNERS keyword row and its fixture line, add rows for "0 approvals" and the owner-only rationale, and a row that fails if `CODEOWNERS` appears in `README.md`. Files: `README.md`, `.github/scripts/test-factory-ci-docs.sh`. Needs T037 (shared files). Proof: docs test green on the README; each new row red on a mutated copy; `grep -rn CODEOWNERS README.md .github` prints nothing.
+- [ ] T039 [US1] Lint hardening (FR-035, FR-003, FR-027, FR-029; R2-3, research D21): in `.github/scripts/factory-ci-lint-workflow.sh`, still line-based, add the rules of `contracts/tick-workflow.md` (Lint rules): the tick `on:` block has `workflow_dispatch:` as its only key (any other 2-space key under `on:`, quoted or not, and a flow-style `on:` fail); the loop covers `*.yml` and `*.yaml`; the 40-hex `uses:` pin rule and the `permissions` present rule run on every workflow file; the `environment:` allowlist per tick job (`plan` and `verdict` use `factory-ci-plan`, `run` uses `factory-ci`, `run-docker` uses `factory-ci-docker`); the main guard regex is end-anchored `if: github.ref == 'refs/heads/main'( && .*)?$` with no `||` (adjust the rule at the line that reads the tick's job guards and the mirror job); the selftest rule also rejects `secrets: inherit` and `secrets[`. Add one mutation row to `--self-test` per new rule (quoted key `"push":`, unquoted `push:`, flow `on: [workflow_dispatch]`, a `.yaml` copy with `ubuntu-latest`, an unpinned `uses:` and a file without `permissions` in a second file, a swapped `environment:`, `if: github.ref == 'refs/heads/main' || x`, `secrets: inherit`, `secrets[`). Keep the `shortcut` note. Files: `.github/scripts/factory-ci-lint-workflow.sh`. Proof: the lint passes on the repo; `--self-test` passes and every new row fails for its named rule (CI `workflow` and `shell` jobs).
+- [ ] T040 [US3] Blob keys are 64 lower-case hex (FR-036; R2-4, research D22): write the shell rows first in `.github/scripts/test-factory-ci-hardening.sh` and `.github/scripts/test-factory-ci-secrets.sh` (short key, 64-character non-hex key, 64 upper-case hex, 63 and 65 hex characters, valid key; for `FACTORY_CI_BLOB_KEY` and `_DOCKER`; plan, job, status and blob functions; the tick guard steps by `grep` for `[0-9a-f]{64}`). Then require `^[0-9a-f]{64}$` in the three guard steps of `.github/workflows/factory-ci-tick.yml` (the docker key stays optional in `plan`), in `.github/scripts/factory-ci-plan.sh` (both keys), and in `fci_blob_encrypt` and `fci_blob_decrypt` of `.github/scripts/factory-ci-blob.sh` (so `factory-ci-job.sh` and `factory-ci-status.sh` refuse through them). The message names the variable and never the value. Update the comment lines that say "32 characters". Files: `.github/workflows/factory-ci-tick.yml`, `.github/scripts/factory-ci-plan.sh`, `.github/scripts/factory-ci-blob.sh`, `.github/scripts/test-factory-ci-hardening.sh`, `.github/scripts/test-factory-ci-secrets.sh`. Needs T039 (the lint must still pass on the tick). Proof: new rows red before the change and green after; sentinel keys never in output.
+- [ ] T041 [US3] Plan phase A without the Loki credentials (FR-037; R2-5, research D23): in `.github/scripts/factory-ci-plan.sh`, the phase A call (`plan --repos ... --rows-out`) runs with `-u FACTORY_CI_LOG_URL -u FACTORY_CI_LOG_USER -u FACTORY_CI_LOG_TOKEN` in addition to what `run()` strips; the phase C call (`--rows-in`) keeps them. Check done in research D23: `rust-ci-runner/src/plan.rs` sends the log line only from `plan::finish` (phase C), so the skip clause does not apply. Add the test row first in `.github/scripts/test-factory-ci-hardening.sh`: a fake `rust-ci-runner` records its environment per call; phase A sees none of the three names, phase C sees all three, and with all three unset the plan still passes. Files: `.github/scripts/factory-ci-plan.sh`, `.github/scripts/test-factory-ci-hardening.sh`. Needs T040 (shared plan script). Proof: the new row is red before and green after.
+- [ ] T042 [US3] Store check only when a row can use a secret (FR-038, FR-013; R2-6, research D19): in `.github/scripts/factory-ci-plan.sh` run `fci_list` for the plain store only when a plain row has `secrets_ok == true` and (`secrets != ""` or `repo_id != ""`), and the same for the docker store and docker rows (`jq` over `$cand`). Keep the short-line and mask logic. Before coding, confirm in `rust-ci-runner/src/job.rs` and the secret-name resolution that a pipeline reaches a secret only through shared names or an owner-scoped key (needs `id`); if a third route exists, widen the predicate and say so in the task notes. Add the test rows first in `.github/scripts/test-factory-ci-hardening.sh` (fake runner writes the candidate file, fake `bws` counts calls): a plain row with no names and no id, token set, `bws` failing, tick passes with zero `bws` calls; a row with `secrets` set and a working `bws`, one call; a row with `repo_id` set and a failing `bws`, the plan fails with the store message; a row with `secrets_ok` false, zero calls; a docker row follows the docker token. Files: `.github/scripts/factory-ci-plan.sh`, `.github/scripts/test-factory-ci-hardening.sh`. Needs T041. Proof: rows red before, green after.
+- [ ] T043 [P] [US5] Remove the dead `container` parameter of `capture()` (FR-008; R2-7, research D24): in `rust-ci-runner/src/engine.rs` delete the `container: Option<&str>` parameter, its `if let Some(name) = container { self.kill(name); }` branch and its doc line; update the callers, which all pass `None` (`quick`, and the call near line 372; `grep -n 'capture(' rust-ci-runner/src rust-ci-runner/tests`). `kill` stays (other callers). No other Rust change. Files: `rust-ci-runner/src/engine.rs`. Proof: green `check`, `pipeline` and `own-pipelines` selftest jobs; `cargo fmt --check` passes (apply the diff the failing step prints by hand, the bootstrap workflow is gone). CI budget: 4 runs, then stop and report.
+- [X] T044 [US5] Contract drift (FR-019, FR-030; R2-8): `specs/003-infrastructure-home/contracts/pipeline-files.md` now shows the `test` step as three `cargo test --locked` commands with the pids-limit reason and the two timeouts; T020's text above says the same; T005 holds the deviation note (budget extended to 8 runs). Files: `specs/003-infrastructure-home/contracts/pipeline-files.md`, `specs/003-infrastructure-home/tasks.md`. Done in this amendment. Proof: `grep -n 'ship_tests' specs/003-infrastructure-home/contracts/pipeline-files.md rust-ci-runner/.factory-ci.toml` shows the same three commands.
+
+**Checkpoint**: every selftest job is green with the round 2 changes, then T029 and T030.
+
 ## Phase 8: Close the pull request
 
 - [X] T028 Remove the temporary bootstrap workflow (FR-008, FR-009): delete `.github/workflows/factory-ci-bootstrap.yml` and its entry in the `no-cargo` allowlist of the lint, after the last fmt patch is applied. Needs T005 and every impl task above. After this, a review-time Rust edit that fails `cargo fmt --check` is fixed by applying the diff the failing step prints, by hand. Proof: green selftest with no bootstrap workflow; `grep -rn bootstrap .github` finds nothing but comments about the exception.
-- [ ] T029 Read-through (FR-001, FR-005): `grep` for removed names (`fci_log_creds`), for `ubuntu-latest`, for bare "monorepo", for "Set up B" and for private identifiers over tracked files; confirm every task above is ticked or blocked on Setup; the PR body links `specs/003-infrastructure-home/`. Proof: the greps print nothing.
+- [ ] T029 Read-through (FR-001, FR-005): `grep` for removed names (`fci_log_creds`), for `ubuntu-latest`, for bare "monorepo", for "Set up B" and for private identifiers over tracked files; confirm every task above is ticked or blocked on Setup; the PR body links `specs/003-infrastructure-home/`. Also grep for `CODEOWNERS`. Proof: the greps print nothing.
 - [ ] T030 Request review (FR-008). Fix findings through the Spec Kit steps (a change to a spec or plan reruns tasks and analyze). Merge only when every selftest job is green and the owner has read the README Setup (Development Workflow). Proof: the selftest jobs are the required checks on `main` (D3).
 
 ## Phase 9: After Setup (blocked on the owner's manual steps and factory-monorepo PR 2; US7)
@@ -100,37 +116,42 @@ Phase 1 is the gate: nothing else can be checked until the crate compiles. Phase
 | --- | --- |
 | FR-001 | T009, T018, T024, T025, T029 |
 | FR-002 | T009, T017 |
-| FR-003 | T015, T016 |
+| FR-003 | T015, T016, T039 |
 | FR-004 | T008, T014, T019, T024, T031 |
 | FR-005 | T018, T029 |
 | FR-006 | T004, T009 |
 | FR-007 | T001, T004, T005, T009 |
-| FR-008 | T001, T005, T028, T030 |
+| FR-008 | T001, T005, T028, T030, T043 |
 | FR-009 | T002, T003, T004, T028 |
 | FR-010 | T007, T008, T011, T012, T013, T014, T024 |
 | FR-011 | T007, T008, T012, T013 |
 | FR-012 | T007, T008, T011, T012 |
-| FR-013 | T008, T013, T033 |
+| FR-013 | T008, T013, T033, T042 |
 | FR-014 | T005 (existing `pipeline.rs` reserved-name tests stay green) |
 | FR-015 | T008, T034 |
 | FR-016 | T009, T024 |
 | FR-017 | T015, T017, T024, T032 |
 | FR-018 | T020, T021 |
-| FR-019 | T020, T021, T022 |
+| FR-019 | T020, T021, T022, T044 |
 | FR-020 | T001, T015, T023, T024 |
 | FR-021 | T022 |
-| FR-022 | T009, T024 |
+| FR-022 | T009, T024, T037, T038 |
 | FR-023 | T009, T019, T024 |
 | FR-024 | T009, T025 |
 | FR-025 | T004, T005, T027, T032, T033, T034 |
 | FR-026 | T026 |
-| FR-027 | T015 |
+| FR-027 | T015, T039 |
 | FR-028 | T006 |
-| FR-029 | T001, T015, T016 |
-| FR-030 | T001, T010, T020, T022 |
+| FR-029 | T001, T015, T016, T039 |
+| FR-030 | T001, T010, T020, T022, T044 |
 | FR-031 | T008, T012, T013, T014, T033 |
 | FR-032 | T009, T035 |
 | FR-033 | T019, T009 |
+| FR-034 | T036, T037 |
+| FR-035 | T039 |
+| FR-036 | T040 |
+| FR-037 | T041 |
+| FR-038 | T042 |
 | SC-001 | T005, T006, T028 |
 | SC-002 | T009, T015 |
 | SC-003 to SC-005 | T032, T033, T034 |
@@ -145,12 +166,12 @@ Phase 1 is the gate: nothing else can be checked until the crate compiles. Phase
 - T020 needs T010; T021 needs T007 to T009; T022 needs T020, T021 and T016; T023 needs T024.
 - T024 needs T014 and T019; T025 needs T024.
 - T026 and T027 need nothing.
-- T029 and T030 follow T028.
+- T037 needs T036; T038 needs T037; T039 needs nothing; T040 needs T039; T041 needs T040; T042 needs T041; T043 and T044 need nothing. T029 and T030 follow T028 and T036 to T044.
 - T031 needs the merge and the owner's Setup; T032 needs T031 (monorepo checks also need factory-monorepo PR 2); T033 and T034 need T032; T035 needs T032 to T034.
 
-Parallel groups: {T007, T008, T009}, {T015, T017, T018, T026, T027}, {T020, T021}, {T033, T034}.
+Parallel groups: {T007, T008, T009}, {T015, T017, T018, T026, T027}, {T020, T021}, {T033, T034}, {T039, T043} (the shell chain T037 to T038 and T040 to T042 runs in ID order because of shared files).
 
-Shared files in order: selftest workflow T001, T004, T006, T016, T022; release workflow T004, T006, T016, T019, T023; tick workflow T014, T018; lint script T015, T028; READMEs T024, T025; `Cargo.toml` T001.
+Shared files in order: selftest workflow T001, T004, T006, T016, T022; release workflow T004, T006, T016, T019, T023; tick workflow T014, T018; lint script T015, T028; READMEs T024, T025; `Cargo.toml` T001; README T037, T038; docs test T037, T038; hardening test T036, T040, T041, T042; plan script T040, T041, T042; tick workflow T036, T040; lint script T039.
 
 ## Engineer briefs
 
@@ -211,3 +232,17 @@ Each brief covers one feature folder, `specs/003-infrastructure-home/`, and the 
 **Files**: `specs/003-infrastructure-home/research.md`.
 **Acceptance**: each check has a recorded pass or fail with a one-line cause and no private identifier.
 **Constraints**: start only after the owner confirms Setup; monorepo checks wait for factory-monorepo PR 2. Do not tag a release or set a variable yourself; those are the owner's steps. A failed check opens a new task and reruns specify, plan, tasks and analyze as needed.
+
+### S9. Review round 2 (T036 to T044)
+
+**Goal**: the PR review findings, in task order. T036 and T044 are done; T037 to T043 are open.
+**Files**: `.github/workflows/factory-ci-tick.yml`, `.github/scripts/factory-ci-plan.sh`, `factory-ci-blob.sh`, `factory-ci-lint-workflow.sh`, `.github/scripts/test-factory-ci-hardening.sh`, `test-factory-ci-secrets.sh`, `test-factory-ci-docs.sh`, `README.md`, `rust-ci-runner/src/engine.rs`. Contract: `contracts/tick-workflow.md`. Decisions: `research.md` D19 to D25.
+**Acceptance**:
+- T037: README step 11 says a red tick or failed plan pings `/fail` and alerts at once, and a late check means ticks stopped; the docs test asserts `/fail` and fails on a README without it.
+- T038: README has the `main` ruleset with 0 approvals, the selftest jobs as required checks, no force push, no deletion, an empty bypass list, the tag ruleset and the owner-only rationale; no `CODEOWNERS` in `README.md` or `.github/`; docs-test rows changed to match.
+- T039: the six lint changes of FR-035 each have a mutation row that fails for its named rule; the lint passes on the repo.
+- T040: every guard on a blob key requires `^[0-9a-f]{64}$`; new shell rows cover short, non-hex, upper-case and valid keys.
+- T041: phase A runs without the three `FACTORY_CI_LOG_*` names and phase C with them (the check of D23 shows the plan binary ships logs only in phase C, so the skip clause does not apply).
+- T042: `fci_list` runs only when a row has `secrets_ok` and (`secrets` or `repo_id`); a Bitwarden outage with no such row passes; rows for each case.
+- T043: `capture()` has no `container` parameter; no behaviour change; CI green.
+**Constraints**: no local cargo, docker, make or builds (C1). Shell tests may run on the VM with a stand-in `openssl` on `PATH` (accepts `-pass env:` and echoes fixed text); everything else runs in CI. CI budget: 4 selftest runs for T043 and the shell changes together, then stop and report. Write the test rows first in each shell task. Order by shared files: T037, T038 (README, docs test); T039; T040, T041, T042 (plan script, hardening test). T043 is independent. Never print a key, token or credential; sentinel values only in tests. Edit nothing outside the files listed; work not listed goes back through spec, plan and tasks.

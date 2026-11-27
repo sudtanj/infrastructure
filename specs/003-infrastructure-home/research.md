@@ -1,10 +1,10 @@
 # Research: Infrastructure Home
 
-Decisions for `spec.md`. Each has the choice, why, and what was rejected. Live results of the 002 checks (T046, T054, T065) are added under "Live check results" when they run. Review round 1 (critic, devops, security; lead decisions D1 to D9 in the spec) changed D4 to D9 and added D14 to D18.
+Decisions for `spec.md`. Each has the choice, why, and what was rejected. Live results of the 002 checks (T046, T054, T065) are added under "Live check results" when they run. Review round 1 (critic, devops, security; lead decisions D1 to D9 in the spec) changed D4 to D9 and added D14 to D18. Review round 2 (PR review; decisions R2-1 to R2-9 in the spec) changed D1, D10 and added D19 to D25.
 
 ## D1. Log credentials move to Environment secrets; the store check stays
 
-- **Decision**: `FACTORY_CI_LOG_URL`, `FACTORY_CI_LOG_USER` and `FACTORY_CI_LOG_TOKEN` are secrets of the three Environments. `.github/scripts/factory-ci-secrets.sh` replaces `fci_log_creds` (reads Bitwarden JSON) with `fci_log_env` (reads the process environment). The plan checks all-or-none at its start. The plan still calls `fci_list` when it has rows and a Bitwarden token, to prove the token works (002 FR-045); it no longer reads log values from the result.
+- **Decision**: `FACTORY_CI_LOG_URL`, `FACTORY_CI_LOG_USER` and `FACTORY_CI_LOG_TOKEN` are secrets of the three Environments. `.github/scripts/factory-ci-secrets.sh` replaces `fci_log_creds` (reads Bitwarden JSON) with `fci_log_env` (reads the process environment). The plan checks all-or-none at its start. The plan still calls `fci_list` to prove the token works (002 FR-045), but since review round 2 only when a candidate row can use a secret (D19); it no longer reads log values from the result.
 - **Why**: The Rust code already reads `FACTORY_CI_LOG_*` from its environment (`src/main.rs`, `src/job.rs`, `src/ship.rs`). Only the scripts change. The smallest diff keeps 002's reviewed store check.
 - **Rejected**: (a) Drop the plan's store check. It saves a call but turns a revoked token from one failed tick into one `error` status per item. (b) Keep Bitwarden as the source and add Actions secrets as a fallback. Two sources make a partial set ambiguous and contradict Principle II.
 
@@ -61,7 +61,7 @@ Decisions for `spec.md`. Each has the choice, why, and what was rejected. Live r
 
 ## D10. README and workflow names are checked by a shell test
 
-- **Decision**: A new `.github/scripts/test-factory-ci-docs.sh` extracts `secrets.NAME`, `vars.NAME` and `environment:` names from the workflows with `grep -o`, and the names in the README Setup tables, and compares both ways. It also runs the stale-wording grep (FR-001), the watch-list entry check (FR-002), the `--locked` check (FR-006), README keyword rows (rulesets, CODEOWNERS, `factory-ci-release`, scheduler headers, the GHCR visibility command, the no-`.factory-ci.toml` sentence, the bootstrap-exception sentence, rollback), and the private-identifier scan of committed docs (FR-032).
+- **Decision**: A new `.github/scripts/test-factory-ci-docs.sh` extracts `secrets.NAME`, `vars.NAME` and `environment:` names from the workflows with `grep -o`, and the names in the README Setup tables, and compares both ways. It also runs the stale-wording grep (FR-001), the watch-list entry check (FR-002), the `--locked` check (FR-006), README keyword rows (rulesets, the owner-only merge rationale, the heartbeat `/fail` sentence, `factory-ci-release`, scheduler headers, the GHCR visibility command, the no-`.factory-ci.toml` sentence, the bootstrap-exception sentence, rollback), and the private-identifier scan of committed docs (FR-032).
 - **Dropped by the lead**: the docs test's own `ubuntu-latest` grep, no-cargo check and "no workflow names factory-monorepo" check, as duplicates of lint rules. FR-017 rests on `no-cargo`, the directory lint and the README statement.
 - **Why**: The constitution says the README lists every name the workflows read. A test keeps it true.
 - **Rejected**: Putting the cases in `test-factory-ci-hardening.sh`: it mixes topics.
@@ -106,7 +106,50 @@ Decisions for `spec.md`. Each has the choice, why, and what was rejected. Live r
 
 ## D18. Deferred (no task in 003)
 
-Recorded in `plan.md` Open risks: replace the third-party `alpine/git` clone image with one built in-repo; container escape reads the runner environment (narrow tokens and `allow_docker` off now); `cargo audit` or `cargo deny`; build provenance attestation; a YAML-parsing lint; splitting the clone token from the status token; a test that fetched file content never reaches the summary `problems` text (security L1), if cheap.
+Recorded in `plan.md` Open risks (round 2 adds M3 wording, L3, L4, L6, m3 and YAML escapes there): replace the third-party `alpine/git` clone image with one built in-repo; container escape reads the runner environment (narrow tokens and `allow_docker` off now); `cargo audit` or `cargo deny`; build provenance attestation; a YAML-parsing lint; splitting the clone token from the status token; a test that fetched file content never reaches the summary `problems` text (security L1), if cheap.
+
+## D19. The plan's store check runs only when a row can use a secret (review round 2)
+
+- **Decision**: `factory-ci-plan.sh` calls `fci_list` for the plain store only when a plain row has `secrets_ok == true` and (`secrets != ""` or `repo_id != ""`), and the same for the docker store and docker rows. D1's purpose stays: a revoked or wrong token fails one tick early, not one `error` status per item.
+- **Why**: QA found that the plan called `fci_list` whenever a plain row existed and the token was set. A Bitwarden outage then failed every tick, though neither watch entry names a secret or an owner id, so no job can reach the store. D2 already stops the job from calling Bitwarden without a listed secret; this is the same rule one level up.
+- **Predicate source**: a plan row does not hold the pipeline's step secrets (only the job reads those). A pipeline can reach a secret only through shared names in the watch entry (`secrets`) or an owner-scoped key (needs `id`, hence `repo_id`). The engineer confirms this in `job.rs` and the secret-name resolution before coding; if a third route exists, the predicate widens to it.
+- **Rejected**: Drop the check (D1 rejects it). Read the pipelines in phase A to learn the step secrets: a runner change for a rare case.
+
+## D20. Merge rules for a one-person repo
+
+- **Decision**: The `main` ruleset requires a pull request with 0 approvals, the selftest jobs as required checks, no force push, no deletion, and an empty bypass list. No CODEOWNERS file, no code-owner review. The tag ruleset on `rust-ci-runner-v*` stays.
+- **Why**: GitHub never lets an author approve their own pull request, so one required approval or code-owner review locks the only account out or forces a bypass. Only the owner has write access, so only the owner can merge, and the selftest is the gate. The 002 and 003 security reviews assumed a second reviewer; the guarantee now rests on owner-only write access.
+- **Rejected**: One approval with the owner on the bypass list (the bypass list stays empty so no path skips the selftest). A second account as reviewer (cost, another secret holder).
+
+## D21. Lint hardening stays line-based
+
+- **Decision**: Add the rules of FR-035 to `factory-ci-lint-workflow.sh`: the tick `on:` block allows only `workflow_dispatch:`, the loop reads `*.yml` and `*.yaml`, the pin and `permissions` rules run on every file, a per-job `environment:` allowlist for the tick, an end-anchored main guard, and `secrets: inherit` and `secrets[` banned in the selftest. Each rule gets a mutation row.
+- **Why**: A line-based rule is cheap to read and to mutate-test. Each of these closes a way to reach secrets or a trigger that a past review found.
+- **Rejected**: A YAML parser (`yq`, a Rust crate): a dependency for a few rules; deferred. YAML escape sequences in trigger keys stay a gap, covered by D20.
+
+## D22. Blob keys are 64 lower-case hex characters
+
+- **Decision**: Every guard uses `^[0-9a-f]{64}$`: the tick guard steps, `factory-ci-plan.sh`, and `fci_blob_encrypt` and `fci_blob_decrypt` (so `job.sh` and `status.sh` inherit it).
+- **Why**: The README already says `openssl rand -hex 32`. A length check of 32 accepts a 32-character word. A check in the blob functions covers every caller with one change.
+- **Rejected**: Guards only in the tick (the scripts run elsewhere, in tests); a minimum entropy estimate.
+
+## D23. Phase A runs without the Loki credentials
+
+- **Decision**: In `factory-ci-plan.sh`, the phase A call (`plan --rows-out`) strips `FACTORY_CI_LOG_URL`, `FACTORY_CI_LOG_USER` and `FACTORY_CI_LOG_TOKEN`; phase C keeps them.
+- **Evidence**: Checked in `rust-ci-runner/src/`. `plan::candidates` (phase A) only reads GitHub. The heartbeat to Loki is called only in `plan::finish` (`plan.rs`, "Called once from phase C when `log_store` is set"). `plan_opts()` in `main.rs` builds the heartbeat and `log_store` from the environment for both calls. In phase A `log_store` and the heartbeat go unused, and `fail_closed` is set from `b_private`, not `log_store`. The skip clause in the lead's decision (plan ships logs in phase A) does not apply. With the three names unset in phase A, `LogConfig::from_env` returns `Ok(None)`, so `load_list` still passes.
+- **Why**: Less environment in the process that parses fetched repo data. The credentials are masked from the plan step on, so this is hardening only.
+- **Cost**: The redactor in phase A no longer holds the log values; there is nothing to redact, because they are not in its environment.
+
+## D24. `capture()` loses its `container` parameter
+
+- **Decision**: Remove the `container: Option<&str>` parameter and its `kill` branch from `Engine::capture` in `rust-ci-runner/src/engine.rs`. Every caller passes `None` (`quick`, and the call at line 372).
+- **Why**: Dead code with an old kill ordering: killing the container before the client is the order `stop_and_remove` replaced (T005 notes). Leaving it invites a caller to use it. CI compiles the change.
+- **Rejected**: Fix the ordering in the dead branch (code nobody calls).
+
+## D25. Heartbeat is a requirement
+
+- **Decision**: FR-034 and `contracts/tick-workflow.md` state the ping rules of the `verdict` job; README Setup step 11 says a red tick or failed plan pings `/fail` and alerts at once, and a late check means ticks stopped. The docs test asserts `/fail` in the README.
+- **Why**: The tick change and QA's 13 rows (commit aa6a307) existed without a requirement; the README told the owner a red tick does not alert, which the code no longer does.
 
 ## Test classification
 

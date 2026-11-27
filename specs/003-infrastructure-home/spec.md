@@ -34,13 +34,25 @@ Answers come from the lead's brief. Nothing blocked on the user; open questions 
 - D8: Release publish and image mirror run in a fourth Environment, `factory-ci-release`, with no secrets (FR-033).
 - D9: The compile loop has a budget of 5 selftest runs, then the engineer stops and the plan is revisited (FR-008).
 
+### Review round 2, 2026-11-27 (lead decisions after the PR review)
+
+- R2-1: The tick `verdict` job pings `<url>/fail` on a red tick, a failed or cancelled plan, or `fail_tick=1`, and the plain URL otherwise. QA covered it in commit aa6a307 (FR-034).
+- R2-2: GitHub never lets an author approve their own pull request, and only the owner has write access, so only the owner can merge. The `main` ruleset needs a pull request, 0 approvals, the selftest jobs as required checks, no force push, no deletion and an empty bypass list. CODEOWNERS and code-owner review are dropped. The selftest is the gate. The tag ruleset stays (FR-022).
+- R2-3: The workflow lint stays line-based; a YAML parser stays deferred. It gets stricter rules for the tick `on:` block, the file extensions it reads, the `uses:` pin and `permissions` rules, an `environment:` allowlist, an end-anchored main guard and `secrets: inherit` in the selftest (FR-035).
+- R2-4: Every guard on `FACTORY_CI_BLOB_KEY*` requires 64 lowercase hex characters, the form `openssl rand -hex 32` gives, not only a length (FR-036).
+- R2-5: The plan's phase A runs without the Loki credentials, because phase A never ships logs (FR-037).
+- R2-6: The plan's store check runs only when at least one candidate row can use a secret. A Bitwarden outage then no longer fails a tick that needs no secret (FR-038).
+- R2-7: `capture()` in `engine.rs` loses its dead `container` parameter (FR-008, T043).
+- R2-8: `rust-ci-runner/.factory-ci.toml` runs `cargo test` in three processes because of the pids limit; the contract and T020 say so (FR-019, T044). The compile-loop budget of D9 was extended to 8 runs; T005 records it.
+- R2-9: Deferred and recorded in `plan.md` Open risks, no task: the token split and the `alpine/git` clone container (security M3), the secret-name charset and reserved shell names (L3), the release verify job's dependence on the tag ruleset (L4), the concurrency slot shared with non-main dispatch (L6), `stop_and_remove` not strictly bounded at 30 s (reviewer m3), YAML escape sequences in triggers (covered only by the owner-only merge rule).
+
 ### What this feature changes in 002
 
 | 002 item | Now |
 | --- | --- |
 | A1 (central repo B is the monorepo or a public copy) | B is this repo. The "separate public copy" step is gone. |
 | FR-029, FR-040 last sentence, US8 scenario 3 (log credentials in the Bitwarden default project) | They come from Environment secrets (FR-010). |
-| FR-045 (the plan checks the store and that the three log values are all present or all absent) | The store check stays. The all-or-none check on the log values moves to the start of the plan and reads the environment (FR-011). |
+| FR-045 (the plan checks the store and that the three log values are all present or all absent) | The store check stays, but runs only when a candidate row can use a secret (FR-038). The all-or-none check on the log values moves to the start of the plan and reads the environment (FR-011). |
 | Open tasks T045, T046, T054, T065, T081 | Done or tracked here (FR-025). |
 
 ## User Scenarios & Testing *(mandatory)*
@@ -179,6 +191,9 @@ After the owner finishes Setup, the live checks that 002 could not run (T046, T0
 - The private monorepo entry and no log credentials: the plan refuses the repo and fails the tick.
 - A fork's pull request runs the selftest: it gets no secrets and `contents: read` only.
 - A workflow dispatched from a branch other than `main`: the Environment refuses the job, `plan` does not run, and `verdict` ends red. No secret is read.
+- Bitwarden is down and no candidate row can use a secret: the plan makes no store call and the tick runs (FR-038).
+- A blob key of 64 characters that is not lower-case hex: every guard refuses it (FR-036).
+- A plan or run job fails or is cancelled: the heartbeat pings `/fail` and the check alerts at once; ticks that stop make it late (FR-034).
 - `workflow_dispatch` token for the scheduler leaks: it can only start ticks; the tick still reads secrets only on `main`.
 
 ## Requirements *(mandatory)*
@@ -205,7 +220,7 @@ After the owner finishes Setup, the live checks that 002 could not run (T046, T0
 - **FR-010**: Log credentials MUST come from the Environment secrets `FACTORY_CI_LOG_URL`, `FACTORY_CI_LOG_USER` and `FACTORY_CI_LOG_TOKEN`, set in `factory-ci-plan`, `factory-ci` and `factory-ci-docker`. `factory-ci-docker` holds its own `FACTORY_CI_LOG_TOKEN` (a separate Grafana access policy token, so the docker Environment can be cut off alone); URL and user are the same values. No script MUST read them from Bitwarden.
 - **FR-011**: All three set means shipping is on, none means off, and a partial set MUST fail the tick at the start of the plan (before any GitHub read), naming the missing names. A job given a partial set MUST refuse before it runs a step.
 - **FR-012**: Each log credential MUST be masked before use, and a value with a trimmed line under 4 characters MUST be refused. The three values MUST NOT reach any step container.
-- **FR-013**: Pipeline secrets MUST come from Bitwarden only, with no GitHub-secret fallback. A job MUST make a Bitwarden call only when its pipeline lists at least one secret. An idle tick makes no Bitwarden call.
+- **FR-013**: Pipeline secrets MUST come from Bitwarden only, with no GitHub-secret fallback. A job MUST make a Bitwarden call only when its pipeline lists at least one secret. An idle tick makes no Bitwarden call, and the plan's store check follows FR-038.
 - **FR-014**: The three `FACTORY_CI_LOG_*` names and `BWS_ACCESS_TOKEN` stay reserved: a pipeline that lists them is rejected before any container starts.
 - **FR-015**: No bootstrap secret value, no private repo name detail, branch, SHA, project path or secret name MUST appear in public logs, summaries, statuses, artifacts or outputs (002 FR-059). A test with sentinel values MUST prove it for the plan and job scripts.
 - **FR-016**: The README MUST say the `FACTORY_CI_TOKEN` fine-grained token covers exactly the watched repos and holds only Contents read, Commit statuses read and write, and Metadata read. The runner uses one token for the clone and the statuses; splitting it is deferred (plan, Open risks).
@@ -221,13 +236,13 @@ After the owner finishes Setup, the live checks that 002 could not run (T046, T0
 **README and constitution**
 
 - **FR-022**: The root README Setup MUST list every secret and variable with the Environment or scope that holds it, and the manual steps, in the order that works:
-  - Repository rules: a `main` ruleset (pull request and review required, the selftest jobs as the only required checks, no force push, no bypass); CODEOWNERS on `.github/`, `rust-ci-runner/` and `.factory-ci.toml`; a tag ruleset limiting who creates `rust-ci-runner-v*`; Actions settings (approval for all outside collaborators, read-only default workflow token, run retention 7 to 14 days).
+  - Repository rules: a `main` ruleset (pull request required, 0 approvals, the selftest jobs as the only required status checks, no force push, no deletion, empty bypass list); no CODEOWNERS file and no code-owner review; a tag ruleset limiting who creates `rust-ci-runner-v*`; Actions settings (approval for all outside collaborators, read-only default workflow token, run retention 7 to 14 days). The README says why: GitHub never lets an author approve their own pull request, only the owner has write access, so only the owner can merge, and the selftest is the gate.
   - Environments: `factory-ci-plan`, `factory-ci`, `factory-ci-docker` limited to `main` with admin bypass off; `factory-ci-release` (no secrets) limited to `main` and the tag pattern `rust-ci-runner-v*`.
   - Accounts: Bitwarden machine accounts (read-only, one project each, token expiry set); a Grafana access policy with `logs:write` only, a usage alert on ingest, one token for the plan and `factory-ci` and a separate one for `factory-ci-docker`, rotated with the move; fine-grained GitHub tokens as in FR-016; blob keys from `openssl rand -hex 32`, rotated with the tokens.
   - After Setup, `gh secret list` at repo and org level shows none of the bootstrap names: they live only in Environments.
   - GHCR: the first push is private; switch it to public in the UI; check with `gh api /users/sudtanj/packages/container/rust-ci-runner --jq .visibility`; confirm the release digest came from a run on `main`.
   - Scheduler: cron-job.org, `POST` to the dispatch endpoint with headers `Accept: application/vnd.github+json`, `Authorization: Bearer <token>` and `X-GitHub-Api-Version: 2022-11-28`, body `{"ref":"main"}`, expect 204, failure notification on, fine-grained token with Actions write on this repo only, a renewal reminder at day 75.
-  - Heartbeat: healthchecks.io with a grace of 60 minutes or more, pinged at `/fail` when the plan failed or the tick is red.
+  - Heartbeat: healthchecks.io with a grace of 60 minutes or more, pinged at `/fail` when the plan failed or the tick is red (FR-034). The README says a red tick or a failed plan pings `/fail` and alerts at once, and that a late check means ticks stopped.
   - What a watched repo without `.factory-ci.toml` gets (nothing), and that the old Bitwarden `FACTORY_CI_LOG_*` keys are deleted only after quickstart checks 1 to 5 and 8 pass and some days of green ticks.
   - Rollback: pause the scheduler first, revert the lock and `--locked` together, and write down the previous `RUNNER_IMAGE_DIGEST`; the README lists what a revert does not restore (Environment secrets, the public package, Bitwarden contents, the scheduler token, the Grafana policy).
   - Notes: watch `ubuntu-24.04` deprecation notices; rerun the mirror after a Docker Hub rate limit; keep this repo public or lengthen the tick period (cost).
@@ -246,6 +261,20 @@ After the owner finishes Setup, the live checks that 002 could not run (T046, T0
 - **FR-031**: `FACTORY_CI_BWS_SERVER_URL`, when set, MUST start with `https://`; the tick MUST refuse any other value before it downloads or calls anything.
 - **FR-032**: A shell test MUST scan the committed docs (README files, `research.md`, `quickstart.md`) for private identifiers: no run URL of a private repo, no Grafana hostname, no token or key pattern. The live-check results template in `research.md` says so.
 - **FR-033**: The release `publish` job and the image mirror job MUST run in the Environment `factory-ci-release`. The mirror job MUST run only when `github.ref == 'refs/heads/main'`.
+
+**Review round 2**
+
+- **FR-034**: The tick `verdict` job MUST ping `<FACTORY_CI_HEARTBEAT_URL>/fail` when the plan result is not `success`, when `fail_tick` is `1`, or when a `run` or `run-docker` result is `failure` or `cancelled`, and the plain URL otherwise. It MUST ping only on `main`, only when the URL is set, with a 10-second limit, and a ping error MUST NOT fail the job. The README Setup step 11 MUST say that a red tick or a failed plan pings `/fail` and alerts at once, and that a late check means ticks stopped. A docs-test row MUST assert that `/fail` appears in the README. Contract: `contracts/tick-workflow.md`.
+- **FR-035**: The workflow lint MUST stay line-based and MUST add these rules, each with a mutation row in `--self-test`:
+  - The tick's `on:` block has `workflow_dispatch:` as its only key. Any other key indented by 2 spaces under `on:`, quoted or not, fails, and so does a flow-style `on:` in the tick.
+  - The lint loop covers `*.yml` and `*.yaml`.
+  - The 40-hex `uses:` pin rule and the `permissions` present rule run on every workflow file.
+  - The tick's `environment:` value per job is from an allowlist: `plan` and `verdict` use `factory-ci-plan`, `run` uses `factory-ci`, `run-docker` uses `factory-ci-docker`.
+  - The main guard regex is end-anchored: `if: github.ref == 'refs/heads/main'( && .*)?$`, with no `||`.
+  - The selftest rule also rejects `secrets: inherit` and `secrets[`.
+- **FR-036**: Every guard on `FACTORY_CI_BLOB_KEY` and `FACTORY_CI_BLOB_KEY_DOCKER` (the tick guard steps, `fci_blob_encrypt` and `fci_blob_decrypt`, and the scripts that call them) MUST require `^[0-9a-f]{64}$`, not only a length of 32 or more. The README already says the keys come from `openssl rand -hex 32`. Shell tests MUST cover a short key, a 64-character non-hex key, an upper-case hex key and a valid key.
+- **FR-037**: The plan script MUST call the plan binary for phase A with `FACTORY_CI_LOG_URL`, `FACTORY_CI_LOG_USER` and `FACTORY_CI_LOG_TOKEN` removed from its environment. Phase A (`plan::candidates`) only reads and never ships logs (checked in `rust-ci-runner/src/plan.rs`); the log line is sent from phase C (`plan::finish`), so the credentials are removed for phase A only. A test MUST prove phase A sees none of the three names and phase C sees all three.
+- **FR-038**: The plan MUST check the Bitwarden store (`fci_list`) only when at least one candidate row can use a secret: its `secrets_ok` is true and it has shared secret names (`secrets` not empty) or an owner id (`repo_id` not empty). A Bitwarden outage then does not fail a tick whose rows list no secret. The purpose of the check stays (D1): a revoked or wrong token fails one tick early instead of one `error` status per item.
 
 ### Key Entities
 
@@ -277,7 +306,7 @@ Closed by the lead (review round 1): OQ-1 scheduler is cron-job.org; OQ-2 `allow
 
 ## Assumptions
 
-- This repo is public, Actions are enabled, and `main` is protected (pull request required, no force push).
+- This repo is public, Actions are enabled, and `main` is protected (pull request required with 0 approvals, no force push, no deletion). Only the owner has write access, so only the owner can merge; the selftest is the gate (R2-2).
 - Free Actions minutes apply to public repos, so a 5-minute tick costs nothing (002 A25).
 - No local `cargo`, `docker`, `make` or test run exists: the VM has 1 GB of RAM. CI is the first compiler.
 - The engineer can read public run logs and download artifacts with `gh`.

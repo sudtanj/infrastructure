@@ -20,8 +20,8 @@ No stored data. These are the configuration objects the feature touches.
 | `FACTORY_CI_TOKEN_DOCKER` | only with `allow_docker` rows | yes | no | yes |
 | `BWS_ACCESS_TOKEN` | only for pipelines with secrets | yes | yes | no |
 | `BWS_ACCESS_TOKEN_DOCKER` | only with `allow_docker` rows | yes | no | yes |
-| `FACTORY_CI_BLOB_KEY` | yes, 32 characters or more | yes | yes | no |
-| `FACTORY_CI_BLOB_KEY_DOCKER` | optional: only with `allow_docker` rows, 32 characters or more, a different value | yes | no | yes |
+| `FACTORY_CI_BLOB_KEY` | yes, 64 lower-case hex characters (`openssl rand -hex 32`) | yes | yes | no |
+| `FACTORY_CI_BLOB_KEY_DOCKER` | optional: only with `allow_docker` rows, 64 lower-case hex characters, a different value | yes | no | yes |
 | `FACTORY_CI_HEARTBEAT_URL` | optional | yes | no | no |
 | `FACTORY_CI_LOG_URL` | all three or none; required for a private watched repo | yes | yes | yes |
 | `FACTORY_CI_LOG_USER` | same | yes | yes | yes |

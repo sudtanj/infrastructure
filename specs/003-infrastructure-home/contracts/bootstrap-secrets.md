@@ -13,8 +13,8 @@ Covers FR-010 to FR-016. Matrix of names and Environments: `../data-model.md`.
 
 ## `factory-ci-plan.sh`
 
-1. After the blob-key check and before `plan ... --rows-out`, call `fci_log_env`. On error: `fail "$FCI_ERR"` (the tick fails before any GitHub read).
-2. Inside the `total > 0` block: the `fci_list` calls stay (token check, 002 FR-045). Delete both `fci_log_creds` calls and the docker `have` juggling.
+1. After the blob-key check (64 lower-case hex, FR-036) and before `plan ... --rows-out`, call `fci_log_env`. On error: `fail "$FCI_ERR"` (the tick fails before any GitHub read).
+2. Inside the `total > 0` block: the `fci_list` calls stay (token check, 002 FR-045), but only when a row of that store has `secrets_ok` and (`secrets` or `repo_id`) (FR-038, `contracts/tick-workflow.md`). Delete both `fci_log_creds` calls and the docker `have` juggling.
 3. When `FCI_HAVE_LOGS` is set: refuse a short line, mask each value, export `FACTORY_CI_LOG_*` for phase C. This now happens for every tick that has rows, with or without a Bitwarden token.
 
 ## `factory-ci-job.sh`
