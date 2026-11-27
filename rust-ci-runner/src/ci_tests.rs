@@ -2009,3 +2009,26 @@ fn the_checkout_directory_is_removed_after_the_run() {
     assert_eq!(w.ok(), 1);
     assert_eq!(work_entries(&w), Vec::<String>::new());
 }
+
+// R06: production values are fixed, so no environment variable can swap `bws`, the engine, the clone
+// host, the protocol or the API host.
+#[test]
+fn production_seams_are_fixed_and_ignore_the_environment() {
+    let s = Seams::production();
+    assert_eq!(s.bws, "/usr/local/bin/bws");
+    assert_eq!(s.engine, "docker");
+    assert_eq!(s.git, "git");
+    assert_eq!(s.clone_base, "https://github.com");
+    assert_eq!(s.protocol, "https");
+    assert_eq!(s.api_base, "https://api.github.com");
+    assert!(s.remove_work);
+    assert_eq!(s.limits.bws, Duration::from_secs(60));
+    assert_eq!(s.limits.probe, Duration::from_secs(15));
+    assert_eq!(s.limits.fetch, Duration::from_secs(300));
+    assert_eq!(s.limits.identity, Duration::from_secs(15));
+    let src = include_str!("ci.rs");
+    assert!(
+        !src.contains("FACTORY_CI_BWS\"") && !src.contains("FACTORY_CI_ENGINE"),
+        "ci.rs reads a variable that R06 removed"
+    );
+}
