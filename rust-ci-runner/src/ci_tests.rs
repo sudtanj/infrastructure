@@ -428,7 +428,6 @@ fn assert_public(w: &W) {
 // ---- arguments (FR-006, FR-007; I7) ----
 
 #[test]
-#[ignore = "test-first"]
 fn ci_requires_all_flags() {
     let w = W::new(&pipe(&["a"]));
     for flag in ["--repos", "--repo", "--ref", "--work"] {
@@ -446,7 +445,6 @@ fn ci_requires_all_flags() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn unknown_flags_and_stray_words_are_refused() {
     let w = W::new(&pipe(&["a"]));
     for extra in [vec!["--bogus", "x"], vec!["--bogus"], vec!["stray"], vec!["--allow-docker=true"], vec!["-x"]] {
@@ -459,7 +457,6 @@ fn unknown_flags_and_stray_words_are_refused() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn repeated_flag_is_refused() {
     let w = W::new(&pipe(&["a"]));
     let n = 6;
@@ -480,7 +477,6 @@ fn repeated_flag_is_refused() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn value_starting_with_dashes_is_refused() {
     let w = W::new(&pipe(&["a"]));
     for flag in ["--repos", "--repo", "--ref", "--project", "--work"] {
@@ -494,7 +490,6 @@ fn value_starting_with_dashes_is_refused() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn ref_table() {
     let w = W::new(&pipe(&["a"]));
     let long = "a".repeat(201);
@@ -530,7 +525,6 @@ fn ref_table() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn project_table() {
     let w = W::new(&pipe(&["a"]));
     let long = "p".repeat(101);
@@ -546,7 +540,6 @@ fn project_table() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn work_table() {
     let w = W::new(&pipe(&["a"]));
     std::fs::create_dir_all(w.root.join("a:b")).unwrap();
@@ -576,7 +569,6 @@ fn work_table() {
 // ---- watch gate (FR-006) ----
 
 #[test]
-#[ignore = "test-first"]
 fn repo_outside_the_watch_list_exits_1_before_bws() {
     let w = W::new(&pipe(&["a"]));
     assert_eq!(w.go(&set(w.args(), "--repo", Some("x/y"))), 1);
@@ -594,7 +586,6 @@ fn repo_outside_the_watch_list_exits_1_before_bws() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn ref_outside_branches_exits_1() {
     let w = W::new(&pipe(&["a"]));
     assert_eq!(w.go(&set(set(w.args(), "--repo", Some("o/mainonly")), "--ref", Some("dev"))), 1);
@@ -603,7 +594,6 @@ fn ref_outside_branches_exits_1() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn entry_without_id_exits_1() {
     let w = W::new(&pipe(&["a"]));
     assert_eq!(w.go(&set(w.args(), "--repo", Some("o/noid"))), 1);
@@ -612,7 +602,6 @@ fn entry_without_id_exits_1() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn missing_access_token_exits_1_without_calling_bws() {
     let mut w = W::new(&pipe(&["a"]));
     w.token = String::new();
@@ -625,7 +614,6 @@ fn missing_access_token_exits_1_without_calling_bws() {
 // ---- the run: exit codes and the grammar (FR-008, FR-018; I4) ----
 
 #[test]
-#[ignore = "test-first"]
 fn passing_run_exits_0() {
     let w = W::new(&pipe(&["a"]));
     assert_eq!(w.ok(), 0, "{}", w.stderr());
@@ -643,7 +631,6 @@ fn passing_run_exits_0() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn failing_step_exits_1_without_reason() {
     let mut p = pipe(&["good", "bad"]);
     p.push_str("[steps.after]\nimage = \"alpine\"\ncommands = [\"x\"]\ndepends_on = [\"bad\"]\n");
@@ -674,7 +661,6 @@ fn failing_step_exits_1_without_reason() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn dropped_lines_on_a_pass_print_the_line_and_exit_1() {
     // the probe is accepted, every later push is refused: the shipper stops at once
     let w = W::with_loki(&pipe(&["a"]), |i| if i == 0 { 204 } else { 401 });
@@ -694,7 +680,6 @@ fn dropped_lines_on_a_pass_print_the_line_and_exit_1() {
 // ---- the probe (FR-016) ----
 
 #[test]
-#[ignore = "test-first"]
 fn probe_failure_exits_1_with_the_fixed_line() {
     for code in [401u16, 403] {
         let w = W::with_loki(&pipe(&["a"]), move |_| code);
@@ -720,7 +705,6 @@ fn probe_failure_exits_1_with_the_fixed_line() {
 // ---- engine and identity (FR-013, FR-023) ----
 
 #[test]
-#[ignore = "test-first"]
 fn engine_down_exits_1_before_the_fetch() {
     let mut w = W::new(&pipe(&["a"]));
     w.docker_body = "case \"$1\" in version) exit 1;; esac".to_string();
@@ -736,7 +720,6 @@ fn engine_down_exits_1_before_the_fetch() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn identity_mismatch_exits_1() {
     for (id, code) in [(43u64, 200u16), (NO_ID, 200), (42, 404), (42, 500), (0, 200)] {
         let w = W::new(&pipe(&["a"]));
@@ -751,7 +734,6 @@ fn identity_mismatch_exits_1() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn identity_request_uses_the_bearer_token() {
     let w = W::new(&pipe(&["a"]));
     assert_eq!(w.ok(), 0, "{}", w.stderr());
@@ -769,7 +751,6 @@ fn env_block(w: &W, file: &str, nth: usize) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn fetch_runs_init_fetch_checkout_with_the_header_in_env() {
     let w = W::new(&pipe(&["a"]));
     assert_eq!(w.ok(), 0, "{}", w.stderr());
@@ -811,7 +792,6 @@ fn fetch_runs_init_fetch_checkout_with_the_header_in_env() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn fetch_token_is_not_in_argv() {
     let w = W::new(&pipe(&["a"]));
     assert_eq!(w.ok(), 0, "{}", w.stderr());
@@ -823,7 +803,6 @@ fn fetch_token_is_not_in_argv() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn fetch_asks_for_refs_heads_only() {
     for r in ["main", "v1.0", "release/2026"] {
         let w = W::new(&pipe(&["a"]));
@@ -836,7 +815,6 @@ fn fetch_asks_for_refs_heads_only() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn clone_failure_prints_the_fixed_line_and_ships_a_redacted_detail() {
     let mut w = W::new(&pipe(&["a"]));
     w.git_body = format!("case \" $* \" in *\" fetch \"*) echo 'fatal: unable to access with {TOK}' >&2; exit 128;; esac");
@@ -850,7 +828,6 @@ fn clone_failure_prints_the_fixed_line_and_ships_a_redacted_detail() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn real_fetch_from_a_file_repo_with_cleared_env() {
     // A wrapper records argv and env, then runs the real git over file:// (protocol seam `file`).
     let mut w = W::new(&pipe(&["a"]));
@@ -909,7 +886,6 @@ fn real_fetch_from_a_file_repo_with_cleared_env() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn symlinked_pipeline_file_is_refused() {
     let w = W::new(&pipe(&["a"]));
     std::fs::remove_file(w.fixture.join(".factory-ci.toml")).unwrap();
@@ -921,7 +897,6 @@ fn symlinked_pipeline_file_is_refused() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn symlinked_project_is_refused() {
     let w = W::new(&pipe(&["a"]));
     std::fs::remove_dir_all(w.fixture.join("svc")).unwrap();
@@ -942,7 +917,6 @@ fn symlinked_project_is_refused() {
 const DOCKER_STEP: &str = "[steps.img]\nimage = \"alpine\"\ncommands = [\"x\"]\ndocker = true\n";
 
 #[test]
-#[ignore = "test-first"]
 fn toml_error_prints_the_fixed_line_and_ships_the_detail() {
     let w = W::new("[steps.a\nimage = \"alpine\" LEAK-TOML-77");
     assert_eq!(w.ok(), 1);
@@ -954,7 +928,6 @@ fn toml_error_prints_the_fixed_line_and_ships_the_detail() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn docker_step_is_refused_before_any_container() {
     let w = W::new(DOCKER_STEP);
     assert_eq!(w.ok(), 1);
@@ -970,7 +943,6 @@ fn docker_step_is_refused_before_any_container() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn allow_docker_needs_the_entry_and_a_pinned_dind_image() {
     let with = |extra: &[&str], env: &[(&str, &str)], repo: &str| {
         let mut w = W::new(DOCKER_STEP);
@@ -999,7 +971,6 @@ fn allow_docker_needs_the_entry_and_a_pinned_dind_image() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn declared_secret_fails_before_any_container() {
     let mut w = W::new("[steps.a]\nimage = \"alpine\"\ncommands = [\"x\"]\nsecrets = [\"NPM_TOKEN\"]\n");
     // even a defined value is never looked up
@@ -1011,7 +982,6 @@ fn declared_secret_fails_before_any_container() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn step_named_runner_gets_the_pipeline_refused() {
     let w = W::new(&pipe(&["runner"]));
     assert_eq!(w.ok(), 1);
@@ -1021,7 +991,6 @@ fn step_named_runner_gets_the_pipeline_refused() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn engine_fault_during_run_exits_1_with_runner_fault() {
     let mut w = W::new(&pipe(&["a"]));
     w.docker_body = "case \"$1\" in network) exit 1;; esac".to_string();
@@ -1039,7 +1008,6 @@ fn two_steps() -> W {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn mount_source_equals_the_work_path() {
     let w = two_steps();
     assert_eq!(w.ok(), 0, "{}", w.stderr());
@@ -1062,7 +1030,6 @@ fn mount_source_equals_the_work_path() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn step_argv_has_no_forbidden_flag() {
     let w = two_steps();
     assert_eq!(w.ok(), 0, "{}", w.stderr());
@@ -1091,7 +1058,6 @@ fn step_argv_has_no_forbidden_flag() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn no_docker_config_reaches_step_containers() {
     let w = two_steps();
     assert_eq!(w.ok(), 0, "{}", w.stderr());
@@ -1102,7 +1068,6 @@ fn no_docker_config_reaches_step_containers() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn step_env_sets_git_safe_directory() {
     let w = two_steps();
     assert_eq!(w.ok(), 0, "{}", w.stderr());
@@ -1134,7 +1099,6 @@ fn assert_no_marker(w: &W) {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn hostile_children_cannot_reach_stdout_or_stderr() {
     // every stub writes the token, its base64 and workflow commands to both streams
     let w = hostile(&pipe(&["a"]));
@@ -1165,7 +1129,6 @@ fn hostile_children_cannot_reach_stdout_or_stderr() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn hostile_fixture_prints_only_allowed_lines() {
     // step names that look like grammar, a 64-character name, a failing step with a dependent
     let long = "n".repeat(64);
@@ -1185,7 +1148,6 @@ fn hostile_fixture_prints_only_allowed_lines() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn no_bootstrap_value_in_stdout_stderr_argv_or_engine_child_env() {
     // I2: raw values and their base64 forms, including base64("x-access-token:<token>")
     let w = hostile(&pipe(&["a", "b"]));
@@ -1218,7 +1180,6 @@ fn no_bootstrap_value_in_stdout_stderr_argv_or_engine_child_env() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn panic_prints_internal_error_only() {
     let mut w = W::new(&pipe(&["a"]));
     w.panic_on_env = true;
@@ -1229,7 +1190,6 @@ fn panic_prints_internal_error_only() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn every_stderr_line_is_in_the_fixed_list() {
     type Case = (&'static str, &'static str, fn() -> W, fn(Vec<String>) -> Vec<String>);
     let keep: fn(Vec<String>) -> Vec<String> = |a| a;
@@ -1271,7 +1231,6 @@ fn work_entries(w: &W) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn invalid_run_id_is_replaced_and_runs_get_their_own_directory() {
     let mut w = W::new(&pipe(&["a"]));
     w.env = vec![("GITHUB_RUN_ID".to_string(), "a/../b".to_string())];
@@ -1289,7 +1248,6 @@ fn invalid_run_id_is_replaced_and_runs_get_their_own_directory() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn the_bitwarden_server_url_comes_from_the_env_and_is_checked() {
     let mut w = W::new(&pipe(&["a"]));
     w.env.push(("FACTORY_CI_BWS_SERVER_URL".to_string(), "https://vault.bitwarden.eu".to_string()));
@@ -1311,7 +1269,6 @@ fn the_bitwarden_server_url_comes_from_the_env_and_is_checked() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn github_server_url_is_ignored() {
     let mut w = W::new(&pipe(&["a"]));
     w.env.push(("GITHUB_SERVER_URL".to_string(), "https://evil.example".to_string()));
