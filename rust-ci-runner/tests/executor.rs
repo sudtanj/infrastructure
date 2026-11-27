@@ -164,6 +164,7 @@ commands = ['echo T a $(cat a.start) $(cat a.end) b $(cat b.start) $(cat b.end)'
 "#;
 
 #[test]
+#[ignore = "needs a container engine"]
 fn independent_steps_overlap_and_the_limit_is_honoured() {
     let r = go(TWO_PARALLEL, opts());
     assert!(r.out.ok(), "{}", r.log);
@@ -190,6 +191,7 @@ fn independent_steps_overlap_and_the_limit_is_honoured() {
 }
 
 #[test]
+#[ignore = "needs a container engine"]
 fn a_dependent_step_sees_files_written_by_an_earlier_step() {
     let r = go(
         r#"
@@ -209,6 +211,7 @@ commands = ['test "$(cat out.txt)" = hello', "echo [read] saw it"]
 }
 
 #[test]
+#[ignore = "needs a container engine"]
 fn failure_skips_dependents_but_not_independent_steps() {
     let r = go(
         r#"
@@ -241,6 +244,7 @@ commands = ["echo free-ran"]
 }
 
 #[test]
+#[ignore = "needs a container engine"]
 fn a_timeout_kills_the_step_and_leaves_no_container() {
     let start = Instant::now();
     let r = go(
@@ -264,6 +268,7 @@ commands = ["sleep 120"]
 }
 
 #[test]
+#[ignore = "needs a container engine"]
 fn the_run_deadline_kills_running_steps_and_skips_the_rest() {
     let r = go(
         r#"
@@ -287,6 +292,7 @@ commands = ["echo x"]
 }
 
 #[test]
+#[ignore = "needs a container engine"]
 fn steps_have_no_engine_socket_and_only_their_own_secrets() {
     let r = go(
         r#"
@@ -319,6 +325,7 @@ commands = ['test -z "$TOKEN"']
 }
 
 #[test]
+#[ignore = "needs a container engine"]
 fn a_docker_step_builds_and_runs_an_image_and_everything_is_cleaned_up() {
     let r = go(
         r#"
@@ -342,6 +349,7 @@ commands = ['test -z "$DOCKER_HOST"', 'test ! -e /var/run/docker.sock']
 }
 
 #[test]
+#[ignore = "needs a container engine"]
 fn concurrent_runs_cannot_see_each_others_images() {
     let pipeline = |tag: &str| {
         format!(
@@ -377,6 +385,7 @@ const RUNNER_VARS: [&str; 4] = [
 ];
 
 #[test]
+#[ignore = "needs a container engine"]
 fn a_step_sees_none_of_the_runner_process_environment() {
     // AS 7.4, SC-007: the token and the log credentials are in the runner's environment only
     for (k, v) in [
@@ -448,6 +457,7 @@ fn started(text: &str) -> Vec<String> {
 }
 
 #[test]
+#[ignore = "needs a container engine"]
 fn local_run_and_job_give_the_same_step_order_and_result() {
     // SC-007, AS 7.4: a chain, so the order is fixed
     pull_once();
@@ -493,6 +503,7 @@ fn local_run_and_job_give_the_same_step_order_and_result() {
 }
 
 #[test]
+#[ignore = "needs a container engine"]
 fn local_run_of_a_docker_pipeline_needs_no_opt_in_and_leaves_nothing() {
     // AS 8.4, FR-025
     pull_once();
@@ -525,6 +536,7 @@ fn local_run_of_a_docker_pipeline_needs_no_opt_in_and_leaves_nothing() {
 }
 
 #[test]
+#[ignore = "needs a container engine"]
 fn a_deadline_that_hits_during_container_creation_leaves_nothing() {
     // Four steps start at once against a one second deadline: some are still being created
     // when the client is killed. The daemon must not keep a `Created` container.
