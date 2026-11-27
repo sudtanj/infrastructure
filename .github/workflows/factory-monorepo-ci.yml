@@ -1,16 +1,23 @@
-# Owner exception, 2026-11-27: this plain workflow builds rust-ci-runner with cargo because the runner cannot build itself yet; only that build is exempt, factory-monorepo's steps run through the runner. Stopgap until the runner image release (feature 003); spec: specs/005-plain-actions-ci/.
+# Owner exception, 2026-11-27: this plain workflow builds rust-ci-runner with cargo because the runner cannot build itself yet; only that build is exempt. The pipelines run through the runner: factory-monorepo's steps, or the unit tests of rust-ci-runner itself (rust-ci-runner/.factory-ci.toml). Stopgap until the runner image release (feature 003); specs: specs/005-plain-actions-ci/, specs/006-runner-unit-tests/.
 name: factory-monorepo-ci
 
 on:
   workflow_dispatch:
     inputs:
+      pipeline:
+        description: pipeline to run
+        type: choice
+        options:
+          - factory-monorepo
+          - rust-ci-runner
+        default: factory-monorepo
       ref:
-        description: factory-monorepo branch to run
+        description: factory-monorepo branch to run; ignored for rust-ci-runner, which tests the main checkout of this repo
         type: string
         default: main
 
 concurrency:
-  group: factory-monorepo-ci-${{ inputs.ref }}
+  group: factory-monorepo-ci-${{ inputs.pipeline }}-${{ inputs.ref }}
   cancel-in-progress: false
 
 permissions: {}
@@ -28,6 +35,7 @@ jobs:
         with:
           persist-credentials: false
       - name: validate ref
+        if: inputs.pipeline == 'factory-monorepo'
         env:
           REF: ${{ inputs.ref }}
         run: |
@@ -64,6 +72,7 @@ jobs:
             "$RUNNER_TEMP/bin/bws" config server-base "$FACTORY_CI_BWS_SERVER_URL"
           fi
       - name: fetch token and clone factory-monorepo
+        if: inputs.pipeline == 'factory-monorepo'
         env:
           BWS_ACCESS_TOKEN: ${{ secrets.BWS_ACCESS_TOKEN }}
           REF: ${{ inputs.ref }}
@@ -108,18 +117,22 @@ jobs:
           cargo build --release
       - name: refuse docker steps
         # A docker-in-docker step would give root on this VM and access to the job's secrets, BWS_ACCESS_TOKEN included.
+        env:
+          DIR: ${{ inputs.pipeline == 'rust-ci-runner' && format('{0}/rust-ci-runner', github.workspace) || format('{0}/target', runner.temp) }}
         run: |
           set -u
           rc=0
           # The runner reads only the root .factory-ci.toml and refuses a symlink.
-          grep -qE '["'"'"']?docker["'"'"']?[[:space:]]*=[[:space:]]*true' "$RUNNER_TEMP/target/.factory-ci.toml" 2> /dev/null || rc=$?
+          grep -qE '["'"'"']?docker["'"'"']?[[:space:]]*=[[:space:]]*true' "$DIR/.factory-ci.toml" 2> /dev/null || rc=$?
           # 0 = a match, 1 = none; anything else is a failed check and stops the job too.
           if [ "$rc" -ne 1 ]; then
             echo "docker = true steps are not allowed in this workflow, or the check failed; use the factory CI runner with allow_docker" >&2
             exit 1
           fi
-      - name: run factory-monorepo pipeline
+      - name: run pipeline
         env:
+          DIR: ${{ inputs.pipeline == 'rust-ci-runner' && format('{0}/rust-ci-runner', github.workspace) || format('{0}/target', runner.temp) }}
+          PIPELINE: ${{ inputs.pipeline }}
           BWS_ACCESS_TOKEN: ${{ secrets.BWS_ACCESS_TOKEN }}
           REF: ${{ inputs.ref }}
           FACTORY_CI_SECRETS: ""
@@ -147,13 +160,14 @@ jobs:
           log=$RUNNER_TEMP/runner.log
           rc=0
           "$GITHUB_WORKSPACE/rust-ci-runner/target/release/rust-ci-runner" run \
-            --dir "$RUNNER_TEMP/target" --quiet-logs > "$log" 2>&1 || rc=$?
+            --dir "$DIR" --quiet-logs > "$log" 2>&1 || rc=$?
           # The runner's own event lines only, reasons dropped; step output is never printed.
           lines=$(grep -E '^\[[A-Za-z0-9_-]{1,64}\] (started|success in [0-9]+s|failed in [0-9]+s(: .*)?|skipped(: .*)?|pipeline (passed|failed))$' "$log" \
             | sed -E 's/^(\[[^]]+\] (failed in [0-9]+s|skipped)):.*/\1/' || true)
           if [ "$rc" -eq 0 ]; then result=passed; else result=failed; fi
           {
-            printf 'factory-monorepo %s: %s\n' "$REF" "$result"
+            if [ "$PIPELINE" = rust-ci-runner ]; then label="rust-ci-runner main"; else label="$PIPELINE $REF"; fi
+            printf '%s: %s\n' "$label" "$result"
             [ -z "$lines" ] || printf '%s\n' "$lines"
             # A fixed text: the log itself is never echoed.
             if [ "$rc" -ne 0 ] && [ -z "$lines" ]; then
