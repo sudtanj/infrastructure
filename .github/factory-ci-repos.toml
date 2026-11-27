@@ -1,8 +1,20 @@
 # One table per watched repo. Unknown keys are errors.
+# The manual `ci` command reads repo, id (required there), branches and allow_docker, and ignores the rest.
+# Listing a repo here also makes the by-hand tick plan it.
 # [[watch]]
 # repo = "sudtanj/invoices"          # required, owner/name
-# id = 123456789                     # optional numeric repo id; required to use owner/name<SEP>NAME keys
+# id = 123456789                     # optional numeric repo id; required to use owner/name<SEP>NAME keys, and by `ci`
 # branches = ["main", "release/*"]   # optional, default: every branch
 # secret_branches = ["main"]         # optional, default: the repo's default branch; other branches get no secrets
 # secrets = ["NPM_TOKEN"]            # optional shared key names in the default project; default: none
 # allow_docker = false               # optional, default false
+
+[[watch]]
+repo = "sudtanj/infrastructure"
+id = 1474045808
+branches = ["main"]
+
+[[watch]]
+repo = "sudtanj/factory-monorepo"
+id = 1473152830
+branches = ["main"]
