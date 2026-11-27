@@ -238,7 +238,7 @@ restrict who can read the store.
 - Status links to Grafana stop working after its 14-day retention.
 - The `ci` command reads its Bitwarden access token once and removes it from its own environment, but that does not
   clear the process environment file under proc: anything running as the same uid in the container can still read
-  it. The runner container therefore runs as its own uid, with the step containers kept off it.
+  it. The runner container therefore runs as the VM user (`--user "$(id -u):$(id -g)"`), and the step containers, which are separate containers, never see it.
 - The `ci` command does not allowlist the Loki host: the URL comes from Bitwarden, and the log token and the step
   output go there. Whoever can write to the Bitwarden project can send them anywhere, so write access to that
   project is a trust root.

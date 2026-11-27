@@ -83,7 +83,7 @@ Found by the review and security pass of Landing A. Each is one commit naming it
 - [X] R12 `tests/no_vendor.rs`: accept `bws` in `store.rs`, `ci.rs` and `engine.rs`; every other vendor name stays refused.
 - [X] R13 `tests/executor.rs`: make it compile and pass, or delete it if it tests something that is gone.
 - [X] R14 Selftest and `rust-ci-runner/.factory-ci.toml` run the integration tests (`cargo test --locked --tests`) so a broken one turns the run red.
-- [ ] R15 `rust-ci-runner/README.md`: the runner container runs as the VM user, not "its own uid".
+- [X] R15 `rust-ci-runner/README.md`: the runner container runs as the VM user, not "its own uid".
 
 ## Dependencies
 
