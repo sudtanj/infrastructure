@@ -145,7 +145,7 @@ fn docker_steps_with_the_opt_in_start() {
 
 #[test]
 fn a_missing_secret_ends_in_error_before_any_container() {
-    // AS 7.7, FR-041
+    // AS 7.7, FR-041; the status text is sanitized (FR-051), so the comma shows as _
     let j = Job::new();
     let toml = pipeline(&[("deploy", "secrets = [\"NPM_TOKEN\"]")]);
     j.run(&[(".factory-ci.toml", &toml)], &[], &[]);
@@ -156,7 +156,7 @@ fn a_missing_secret_ends_in_error_before_any_container() {
         s["description"]
             .as_str()
             .unwrap()
-            .contains("requests secret NPM_TOKEN, which is not defined"),
+            .contains("requests secret NPM_TOKEN_ which is not defined"),
         "{s}"
     );
 }
