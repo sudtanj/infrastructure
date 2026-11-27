@@ -1,36 +1,39 @@
-# The runner comes from the released image (RUNNER_IMAGE below, pinned by digest); only rust-ci-runner-release.yml builds it, an owner exception of 2026-11-27. This workflow copies the binary out of the image and runs the pipelines through it: factory-monorepo's steps, or the unit tests of rust-ci-runner itself (rust-ci-runner/.factory-ci.toml). Specs: specs/005-plain-actions-ci/, specs/006-runner-unit-tests/, specs/007-runner-image/.
+# Starts the CI job of rust-ci-runner by hand: one container from the pinned release image. The runner does the rest (watch list check, Bitwarden, Loki probe, fetch, docker refusal, pipeline) and prints only fixed lines; see rust-ci-runner/README.md.
+# Owner exception of 2026-11-27: this workflow holds BWS_ACCESS_TOKEN (in the Environment factory-ci) and reaches Bitwarden through the image, so the constitution was amended to 1.1.0. It supersedes parts of specs/005-plain-actions-ci/, specs/006-runner-unit-tests/ and specs/007-runner-image/ (feature 008).
+# Never switch this job to a self-hosted runner: the runner container holds the host docker socket and the access token, and only the ephemeral GitHub-hosted VM contains that.
 name: factory-monorepo-ci
 
 on:
   workflow_dispatch:
     inputs:
-      pipeline:
-        description: pipeline to run
-        type: choice
-        options:
-          - factory-monorepo
-          - rust-ci-runner
-        default: factory-monorepo
+      repo:
+        description: repository to run, owner/name; it must be in .github/factory-ci-repos.toml
+        type: string
+        default: sudtanj/factory-monorepo
       ref:
-        description: factory-monorepo branch to run; ignored for rust-ci-runner, which tests the main checkout of this repo
+        description: branch to run; it must match the branches of its watch entry
         type: string
         default: main
+      project:
+        description: "project folder, or . for the repository root"
+        type: string
+        default: .
 
 concurrency:
-  group: factory-monorepo-ci-${{ inputs.pipeline }}-${{ inputs.ref }}
+  group: factory-monorepo-ci-${{ inputs.repo }}-${{ inputs.ref }}-${{ inputs.project }}
   cancel-in-progress: false
 
 permissions: {}
 
 env:
-  # Pinned by digest; bump this line after each release.
-  RUNNER_IMAGE: ghcr.io/sudtanj/rust-ci-runner:0.1.0@sha256:0382941d78c93b0742e142d74a09e708ea2a161c46227ef34d8c7a24010b5b26
+  # Pinned by digest; bump this line after each release, by a reviewed commit.
+  RUNNER_IMAGE: ghcr.io/sudtanj/rust-ci-runner:0.2.0@sha256:f35772a54a14dde7d312f03704b559f1165526022c2fc020c8cced31b570bd91
 
 jobs:
   ci:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     environment: factory-ci
     permissions:
       contents: read
@@ -39,169 +42,25 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - name: validate ref
-        if: inputs.pipeline == 'factory-monorepo'
+      - name: run the job
         env:
-          REF: ${{ inputs.ref }}
-        run: |
-          set -eu
-          case $REF in
-            '' | -* | *..* | *[!A-Za-z0-9._/-]*)
-              echo "ref must use only A-Z a-z 0-9 . _ / -, not start with -, and not contain .." >&2
-              exit 1 ;;
-          esac
-      - name: install bws
-        env:
+          BWS_ACCESS_TOKEN: ${{ secrets.BWS_ACCESS_TOKEN }}
           FACTORY_CI_BWS_SERVER_URL: ${{ vars.FACTORY_CI_BWS_SERVER_URL }}
-        run: |
-          set -eu
-          base=https://github.com/bitwarden/sdk-sm/releases/download/bws-v2.1.0
-          asset=bws-x86_64-unknown-linux-musl-2.1.0.zip
-          # SHA-256 of the zip, as pinned in .github/scripts/factory-ci-secrets.sh on the 003 branch.
-          want=f59ee150e42b82128d437087e9bac920053c6bfddcb960d20ce9386e5ac9bba6
-          dir=$RUNNER_TEMP/bws-install
-          mkdir -p "$dir" "$RUNNER_TEMP/bin"
-          cd "$dir"
-          curl -fsSL --proto '=https' --tlsv1.2 --max-time 120 -O "$base/$asset"
-          [ "$(sha256sum "$asset" | cut -d ' ' -f 1)" = "$want" ] \
-            || { echo "the bws archive does not match the pinned digest" >&2; exit 1; }
-          [ "$(unzip -Z1 "$asset")" = bws ] \
-            || { echo "the bws archive must list exactly bws" >&2; exit 1; }
-          unzip -q "$asset" bws
-          install -m 0755 bws "$RUNNER_TEMP/bin/bws"
-          if [ -n "$FACTORY_CI_BWS_SERVER_URL" ]; then
-            case $FACTORY_CI_BWS_SERVER_URL in
-              https://*) ;;
-              *) echo "FACTORY_CI_BWS_SERVER_URL must start with https://" >&2; exit 1 ;;
-            esac
-            "$RUNNER_TEMP/bin/bws" config server-base "$FACTORY_CI_BWS_SERVER_URL"
-          fi
-      - name: fetch token and clone factory-monorepo
-        if: inputs.pipeline == 'factory-monorepo'
-        env:
-          BWS_ACCESS_TOKEN: ${{ secrets.BWS_ACCESS_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ inputs.repo }}
           REF: ${{ inputs.ref }}
+          PROJECT: ${{ inputs.project }}
         run: |
           set -eu
-          set +x
-          key=FACTORY_CI_TOKEN
-          fail() { echo "$1" >&2; exit 1; }
-          json=$(timeout 60 "$RUNNER_TEMP/bin/bws" secret list -o json 2> /dev/null) \
-            || fail "the secret store is unreachable or rejected the access token"
-          n=$(printf '%s' "$json" | jq -r --arg k "$key" '[.[] | select(.key == $k)] | length' 2> /dev/null) \
-            || fail "the secret store returned an unreadable list"
-          if [ "$n" != 1 ]; then
-            # Counts only, never names or values: helps tell "no access to the project" from "key misspelled".
-            total=$(printf '%s' "$json" | jq -r 'length')
-            near=$(printf '%s' "$json" | jq -r --arg k "$key" '[.[] | select((.key | gsub("^\\s+|\\s+$"; "") | ascii_upcase) == $k)] | length')
-            fail "expected exactly one secret with key $key, found $n; the access token sees $total secrets, $near match ignoring case and spaces"
-          fi
-          tok=$(printf '%s' "$json" | jq -r --arg k "$key" '.[] | select(.key == $k) | .value // ""')
-          unset json
-          # One line of token characters only: a newline or % could smuggle a workflow command.
-          case $tok in
-            '' | *[!A-Za-z0-9_.-]*) fail "the secret $key is empty or has an unexpected shape" ;;
-          esac
-          [ "${#tok}" -ge 8 ] || fail "the secret $key is shorter than 8 characters"
-          echo "::add-mask::$tok"
-          hdr=$(printf 'x-access-token:%s' "$tok" | base64 -w0)
-          echo "::add-mask::$hdr"
-          unset tok
-          # The header travels in git's environment: not in argv and not in .git/config.
-          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraHeader \
-            GIT_CONFIG_VALUE_0="Authorization: basic $hdr" GIT_TERMINAL_PROMPT=0 \
-            timeout 300 git clone -q --depth 1 --no-tags --branch "$REF" \
-            https://github.com/sudtanj/factory-monorepo.git "$RUNNER_TEMP/target" 2> /dev/null \
-            || fail "cloning factory-monorepo at ref $REF failed"
-      - name: fetch rust-ci-runner
-        env:
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -eu
-          mkdir -p "$RUNNER_TEMP/bin"
-          # The token is only for a private package; it goes in on stdin, never in argv.
-          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          docker pull "$RUNNER_IMAGE"
-          # The image is FROM scratch: no shell, so copy the binary out instead of running it there.
-          cid=$(docker create "$RUNNER_IMAGE")
-          trap 'docker rm "$cid" > /dev/null' EXIT
-          docker cp "$cid:/rust-ci-runner" "$RUNNER_TEMP/bin/rust-ci-runner"
-          chmod +x "$RUNNER_TEMP/bin/rust-ci-runner"
-      - name: refuse docker steps
-        # A docker-in-docker step would give root on this VM and access to the job's secrets, BWS_ACCESS_TOKEN included.
-        env:
-          DIR: ${{ inputs.pipeline == 'rust-ci-runner' && format('{0}/rust-ci-runner', github.workspace) || format('{0}/target', runner.temp) }}
-        run: |
-          set -u
-          rc=0
-          # The runner reads only the root .factory-ci.toml and refuses a symlink.
-          grep -qE '["'"'"']?docker["'"'"']?[[:space:]]*=[[:space:]]*true' "$DIR/.factory-ci.toml" 2> /dev/null || rc=$?
-          # 0 = a match, 1 = none; anything else is a failed check and stops the job too.
-          if [ "$rc" -ne 1 ]; then
-            echo "docker = true steps are not allowed in this workflow, or the check failed; use the factory CI runner with allow_docker" >&2
-            exit 1
-          fi
-      - name: run pipeline
-        env:
-          DIR: ${{ inputs.pipeline == 'rust-ci-runner' && format('{0}/rust-ci-runner', github.workspace) || format('{0}/target', runner.temp) }}
-          PIPELINE: ${{ inputs.pipeline }}
-          BWS_ACCESS_TOKEN: ${{ secrets.BWS_ACCESS_TOKEN }}
-          REF: ${{ inputs.ref }}
-          FACTORY_CI_SECRETS: ""
-        run: |
-          set -u
-          set +x
-          fail() { echo "$1" >&2; exit 1; }
-          # Grafana Loki settings from Bitwarden: step output goes there, never to this public log.
-          json=$(timeout 60 "$RUNNER_TEMP/bin/bws" secret list -o json 2> /dev/null) \
-            || fail "the secret store is unreachable or rejected the access token"
-          unset BWS_ACCESS_TOKEN
-          for key in FACTORY_CI_LOG_URL FACTORY_CI_LOG_USER FACTORY_CI_LOG_TOKEN; do
-            n=$(printf '%s' "$json" | jq -r --arg k "$key" '[.[] | select(.key == $k)] | length') \
-              || fail "the secret store returned an unreadable list"
-            [ "$n" = 1 ] || fail "expected exactly one secret with key $key, found $n"
-            val=$(printf '%s' "$json" | jq -r --arg k "$key" '.[] | select(.key == $k) | .value // ""')
-            # One line of URL or token characters only: a newline or % could smuggle a workflow command.
-            case $val in
-              '' | *[!A-Za-z0-9_.=+/:-]*) fail "the secret $key is empty or has an unexpected shape" ;;
-            esac
-            [ "$key" != FACTORY_CI_LOG_TOKEN ] || echo "::add-mask::$val"
-            export "$key=$val"
-          done
-          unset json val
-          # Grafana Cloud shows the push URL with its path; the runner appends the path itself.
-          FACTORY_CI_LOG_URL=${FACTORY_CI_LOG_URL%/}
-          FACTORY_CI_LOG_URL=${FACTORY_CI_LOG_URL%/loki/api/v1/push}
-          export FACTORY_CI_LOG_URL
-          # The runner's local mode drops failed pushes silently, so prove the store accepts one line now.
-          body=$(jq -nc --arg repo "$GITHUB_REPOSITORY" --arg ts "$(date +%s%N)" --arg line "probe run=$GITHUB_RUN_ID" \
-            '{streams: [{stream: {service_name: "factory-ci", repo: $repo, project: "probe", step: "probe", stream: "stdout"}, values: [[$ts, $line]]}]}')
-          # Credentials go to curl on stdin: not in argv.
-          code=$(printf 'user = "%s:%s"\n' "$FACTORY_CI_LOG_USER" "$FACTORY_CI_LOG_TOKEN" \
-            | curl -sS -o /dev/null -w '%{http_code}' --max-time 15 --proto '=https' -K - \
-              -H 'Content-Type: application/json' --data "$body" "$FACTORY_CI_LOG_URL/loki/api/v1/push" 2> /dev/null) \
-            || code=${code:-000}
-          echo "log store answered HTTP $code"
-          case $code in
-            2??) ;;
-            *) fail "check FACTORY_CI_LOG_URL (host only, e.g. https://logs-prod-xxx.grafana.net), FACTORY_CI_LOG_USER (numeric user id) and FACTORY_CI_LOG_TOKEN (needs logs:write)" ;;
-          esac
-          log=$RUNNER_TEMP/runner.log
-          rc=0
-          "$RUNNER_TEMP/bin/rust-ci-runner" run \
-            --dir "$DIR" --quiet-logs > "$log" 2>&1 || rc=$?
-          # The runner's own event lines only, reasons dropped; step output is never printed.
-          lines=$(grep -E '^\[[A-Za-z0-9_-]{1,64}\] (started|success in [0-9]+s|failed in [0-9]+s(: .*)?|skipped(: .*)?|pipeline (passed|failed))$' "$log" \
-            | sed -E 's/^(\[[^]]+\] (failed in [0-9]+s|skipped)):.*/\1/' || true)
-          if [ "$rc" -eq 0 ]; then result=passed; else result=failed; fi
-          {
-            if [ "$PIPELINE" = rust-ci-runner ]; then label="rust-ci-runner main"; else label="$PIPELINE $REF"; fi
-            printf '%s: %s\n' "$label" "$result"
-            [ -z "$lines" ] || printf '%s\n' "$lines"
-            # A fixed text: the log itself is never echoed.
-            if [ "$rc" -ne 0 ] && [ -z "$lines" ]; then
-              echo "runner failed before running any step (details in Grafana Loki)"
-            fi
-            echo "Grafana Explore: {service_name=\"factory-ci\", repo=\"$GITHUB_REPOSITORY\"}"
-          } | tee -a "$GITHUB_STEP_SUMMARY"
-          exit "$rc"
+          export DOCKER_CONFIG=$(mktemp -d); trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null
+          mkdir -p "$RUNNER_TEMP/ci"
+          docker run -q --rm --init --name "factory-ci-runner-$GITHUB_RUN_ID" \
+            --user "$(id -u):$(id -g)" --group-add "$(stat -c %g /var/run/docker.sock)" \
+            --cap-drop ALL --security-opt no-new-privileges --read-only \
+            --tmpfs /tmp:rw,size=64m -e HOME=/tmp \
+            -e BWS_ACCESS_TOKEN -e GITHUB_RUN_ID -e FACTORY_CI_BWS_SERVER_URL \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$RUNNER_TEMP/ci:$RUNNER_TEMP/ci" \
+            -v "$GITHUB_WORKSPACE/.github/factory-ci-repos.toml:/etc/factory-ci/repos.toml:ro" \
+            "$RUNNER_IMAGE" ci --repos /etc/factory-ci/repos.toml --repo "$REPO" --ref "$REF" --project "$PROJECT" --work "$RUNNER_TEMP/ci"
