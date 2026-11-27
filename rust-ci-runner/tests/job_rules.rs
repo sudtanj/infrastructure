@@ -152,11 +152,12 @@ fn a_missing_secret_ends_in_error_before_any_container() {
     assert!(j.sb.step_runs().is_empty());
     let s = j.last_status();
     assert_eq!(s["state"], "error");
+    // The status text is sanitized (FR-051): the comma becomes an underscore.
     assert!(
         s["description"]
             .as_str()
             .unwrap()
-            .contains("requests secret NPM_TOKEN, which is not defined"),
+            .contains("requests secret NPM_TOKEN_ which is not defined"),
         "{s}"
     );
 }
