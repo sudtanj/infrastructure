@@ -29,6 +29,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: build the runner from source
         working-directory: rust-ci-runner
         run: cargo build --locked --release
@@ -89,7 +91,7 @@ jobs:
       - name: this workflow holds no secret, gate or privileged trigger
         run: |
           f=.github/workflows/factory-ci-selftest.yml
-          if grep -En '[e]nvironment:|[i]d-token|[p]ull_request_target' "$f"; then
+          if grep -En '[e]nvironment:|[i]d-token|[p]ull_request_target|[w]orkflow_run|[r]epository_dispatch|[s]ecrets:|[s]ecrets\[|toJSON\([s]ecrets' "$f"; then
             echo "factory-ci-selftest must not use these" >&2
             exit 1
           fi
