@@ -48,7 +48,6 @@ To run it, open Actions, pick `factory-monorepo-ci`, choose `main` as the workfl
 
 The log is public, so it shows only each step's name, result and duration, plus `factory-monorepo <ref>: passed` or `failed`. The runner's full output goes to a file on the hosted runner and is never uploaded. The job exits with the runner's exit code and posts no commit status.
 
-
 Rules for this workflow:
 
 - Logs are minimal on purpose. The repo is public, factory-monorepo is private. If the runner fails before any step, you see one fixed line and nothing else.
