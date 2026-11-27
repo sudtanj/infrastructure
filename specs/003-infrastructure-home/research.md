@@ -110,7 +110,31 @@ Recorded in `plan.md` Open risks: replace the third-party `alpine/git` clone ima
 
 ## Test classification
 
-Filled by T010.
+Read by the lead for T010. "Engine" means the test starts real containers through the `docker` CLI. Only `tests/executor.rs` does; its 12 tests carry `#[ignore = "needs a container engine"]`. The runner pipeline (`cargo test --locked`, no engine in the step container) passed every other test in selftest run 45961039214, which is the evidence for the "no engine" rows.
+
+| File | Needs an engine | Why |
+| --- | --- | --- |
+| `tests/executor.rs` | yes, ignored | Runs step containers, networks and volumes for real |
+| `tests/argv.rs` | no | Builds `docker run` argument lists and asserts on them |
+| `tests/cli.rs` | no | Stub `docker` first on `PATH` (`tests/common/mod.rs`) |
+| `tests/cli_logs.rs` | no | Stub `docker` and a fake log server |
+| `tests/job_prepare.rs` | no | Pipeline parsing and validation only |
+| `tests/job_rules.rs` | no | Stub `docker` on `PATH` |
+| `tests/no_vendor.rs` | no | Reads source files |
+| `tests/ship_job.rs` | no | Fake log server |
+| `src/github_tests.rs` | no | Fake GitHub server |
+| `src/job_tests.rs` | no | In-process |
+| `src/plan_cap_tests.rs` | no | Fake GitHub API |
+| `src/plan_error_tests.rs` | no | Fake GitHub API |
+| `src/plan_hardening_tests.rs` | no | Fake GitHub API |
+| `src/plan_race_tests.rs` | no | Fake GitHub API |
+| `src/plan_tests.rs` | no | Fake GitHub API |
+| `src/projects_tests.rs` | no | In-process |
+| `src/secret_names_tests.rs` | no | In-process |
+| `src/ship_tests.rs` | no | Fake log server |
+| `src/text_tests.rs` | no | In-process |
+| `src/walk_tests.rs` | no | Temporary directories |
+| `src/watch_tests.rs` | no | TOML parsing |
 
 ## Live check results
 

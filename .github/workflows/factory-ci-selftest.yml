@@ -1,8 +1,7 @@
 name: factory-ci-selftest
 
-# Bootstrap exception: this workflow runs on the pull request's own code with no secret,
-# no Environment and no artifact. The temporary factory-ci-bootstrap.yml is the only
-# workflow that uploads one, and it is deleted before merge.
+# Bootstrap exception: this workflow runs cargo on the pull request's own code with no secret,
+# no Environment and no artifact.
 on:
   pull_request:
   workflow_dispatch:

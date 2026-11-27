@@ -119,7 +119,7 @@ for f in "$dir"/*.yml; do
   [ -r "$f" ] || continue
   code "$f" | grep 'runs-on:' | grep -Evq 'runs-on: ubuntu-24\.04$' && bad runs-on-pinned "$f: a runs-on is not exactly ubuntu-24.04"
   code "$f" | grep -Eq '(^|[^A-Za-z_-])pull_request_target([^A-Za-z_-]|$)' && bad no-pull-request-target "$f: pull_request_target is present"
-  case $f in "$dir"/factory-ci-selftest.yml | "$dir"/factory-ci-bootstrap.yml | "$rel") continue ;; esac
+  case $f in "$dir"/factory-ci-selftest.yml | "$rel") continue ;; esac
   code "$f" | grep -Eq '(^|[^A-Za-z_-])cargo ' && bad no-cargo "$f: a cargo command outside the bootstrap-exception workflows"
 done
 
