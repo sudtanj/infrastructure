@@ -444,7 +444,6 @@ fn url_with_another_path_is_kept() {
 const LIMIT: Duration = Duration::from_millis(800);
 
 #[test]
-#[ignore = "test-first"]
 fn probe_204_is_ok() {
     let l = ok_loki();
     assert_eq!(crate::ship::probe(&cfg(&l.url), "0123456789abcdef", LIMIT), Ok(204));
@@ -452,7 +451,6 @@ fn probe_204_is_ok() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn probe_401_reports_the_code() {
     for code in [401u16, 403] {
         let l = loki(move |_| (code, Duration::ZERO));
@@ -462,7 +460,6 @@ fn probe_401_reports_the_code() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn probe_with_no_answer_reports_000_in_time() {
     // Nothing listens on port 1: every attempt is refused at once. One retry after 2 s.
     let start = Instant::now();
@@ -477,7 +474,6 @@ fn probe_with_no_answer_reports_000_in_time() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn probe_retries_once_on_5xx_and_429() {
     for code in [500u16, 503, 429] {
         let l = loki(move |i| (if i == 0 { code } else { 204 }, Duration::ZERO));
@@ -493,7 +489,6 @@ fn probe_retries_once_on_5xx_and_429() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn probe_posts_one_line_with_the_five_labels_and_basic_auth() {
     let l = ok_loki();
     assert!(crate::ship::probe(&cfg(&l.url), "0123456789abcdef", LIMIT).is_ok());

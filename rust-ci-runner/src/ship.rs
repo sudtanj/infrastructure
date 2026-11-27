@@ -157,6 +157,67 @@ struct Queue {
     done: bool,
 }
 
+/// The one place a push body is built: the shipper and the probe both call it.
+fn render(labels: &Labels, m: &Meta, mut batch: Vec<Line>) -> String {
+    batch.sort_by_key(|l| l.ts_ns);
+    let prefix = format!(
+        "run={} sha={} branch={} ",
+        m.run_id,
+        short_sha(&m.sha),
+        m.branch.chars().take(40).collect::<String>()
+    );
+    let mut streams: BTreeMap<(String, String), Vec<[String; 2]>> = BTreeMap::new();
+    for l in batch {
+        let text = format!("{prefix}{}", l.text.replace('\0', "\u{fffd}"));
+        streams.entry((l.step, l.stream)).or_default().push([l.ts_ns.to_string(), text]);
+    }
+    let streams: Vec<_> = streams
+        .into_iter()
+        .map(|((step, stream), values)| {
+            serde_json::json!({
+                "stream": {"service_name": SERVICE_NAME, "repo": labels.repo, "project": labels.project, "step": step, "stream": stream},
+                "values": values,
+            })
+        })
+        .collect();
+    serde_json::json!({ "streams": streams }).to_string()
+}
+
+fn basic_auth(cfg: &LogConfig) -> String {
+    format!("Basic {}", base64(format!("{}:{}", cfg.user, cfg.token).as_bytes()))
+}
+
+/// Posts one line before the run starts, so a wrong URL, user or token fails early. `limit` is per
+/// attempt; no answer, 429 and 5xx are tried once more after 2 s. `Err(0)` means no answer.
+pub fn probe(cfg: &LogConfig, run_id: &str, limit: Duration) -> Result<u16, u16> {
+    let labels = Labels { repo: "factory-ci".to_string(), project: "probe".to_string() };
+    let meta = Meta { run_id: run_id.to_string(), sha: String::new(), branch: String::new() };
+    let ts_ns = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let line = Line { ts_ns, step: "probe".to_string(), stream: "stdout".to_string(), text: "probe".to_string() };
+    let body = render(&labels, &meta, vec![line]);
+    let agent = ureq::AgentBuilder::new().timeout(limit).redirects(0).build();
+    let url = format!("{}/loki/api/v1/push", cfg.url);
+    let mut code = 0;
+    for attempt in 0..2 {
+        if attempt == 1 {
+            std::thread::sleep(Duration::from_secs(2));
+        }
+        let res = agent.post(&url).set("Authorization", &basic_auth(cfg)).set("Content-Type", "application/json").send_string(&body);
+        code = match res {
+            Ok(r) => r.status(),
+            Err(ureq::Error::Status(c, _)) => c,
+            Err(_) => 0,
+        };
+        if (200..300).contains(&code) {
+            return Ok(code);
+        }
+        if code != 0 && code != 429 && code < 500 {
+            break;
+        }
+    }
+    Err(code)
+}
+
 /// Ships lines to Loki from one thread. Nothing here can fail a step: a lost line only sets `dropped`.
 pub struct Shipper {
     cfg: LogConfig,
@@ -257,36 +318,10 @@ impl Shipper {
         }
     }
 
-    fn body(&self, mut batch: Vec<Line>) -> String {
-        batch.sort_by_key(|l| l.ts_ns);
-        let m = &self.meta;
-        let prefix = format!(
-            "run={} sha={} branch={} ",
-            m.run_id,
-            short_sha(&m.sha),
-            m.branch.chars().take(40).collect::<String>()
-        );
-        let mut streams: BTreeMap<(String, String), Vec<[String; 2]>> = BTreeMap::new();
-        for l in batch {
-            let text = format!("{prefix}{}", l.text.replace('\0', "\u{fffd}"));
-            streams.entry((l.step, l.stream)).or_default().push([l.ts_ns.to_string(), text]);
-        }
-        let streams: Vec<_> = streams
-            .into_iter()
-            .map(|((step, stream), values)| {
-                serde_json::json!({
-                    "stream": {"service_name": SERVICE_NAME, "repo": self.labels.repo, "project": self.labels.project, "step": step, "stream": stream},
-                    "values": values,
-                })
-            })
-            .collect();
-        serde_json::json!({ "streams": streams }).to_string()
-    }
-
     /// Posts one batch with retries. False only when the store refused our credentials.
     fn send(&self, batch: Vec<Line>) -> bool {
-        let body = self.body(batch);
-        let auth = format!("Basic {}", base64(format!("{}:{}", self.cfg.user, self.cfg.token).as_bytes()));
+        let body = render(&self.labels, &self.meta, batch);
+        let auth = basic_auth(&self.cfg);
         let agent = ureq::AgentBuilder::new().timeout(self.t.request_timeout).redirects(0).build();
         let url = format!("{}/loki/api/v1/push", self.cfg.url);
         let start = Instant::now();
