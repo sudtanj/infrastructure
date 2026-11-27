@@ -18,6 +18,12 @@ pub const DIND_IMAGE: &str = "docker:27.5.1-dind";
 /// Start of the reason when the engine binary cannot be started; `job` reports it as `error`.
 pub const SPAWN_FAIL: &str = "cannot run ";
 
+/// The only variables an engine child inherits (FR-012).
+const ENGINE_ENV: [&str; 7] = ["PATH", "HOME", "DOCKER_HOST", "DOCKER_CONFIG", "DOCKER_CERT_PATH", "DOCKER_TLS_VERIFY", "XDG_RUNTIME_DIR"];
+
+/// Memory limit of a step container; swap is capped at the same value so it cannot grow past it.
+const MEMORY: &str = "5g";
+
 /// Sets git's HTTP auth from the FCI_TOKEN variable, inside the container.
 const GIT_AUTH: &str = r#"
 git config --global --add safe.directory '*'
@@ -70,9 +76,17 @@ impl Engine {
         Engine { bin: s(bin) }
     }
 
-    fn command(&self, args: &[String], env: &[(String, String)]) -> Command {
+    /// The child starts from an empty environment plus the engine client's own variables, so
+    /// nothing else the runner holds reaches it (I9, I11). `env` entries are explicit and pass.
+    pub(crate) fn command(&self, args: &[String], env: &[(String, String)]) -> Command {
         let mut c = Command::new(&self.bin);
-        c.args(args).envs(env.iter().cloned()).stdin(Stdio::null());
+        c.args(args).stdin(Stdio::null()).env_clear();
+        for k in ENGINE_ENV {
+            if let Ok(v) = std::env::var(k) {
+                c.env(k, v);
+            }
+        }
+        c.env_remove("BWS_ACCESS_TOKEN").envs(env.iter().cloned());
         c
     }
 
@@ -371,6 +385,7 @@ fn run_step(ctx: &RunCtx, name: &str, step: &Step, side: Option<&Sidecar>) -> St
     let mut a = strs(&["run", "--rm", "--name", &container, "--label", &label]);
     a.extend(strs(&["--pids-limit", "512", "--security-opt", "no-new-privileges"]));
     a.extend(strs(&["--cap-drop", "NET_RAW", "--cap-drop", "MKNOD", "--cap-drop", "SETFCAP"]));
+    a.extend(strs(&["--memory", MEMORY, "--memory-swap", MEMORY]));
     a.extend(strs(&["-v", &mount, "-w", "/workspace"]));
     let plain = format!("factory-ci-{}", ctx.run_id);
     match (step.docker, side) {

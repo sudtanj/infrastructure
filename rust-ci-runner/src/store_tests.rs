@@ -94,7 +94,6 @@ fn names(env: &str) -> Vec<String> {
 // ---- engine children (T005): FR-012, I9, I11 ----
 
 #[test]
-#[ignore = "test-first"]
 fn command_removes_the_inherited_token() {
     // `env_remove` acts on the inherited environment: no entry with a value may name the token.
     let e = Engine::new("docker");
@@ -103,7 +102,6 @@ fn command_removes_the_inherited_token() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn explicit_env_entry_still_passes() {
     let e = Engine::new("docker");
     let c = e.command(&[], &[("BWS_ACCESS_TOKEN".to_string(), "explicit".to_string()), ("FCI_TOKEN".to_string(), "t".to_string())]);
@@ -113,7 +111,6 @@ fn explicit_env_entry_still_passes() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn engine_child_env_is_the_allowlist() {
     // A stub engine dumps its environment. cargo sets CARGO_PKG_NAME for every test process.
     let sb = Sandbox::new();
