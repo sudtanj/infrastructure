@@ -1,3 +1,4 @@
+pub mod ci;
 pub mod engine;
 pub mod github;
 pub mod job;
@@ -43,3 +44,5 @@ mod watch_tests;
 mod job_tests;
 #[cfg(test)]
 mod store_tests;
+#[cfg(test)]
+mod ci_tests;

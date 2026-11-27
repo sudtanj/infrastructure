@@ -1,5 +1,5 @@
 use rust_ci_runner::github::HttpApi;
-use rust_ci_runner::{job, plan, ship, watch};
+use rust_ci_runner::{ci, job, plan, ship, watch};
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
@@ -11,10 +11,11 @@ const USAGE: &str = "usage:
   rust-ci-runner plan --repos FILE --rows-out CAND  phase A: candidates, reads only
   rust-ci-runner plan --rows-in CAND --rows-out ROWS --summary FILE [--cap N] [--now EPOCH]  phase C: cap, posts; prints fail_tick=0|1
   rust-ci-runner job --repo OWNER/NAME --sha SHA --project PATH --branch NAME --run-id ID [--prev SHA] [--allow-docker] [--quiet-logs] [--private] [--retry] [--names-file FILE --reason-file FILE]  clone, run and post the final status; with the two files, only list the pipeline's secret names
+  rust-ci-runner ci --repos FILE --repo OWNER/NAME --ref REF [--project PATH] --work DIR [--allow-docker]  the manual CI job: fetch the settings, clone, run, print only fixed lines; exit 0 or 1
   rust-ci-runner status --repo OWNER/NAME --sha SHA --project PATH --run-id ID --state error|failure|success --description TEXT [--retry]  post one status
   rust-ci-runner help
 
-environment: FACTORY_CI_ENGINE=docker|podman (default docker; `job` also accepts a path); `plan`, `job` and `status` read FACTORY_CI_TOKEN. `run` reads secrets from
+environment: FACTORY_CI_ENGINE=docker|podman (default docker; `job` and `ci` also accept a path); `ci` reads BWS_ACCESS_TOKEN, and optionally FACTORY_CI_BWS, FACTORY_CI_BWS_SERVER_URL, FACTORY_CI_DIND_IMAGE, GITHUB_RUN_ID; `plan`, `job` and `status` read FACTORY_CI_TOKEN. `run` reads secrets from
 the environment variables named in the pipeline file.";
 
 fn fail(msg: &str) -> ExitCode {
@@ -201,12 +202,24 @@ fn env(k: &str) -> Option<String> {
     std::env::var(k).ok()
 }
 
+/// `ci`: the whole manual CI job. The access token is read once and removed from the process
+/// environment before anything else starts; a panic message never reaches the public log, `ci::run`
+/// prints the fixed line instead.
+fn run_ci(args: &[String]) -> ExitCode {
+    let token = std::env::var("BWS_ACCESS_TOKEN").unwrap_or_default();
+    std::env::remove_var("BWS_ACCESS_TOKEN");
+    std::panic::set_hook(Box::new(|_| {}));
+    let seams = ci::Seams::production(&env);
+    ExitCode::from(ci::run(args, &token, &env, &seams, Box::new(std::io::stdout()), Box::new(std::io::stderr())) as u8)
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("run") => run(&args[1..]),
         Some("plan") => plan(&args[1..]),
-        Some("job") => ExitCode::from(job::job(&args[1..], &env) as u8),
+        Some("ci") => run_ci(&args[1..]),
+        Some("job") =>ExitCode::from(job::job(&args[1..], &env) as u8),
         Some("status") => ExitCode::from(job::status(&args[1..], &env) as u8),
         Some("help") | Some("--help") | Some("-h") => {
             println!("{USAGE}");
