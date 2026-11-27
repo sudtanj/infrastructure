@@ -1,0 +1,146 @@
+name: rust-ci-runner-release
+
+# Push a tag such as rust-ci-runner-v0.1.0 on a commit that is on main. Publishes static
+# binaries as release assets and a multi-arch image holding only the binary at
+# ghcr.io/<owner>/rust-ci-runner. Protect this tag pattern and main in the repository settings.
+on:
+  push:
+    tags: ["rust-ci-runner-v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: the tag matches Cargo.toml and the commit is on main
+        shell: bash
+        run: |
+          set -eu
+          want=${TAG#rust-ci-runner-v}
+          have=$(grep -m1 '^version' rust-ci-runner/Cargo.toml | cut -d'"' -f2)
+          [ "$want" = "$have" ] || { echo "tag says $want, Cargo.toml says $have" >&2; exit 1; }
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+            || { echo "the tagged commit is not on main" >&2; exit 1; }
+
+  build:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            arch: amd64
+            cc: musl-gcc
+            packages: musl-tools
+          - target: aarch64-unknown-linux-musl
+            arch: arm64
+            cc: aarch64-linux-gnu-gcc
+            packages: gcc-aarch64-linux-gnu musl-tools
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: install the C compiler for ${{ matrix.target }}
+        env:
+          PACKAGES: ${{ matrix.packages }}
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $PACKAGES
+      - name: build
+        working-directory: rust-ci-runner
+        env:
+          TARGET: ${{ matrix.target }}
+          CC_VAR: ${{ matrix.cc }}
+        run: |
+          set -eu
+          up=$(printf '%s' "$TARGET" | tr 'a-z-' 'A-Z_')
+          lower=$(printf '%s' "$TARGET" | tr '-' '_')
+          export "CC_$lower=$CC_VAR"
+          export "CARGO_TARGET_${up}_LINKER=$CC_VAR"
+          make build TARGET="$TARGET"
+      - name: stage the binary
+        env:
+          TARGET: ${{ matrix.target }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -eu
+          mkdir -p "dist/$ARCH"
+          cp "rust-ci-runner/target/$TARGET/release/rust-ci-runner" "dist/$ARCH/rust-ci-runner"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: binary-${{ matrix.arch }}
+          path: dist/${{ matrix.arch }}/rust-ci-runner
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: binary-*
+          path: dist
+      - name: release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          cp dist/binary-amd64/rust-ci-runner rust-ci-runner-x86_64-linux
+          cp dist/binary-arm64/rust-ci-runner rust-ci-runner-aarch64-linux
+          chmod +x rust-ci-runner-*-linux
+          gh release create "$TAG" --title "$TAG" --generate-notes --verify-tag \
+            rust-ci-runner-x86_64-linux rust-ci-runner-aarch64-linux
+      - name: image tags
+        id: tags
+        env:
+          TAG: ${{ github.ref_name }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -eu
+          version=${TAG#rust-ci-runner-v}
+          owner=$(printf '%s' "$OWNER" | tr 'A-Z' 'a-z')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/$owner/rust-ci-runner" >> "$GITHUB_OUTPUT"
+      - run: |
+          mkdir -p image/amd64 image/arm64
+          cp dist/binary-amd64/rust-ci-runner image/amd64/rust-ci-runner
+          cp dist/binary-arm64/rust-ci-runner image/arm64/rust-ci-runner
+          chmod +x image/*/rust-ci-runner
+          cp rust-ci-runner/Dockerfile image/Dockerfile
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: image
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.tags.outputs.image }}:${{ steps.tags.outputs.version }}
+            ${{ steps.tags.outputs.image }}:latest
+      - name: image digest
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          echo "Set the repository variable RUNNER_IMAGE_DIGEST to $DIGEST" >> "$GITHUB_STEP_SUMMARY"

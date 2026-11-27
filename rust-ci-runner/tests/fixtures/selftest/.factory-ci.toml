@@ -1,0 +1,19 @@
+# Used by .github/workflows/factory-ci-selftest.yml: two parallel steps, one dependent step,
+# and one docker step that builds and runs an image.
+[steps.one]
+image = "busybox"
+commands = ["sleep 3", "echo one > one.txt"]
+
+[steps.two]
+image = "busybox"
+commands = ["sleep 3", "echo two > two.txt"]
+
+[steps.after]
+image = "busybox"
+depends_on = ["one", "two"]
+commands = ["cat one.txt two.txt"]
+
+[steps.img]
+image = "docker:27.5.1-cli"
+docker = true
+commands = ["docker build -q -t selftest .", "docker run --rm selftest"]

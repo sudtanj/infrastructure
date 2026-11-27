@@ -1,0 +1,39 @@
+name: factory-ci-mirror-images
+
+# Manual. Copies the clone and dind images to GHCR with their digests intact and prints the
+# references to paste into FACTORY_CI_CLONE_IMAGE and FACTORY_CI_DIND_IMAGE (research.md D8).
+# Make both GHCR packages public afterwards.
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  mirror:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: copy and print digests
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -eu
+          owner=$(printf '%s' "$OWNER" | tr 'A-Z' 'a-z')
+          mirror() {
+            docker buildx imagetools create -t "$2" "$1"
+            digest=$(docker buildx imagetools inspect "$2" --format '{{.Manifest.Digest}}')
+            printf '%s' "$digest" | grep -Eqx 'sha256:[0-9a-f]{64}' \
+              || { echo "no digest for $2" >&2; exit 1; }
+            echo "$3 = ${2%%:*}@$digest" >> "$GITHUB_STEP_SUMMARY"
+          }
+          mirror alpine/git:latest "ghcr.io/$owner/alpine-git:latest" FACTORY_CI_CLONE_IMAGE
+          mirror docker:27.5.1-dind "ghcr.io/$owner/docker-dind:27.5.1" FACTORY_CI_DIND_IMAGE

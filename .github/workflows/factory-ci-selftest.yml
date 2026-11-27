@@ -1,0 +1,73 @@
+name: factory-ci-selftest
+
+on:
+  pull_request:
+    paths:
+      - "rust-ci-runner/**"
+      - ".github/workflows/factory-ci*.yml"
+      - ".github/factory-ci-repos.toml"
+      - ".github/scripts/**"
+
+permissions:
+  contents: read
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: build the runner from source
+        working-directory: rust-ci-runner
+        run: cargo build --release
+      - name: run the fixture pipeline
+        shell: bash
+        run: |
+          FACTORY_CI_SHA=$(git rev-parse HEAD) FACTORY_CI_EVENT=push FACTORY_CI_BRANCH=selftest \
+            rust-ci-runner/target/release/rust-ci-runner run --dir rust-ci-runner/tests/fixtures/selftest | tee out.txt
+          grep -q '^\[img\] selftest-ok' out.txt
+          grep -q '^\[after\] one$' out.txt
+          grep -q '^\[after\] two$' out.txt
+      - name: no containers, networks or volumes are left
+        shell: bash
+        run: |
+          test -z "$(docker ps -aq --filter label=factory-ci.run)"
+          test -z "$(docker network ls -q --filter label=factory-ci.run)"
+          test -z "$(docker volume ls -q --filter label=factory-ci.run)"
+
+  list:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: build the runner from source
+        working-directory: rust-ci-runner
+        run: cargo build --release
+      - name: check the watch list
+        run: rust-ci-runner/target/release/rust-ci-runner plan --repos .github/factory-ci-repos.toml --check
+
+  workflow:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: lint the tick and release workflows
+        run: .github/scripts/factory-ci-lint-workflow.sh .github/workflows/factory-ci-tick.yml .github/workflows/rust-ci-runner-release.yml
+
+  shell:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: shell tests of the secrets library and the wrappers
+        run: .github/scripts/test-factory-ci-secrets.sh
+      - name: shell tests of the hardening rules
+        run: .github/scripts/test-factory-ci-hardening.sh
+      - name: the lint catches a broken copy of each rule
+        run: .github/scripts/factory-ci-lint-workflow.sh --self-test .github/workflows/factory-ci-tick.yml .github/workflows/rust-ci-runner-release.yml

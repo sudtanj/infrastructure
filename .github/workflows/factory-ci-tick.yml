@@ -1,0 +1,332 @@
+name: factory-ci-tick
+
+# One tick: plan what changed in the watched repos, run each item, report. B is public, so
+# nothing printed here may name a branch, SHA, project path or secret (FR-059): the matrix
+# carries only an index and an encrypted blob. Dispatch and rules: contracts/tick-workflow.md.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: factory-ci-tick
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  plan:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: factory-ci-plan
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      matrix_docker: ${{ steps.plan.outputs.matrix_docker }}
+      count: ${{ steps.plan.outputs.count }}
+      count_docker: ${{ steps.plan.outputs.count_docker }}
+      fail_tick: ${{ steps.plan.outputs.fail_tick }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: guard, pinned images
+        env:
+          FACTORY_CI_BLOB_KEY: ${{ secrets.FACTORY_CI_BLOB_KEY }}
+          FACTORY_CI_BLOB_KEY_DOCKER: ${{ secrets.FACTORY_CI_BLOB_KEY_DOCKER }}
+          RUNNER_IMAGE_DIGEST: ${{ vars.RUNNER_IMAGE_DIGEST }}
+          FACTORY_CI_CLONE_IMAGE: ${{ vars.FACTORY_CI_CLONE_IMAGE }}
+          FACTORY_CI_DIND_IMAGE: ${{ vars.FACTORY_CI_DIND_IMAGE }}
+        run: |
+          set -eu
+          case $RUNNER_IMAGE_DIGEST in sha256:*) ;; *) RUNNER_IMAGE_DIGEST=bad ;; esac
+          printf '%s' "${RUNNER_IMAGE_DIGEST#sha256:}" | grep -Eqx '[0-9a-f]{64}' \
+            || { echo "RUNNER_IMAGE_DIGEST is not a pinned sha256 digest" >&2; exit 1; }
+          for v in FACTORY_CI_CLONE_IMAGE FACTORY_CI_DIND_IMAGE; do
+            val=${!v}
+            printf '%s' "$val" | grep -Eq '@sha256:[0-9a-f]{64}$' \
+              || { echo "$v is not pinned with @sha256" >&2; exit 1; }
+          done
+          [ "${#FACTORY_CI_BLOB_KEY}" -ge 32 ] \
+            || { echo "the blob key is shorter than 32 characters" >&2; exit 1; }
+          [ -z "$FACTORY_CI_BLOB_KEY_DOCKER" ] || [ "${#FACTORY_CI_BLOB_KEY_DOCKER}" -ge 32 ] \
+            || { echo "the docker blob key is shorter than 32 characters" >&2; exit 1; }
+      - name: fetch runner
+        env:
+          OWNER: ${{ github.repository_owner }}
+          RUNNER_IMAGE_DIGEST: ${{ vars.RUNNER_IMAGE_DIGEST }}
+        run: |
+          set -eu
+          owner=$(printf '%s' "$OWNER" | tr 'A-Z' 'a-z')
+          mkdir -p "$RUNNER_TEMP/bin"
+          id=$(docker create "ghcr.io/$owner/rust-ci-runner@$RUNNER_IMAGE_DIGEST")
+          docker cp "$id:/rust-ci-runner" "$RUNNER_TEMP/bin/rust-ci-runner"
+          docker rm "$id" > /dev/null
+          chmod +x "$RUNNER_TEMP/bin/rust-ci-runner"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: install bws
+        env:
+          HAVE_BWS: ${{ secrets.BWS_ACCESS_TOKEN != '' }}
+          FACTORY_CI_BWS_SERVER_URL: ${{ vars.FACTORY_CI_BWS_SERVER_URL }}
+        run: |
+          set -eu
+          [ "$HAVE_BWS" = true ] || exit 0
+          . .github/scripts/factory-ci-secrets.sh
+          printf '%s' "$BWS_SHA256" | grep -Eqx '[0-9a-f]{64}' \
+            || { echo "BWS_SHA256 is not a pinned digest" >&2; exit 1; }
+          base=https://github.com/bitwarden/sdk-sm/releases/download/bws-v2.1.0
+          asset=bws-x86_64-unknown-linux-musl-2.1.0.zip
+          dir=$RUNNER_TEMP/bws-install
+          mkdir -p "$dir" "$RUNNER_TEMP/bin"
+          cd "$dir"
+          curl -fsSL --max-time 120 -O "$base/bws-sha256-checksums-2.1.0.txt"
+          curl -fsSL --max-time 120 -O "$base/$asset"
+          grep " $asset\$" bws-sha256-checksums-2.1.0.txt | sha256sum -c -
+          [ "$(sha256sum "$asset" | cut -d ' ' -f 1)" = "$BWS_SHA256" ] \
+            || { echo "the bws archive does not match BWS_SHA256" >&2; exit 1; }
+          [ "$(unzip -Z1 "$asset")" = bws ] \
+            || { echo "the bws archive must list exactly bws" >&2; exit 1; }
+          unzip -q "$asset" bws
+          install -m 0755 bws "$RUNNER_TEMP/bin/bws"
+          if [ -n "$FACTORY_CI_BWS_SERVER_URL" ]; then
+            "$RUNNER_TEMP/bin/bws" config server-base "$FACTORY_CI_BWS_SERVER_URL"
+          fi
+      - name: plan
+        id: plan
+        env:
+          FACTORY_CI_TOKEN: ${{ secrets.FACTORY_CI_TOKEN }}
+          FACTORY_CI_TOKEN_DOCKER: ${{ secrets.FACTORY_CI_TOKEN_DOCKER }}
+          BWS_ACCESS_TOKEN: ${{ secrets.BWS_ACCESS_TOKEN }}
+          BWS_ACCESS_TOKEN_DOCKER: ${{ secrets.BWS_ACCESS_TOKEN_DOCKER }}
+          FACTORY_CI_BLOB_KEY: ${{ secrets.FACTORY_CI_BLOB_KEY }}
+          FACTORY_CI_BLOB_KEY_DOCKER: ${{ secrets.FACTORY_CI_BLOB_KEY_DOCKER }}
+          B_PRIVATE: ${{ github.event.repository.private }}
+          HAVE_BWS: ${{ secrets.BWS_ACCESS_TOKEN != '' }}
+          FACTORY_CI_LOG_LINK: ${{ vars.FACTORY_CI_LOG_LINK }}
+          FACTORY_CI_BWS_PROJECT: ${{ vars.FACTORY_CI_BWS_PROJECT }}
+          FACTORY_CI_BWS_PROJECT_DOCKER: ${{ vars.FACTORY_CI_BWS_PROJECT_DOCKER }}
+          FACTORY_CI_BWS_SERVER_URL: ${{ vars.FACTORY_CI_BWS_SERVER_URL }}
+          FACTORY_CI_CLONE_IMAGE: ${{ vars.FACTORY_CI_CLONE_IMAGE }}
+          FACTORY_CI_DIND_IMAGE: ${{ vars.FACTORY_CI_DIND_IMAGE }}
+        run: bash .github/scripts/factory-ci-plan.sh
+
+  run:
+    needs: plan
+    if: github.ref == 'refs/heads/main' && needs.plan.outputs.count != '0'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: factory-ci
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: item ${{ matrix.n }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: guard, pinned images
+        env:
+          FACTORY_CI_BLOB_KEY: ${{ secrets.FACTORY_CI_BLOB_KEY }}
+          RUNNER_IMAGE_DIGEST: ${{ vars.RUNNER_IMAGE_DIGEST }}
+          FACTORY_CI_CLONE_IMAGE: ${{ vars.FACTORY_CI_CLONE_IMAGE }}
+          FACTORY_CI_DIND_IMAGE: ${{ vars.FACTORY_CI_DIND_IMAGE }}
+        run: |
+          set -eu
+          case $RUNNER_IMAGE_DIGEST in sha256:*) ;; *) RUNNER_IMAGE_DIGEST=bad ;; esac
+          printf '%s' "${RUNNER_IMAGE_DIGEST#sha256:}" | grep -Eqx '[0-9a-f]{64}' \
+            || { echo "RUNNER_IMAGE_DIGEST is not a pinned sha256 digest" >&2; exit 1; }
+          for v in FACTORY_CI_CLONE_IMAGE FACTORY_CI_DIND_IMAGE; do
+            val=${!v}
+            printf '%s' "$val" | grep -Eq '@sha256:[0-9a-f]{64}$' \
+              || { echo "$v is not pinned with @sha256" >&2; exit 1; }
+          done
+          [ "${#FACTORY_CI_BLOB_KEY}" -ge 32 ] \
+            || { echo "the blob key is shorter than 32 characters" >&2; exit 1; }
+      - name: fetch runner
+        env:
+          OWNER: ${{ github.repository_owner }}
+          RUNNER_IMAGE_DIGEST: ${{ vars.RUNNER_IMAGE_DIGEST }}
+        run: |
+          set -eu
+          owner=$(printf '%s' "$OWNER" | tr 'A-Z' 'a-z')
+          mkdir -p "$RUNNER_TEMP/bin"
+          id=$(docker create "ghcr.io/$owner/rust-ci-runner@$RUNNER_IMAGE_DIGEST")
+          docker cp "$id:/rust-ci-runner" "$RUNNER_TEMP/bin/rust-ci-runner"
+          docker rm "$id" > /dev/null
+          chmod +x "$RUNNER_TEMP/bin/rust-ci-runner"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: install bws
+        env:
+          HAVE_BWS: ${{ secrets.BWS_ACCESS_TOKEN != '' }}
+          FACTORY_CI_BWS_SERVER_URL: ${{ vars.FACTORY_CI_BWS_SERVER_URL }}
+        run: |
+          set -eu
+          [ "$HAVE_BWS" = true ] || exit 0
+          . .github/scripts/factory-ci-secrets.sh
+          printf '%s' "$BWS_SHA256" | grep -Eqx '[0-9a-f]{64}' \
+            || { echo "BWS_SHA256 is not a pinned digest" >&2; exit 1; }
+          base=https://github.com/bitwarden/sdk-sm/releases/download/bws-v2.1.0
+          asset=bws-x86_64-unknown-linux-musl-2.1.0.zip
+          dir=$RUNNER_TEMP/bws-install
+          mkdir -p "$dir" "$RUNNER_TEMP/bin"
+          cd "$dir"
+          curl -fsSL --max-time 120 -O "$base/bws-sha256-checksums-2.1.0.txt"
+          curl -fsSL --max-time 120 -O "$base/$asset"
+          grep " $asset\$" bws-sha256-checksums-2.1.0.txt | sha256sum -c -
+          [ "$(sha256sum "$asset" | cut -d ' ' -f 1)" = "$BWS_SHA256" ] \
+            || { echo "the bws archive does not match BWS_SHA256" >&2; exit 1; }
+          [ "$(unzip -Z1 "$asset")" = bws ] \
+            || { echo "the bws archive must list exactly bws" >&2; exit 1; }
+          unzip -q "$asset" bws
+          install -m 0755 bws "$RUNNER_TEMP/bin/bws"
+          if [ -n "$FACTORY_CI_BWS_SERVER_URL" ]; then
+            "$RUNNER_TEMP/bin/bws" config server-base "$FACTORY_CI_BWS_SERVER_URL"
+          fi
+      - name: job
+        id: job
+        env:
+          ITEM_BLOB: ${{ matrix.blob }}
+          FACTORY_CI_BLOB_KEY: ${{ secrets.FACTORY_CI_BLOB_KEY }}
+          FACTORY_CI_TOKEN: ${{ secrets.FACTORY_CI_TOKEN }}
+          BWS_ACCESS_TOKEN: ${{ secrets.BWS_ACCESS_TOKEN }}
+          HAVE_BWS: ${{ secrets.BWS_ACCESS_TOKEN != '' }}
+          B_PRIVATE: ${{ github.event.repository.private }}
+          FACTORY_CI_LOG_LINK: ${{ vars.FACTORY_CI_LOG_LINK }}
+          FACTORY_CI_BWS_PROJECT: ${{ vars.FACTORY_CI_BWS_PROJECT }}
+          FACTORY_CI_BWS_SERVER_URL: ${{ vars.FACTORY_CI_BWS_SERVER_URL }}
+          FACTORY_CI_CLONE_IMAGE: ${{ vars.FACTORY_CI_CLONE_IMAGE }}
+          FACTORY_CI_DIND_IMAGE: ${{ vars.FACTORY_CI_DIND_IMAGE }}
+        run: bash .github/scripts/factory-ci-job.sh
+      - name: status fallback
+        if: always() && steps.job.outcome != 'success'
+        env:
+          ITEM_BLOB: ${{ matrix.blob }}
+          FACTORY_CI_BLOB_KEY: ${{ secrets.FACTORY_CI_BLOB_KEY }}
+          FACTORY_CI_TOKEN: ${{ secrets.FACTORY_CI_TOKEN }}
+        run: bash .github/scripts/factory-ci-status.sh
+
+  run-docker:
+    needs: plan
+    if: github.ref == 'refs/heads/main' && needs.plan.outputs.count_docker != '0'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: factory-ci-docker
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix_docker) }}
+    name: item ${{ matrix.n }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: guard, pinned images
+        env:
+          FACTORY_CI_BLOB_KEY: ${{ secrets.FACTORY_CI_BLOB_KEY_DOCKER }}
+          RUNNER_IMAGE_DIGEST: ${{ vars.RUNNER_IMAGE_DIGEST }}
+          FACTORY_CI_CLONE_IMAGE: ${{ vars.FACTORY_CI_CLONE_IMAGE }}
+          FACTORY_CI_DIND_IMAGE: ${{ vars.FACTORY_CI_DIND_IMAGE }}
+        run: |
+          set -eu
+          case $RUNNER_IMAGE_DIGEST in sha256:*) ;; *) RUNNER_IMAGE_DIGEST=bad ;; esac
+          printf '%s' "${RUNNER_IMAGE_DIGEST#sha256:}" | grep -Eqx '[0-9a-f]{64}' \
+            || { echo "RUNNER_IMAGE_DIGEST is not a pinned sha256 digest" >&2; exit 1; }
+          for v in FACTORY_CI_CLONE_IMAGE FACTORY_CI_DIND_IMAGE; do
+            val=${!v}
+            printf '%s' "$val" | grep -Eq '@sha256:[0-9a-f]{64}$' \
+              || { echo "$v is not pinned with @sha256" >&2; exit 1; }
+          done
+          [ "${#FACTORY_CI_BLOB_KEY}" -ge 32 ] \
+            || { echo "the blob key is shorter than 32 characters" >&2; exit 1; }
+      - name: fetch runner
+        env:
+          OWNER: ${{ github.repository_owner }}
+          RUNNER_IMAGE_DIGEST: ${{ vars.RUNNER_IMAGE_DIGEST }}
+        run: |
+          set -eu
+          owner=$(printf '%s' "$OWNER" | tr 'A-Z' 'a-z')
+          mkdir -p "$RUNNER_TEMP/bin"
+          id=$(docker create "ghcr.io/$owner/rust-ci-runner@$RUNNER_IMAGE_DIGEST")
+          docker cp "$id:/rust-ci-runner" "$RUNNER_TEMP/bin/rust-ci-runner"
+          docker rm "$id" > /dev/null
+          chmod +x "$RUNNER_TEMP/bin/rust-ci-runner"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: install bws
+        env:
+          HAVE_BWS: ${{ secrets.BWS_ACCESS_TOKEN_DOCKER != '' }}
+          FACTORY_CI_BWS_SERVER_URL: ${{ vars.FACTORY_CI_BWS_SERVER_URL }}
+        run: |
+          set -eu
+          [ "$HAVE_BWS" = true ] || exit 0
+          . .github/scripts/factory-ci-secrets.sh
+          printf '%s' "$BWS_SHA256" | grep -Eqx '[0-9a-f]{64}' \
+            || { echo "BWS_SHA256 is not a pinned digest" >&2; exit 1; }
+          base=https://github.com/bitwarden/sdk-sm/releases/download/bws-v2.1.0
+          asset=bws-x86_64-unknown-linux-musl-2.1.0.zip
+          dir=$RUNNER_TEMP/bws-install
+          mkdir -p "$dir" "$RUNNER_TEMP/bin"
+          cd "$dir"
+          curl -fsSL --max-time 120 -O "$base/bws-sha256-checksums-2.1.0.txt"
+          curl -fsSL --max-time 120 -O "$base/$asset"
+          grep " $asset\$" bws-sha256-checksums-2.1.0.txt | sha256sum -c -
+          [ "$(sha256sum "$asset" | cut -d ' ' -f 1)" = "$BWS_SHA256" ] \
+            || { echo "the bws archive does not match BWS_SHA256" >&2; exit 1; }
+          [ "$(unzip -Z1 "$asset")" = bws ] \
+            || { echo "the bws archive must list exactly bws" >&2; exit 1; }
+          unzip -q "$asset" bws
+          install -m 0755 bws "$RUNNER_TEMP/bin/bws"
+          if [ -n "$FACTORY_CI_BWS_SERVER_URL" ]; then
+            "$RUNNER_TEMP/bin/bws" config server-base "$FACTORY_CI_BWS_SERVER_URL"
+          fi
+      - name: job
+        id: job
+        env:
+          ITEM_BLOB: ${{ matrix.blob }}
+          FACTORY_CI_BLOB_KEY: ${{ secrets.FACTORY_CI_BLOB_KEY_DOCKER }}
+          FACTORY_CI_TOKEN: ${{ secrets.FACTORY_CI_TOKEN_DOCKER }}
+          BWS_ACCESS_TOKEN: ${{ secrets.BWS_ACCESS_TOKEN_DOCKER }}
+          HAVE_BWS: ${{ secrets.BWS_ACCESS_TOKEN_DOCKER != '' }}
+          B_PRIVATE: ${{ github.event.repository.private }}
+          FACTORY_CI_LOG_LINK: ${{ vars.FACTORY_CI_LOG_LINK }}
+          FACTORY_CI_BWS_PROJECT: ${{ vars.FACTORY_CI_BWS_PROJECT_DOCKER }}
+          FACTORY_CI_BWS_SERVER_URL: ${{ vars.FACTORY_CI_BWS_SERVER_URL }}
+          FACTORY_CI_CLONE_IMAGE: ${{ vars.FACTORY_CI_CLONE_IMAGE }}
+          FACTORY_CI_DIND_IMAGE: ${{ vars.FACTORY_CI_DIND_IMAGE }}
+        run: bash .github/scripts/factory-ci-job.sh
+      - name: status fallback
+        if: always() && steps.job.outcome != 'success'
+        env:
+          ITEM_BLOB: ${{ matrix.blob }}
+          FACTORY_CI_BLOB_KEY: ${{ secrets.FACTORY_CI_BLOB_KEY_DOCKER }}
+          FACTORY_CI_TOKEN: ${{ secrets.FACTORY_CI_TOKEN_DOCKER }}
+        run: bash .github/scripts/factory-ci-status.sh
+
+  verdict:
+    needs: [plan, run, run-docker]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: factory-ci-plan
+    permissions: {}
+    steps:
+      - name: fail on a bad plan
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          FAIL_TICK: ${{ needs.plan.outputs.fail_tick }}
+        run: |
+          [ "$PLAN_RESULT" = success ] || { echo "plan did not succeed" >&2; exit 1; }
+          [ "$FAIL_TICK" != 1 ] || { echo "plan found problems, see the plan summary" >&2; exit 1; }
+      - name: heartbeat
+        if: always()
+        env:
+          FACTORY_CI_HEARTBEAT_URL: ${{ secrets.FACTORY_CI_HEARTBEAT_URL }}
+        run: |
+          set +x
+          if [ "$GITHUB_REF" = refs/heads/main ] && [ -n "$FACTORY_CI_HEARTBEAT_URL" ]; then
+            curl -fsS --max-time 10 "$FACTORY_CI_HEARTBEAT_URL" > /dev/null 2>&1 || true
+          fi
