@@ -260,15 +260,15 @@ store_ok() {  # same with a working store
 }
 store_case "no names, no id, store down" 0 0 '.rows[0].repo_id = "" | .rows[0].secrets = ""'
 store_ok "shared names, store up" 1 '.rows[0].repo_id = "" | .rows[0].secrets = "NPM_TOKEN"'
-store_case "repo id, store down" 1 1 '.rows[0].repo_id = "123" | .rows[0].secrets = ""'
+store_case "repo id, store down (fci_list retries)" 1 3 '.rows[0].repo_id = "123" | .rows[0].secrets = ""'
 store_case "secrets_ok false, names and id, store down" 0 0 '.rows[0].secrets_ok = false | .rows[0].secrets = "NPM_TOKEN"'
 plan_world; cand_with '.rows[0].repo_id = "123"'; echo down > "$W/state/bws.mode"; run_plan
 has "repo id, store down: the store message" "$(cat "$W/gh_summary")" "secret store unreachable"; rm -rf "$W"
-D='.rows[0].allow_docker = true'; DT=BWS_ACCESS_TOKEN_DOCKER=bws-docker-XX7
-store_ok "docker row with an id, docker token" 1 "$D | .rows[0].repo_id = \"123\"" "$DT"
-plan_world; cand_with "$D | .rows[0].repo_id = \"123\""; run_plan "$DT"
+D='.rows[0].allow_docker = true'; DT=BWS_ACCESS_TOKEN_DOCKER=bws-docker-XX7; DP=FACTORY_CI_BWS_PROJECT_DOCKER=proj-docker
+store_ok "docker row with an id, docker token" 1 "$D | .rows[0].repo_id = \"123\"" "$DT" "$DP"
+plan_world; cand_with "$D | .rows[0].repo_id = \"123\""; run_plan "$DT" "$DP"
 eq "docker row: the docker token is the one used" bws-docker-XX7 "$(cat "$W/state/bws.token.1")"; rm -rf "$W"
-store_case "docker row without names or id, docker token, store down" 0 0 "$D | .rows[0].repo_id = \"\" | .rows[0].secrets = \"\"" "$DT"
+store_case "docker row without names or id, docker token, store down" 0 0 "$D | .rows[0].repo_id = \"\" | .rows[0].secrets = \"\"" "$DT" "$DP"
 store_ok "docker row with an id, no docker token" 0 "$D | .rows[0].repo_id = \"123\""
 store_ok "docker row only: the plain store is not asked" 0 "$D | .rows[0].repo_id = \"\" | .rows[0].secrets = \"NPM_TOKEN\""
 plan_world; cand_row; run_plan FACTORY_CI_BLOB_KEY_DOCKER=
