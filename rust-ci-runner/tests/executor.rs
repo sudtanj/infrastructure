@@ -523,3 +523,21 @@ fn local_run_of_a_docker_pipeline_needs_no_opt_in_and_leaves_nothing() {
     assert!(leftovers(&id).is_empty(), "{:?}", leftovers(&id));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_deadline_that_hits_during_container_creation_leaves_nothing() {
+    // Four steps start at once against a one second deadline: some are still being created
+    // when the client is killed. The daemon must not keep a `Created` container.
+    let steps: String = (1..=4)
+        .map(|i| format!("[steps.s{i}]\nimage = \"busybox\"\ncommands = [\"sleep 120\"]\n\n"))
+        .collect();
+    let r = go(
+        &steps,
+        Opts {
+            deadline_secs: 1,
+            ..opts()
+        },
+    );
+    assert!(r.out.failed.is_some());
+    assert!(leftovers(&r.id).is_empty(), "{:?}", leftovers(&r.id));
+}

@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, BufReader, Read};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -130,6 +130,27 @@ impl Engine {
         let _ = self.quick(&["rm", "-f", name]);
     }
 
+    /// Kills the `docker run` client, then removes `name` until the daemon reports it gone twice
+    /// in a row: a daemon still handling the create when the client dies would otherwise leave
+    /// the container in `Created` state.
+    /// shortcut: gives up after 5 s; a create slower than that leaks until the run-label cleanup.
+    fn stop_and_remove(&self, child: &mut Child, name: &str) {
+        let _ = child.kill();
+        let _ = child.wait();
+        self.kill(name);
+        let stop = Instant::now() + Duration::from_secs(5);
+        let mut gone = 0;
+        while gone < 2 && Instant::now() < stop {
+            std::thread::sleep(Duration::from_millis(500));
+            if self.quick(&["container", "inspect", name]).is_err() {
+                gone += 1;
+            } else {
+                gone = 0;
+                let _ = self.quick(&["rm", "-f", "-v", name]);
+            }
+        }
+    }
+
     /// Removes the containers, networks and volumes that carry `label` (`key=value`).
     pub fn cleanup(&self, label: &str) {
         let filter = format!("label={label}");
@@ -221,9 +242,7 @@ impl Engine {
                         })
                     }
                     Ok(None) if Instant::now() >= end => {
-                        self.kill(container);
-                        let _ = child.kill();
-                        let _ = child.wait();
+                        self.stop_and_remove(&mut child, container);
                         return State::Failed(s(timeout_msg));
                     }
                     Ok(None) => std::thread::sleep(Duration::from_millis(25)),
