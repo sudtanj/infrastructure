@@ -131,8 +131,8 @@ impl Pipeline {
                     "step name '{name}' must be 1 to 64 letters, digits, '-' or '_'"
                 ));
             }
-            // The runner's own containers are called factory-ci-<run>-clone and -dind; `runner` is the name of its public lines.
-            if name == "clone" || name == "dind" || name == "runner" {
+            // The runner's own containers are called factory-ci-<run>-clone and -dind; `runner` names its public lines and `ci` its log-store detail.
+            if ["clone", "dind", "runner", "ci"].contains(&name.as_str()) {
                 bad.push(format!("step name '{name}' is reserved"));
             }
             if s.image.trim().is_empty() {
@@ -475,5 +475,13 @@ commands = ["x"]
         assert!(has(&v, "runner"), "{v:?}");
         assert!(parse("[steps.runner2]\nimage = \"x\"\ncommands = [\"y\"]\n").is_ok());
         assert!(parse("[steps.Runner]\nimage = \"x\"\ncommands = [\"y\"]\n").is_ok());
+    }
+
+    #[test]
+    fn step_named_ci_is_refused() {
+        // `ci` is the step name of the runner's own detail lines in the log store.
+        let v = bad("[steps.ci]\nimage = \"x\"\ncommands = [\"y\"]\n");
+        assert!(has(&v, "'ci' is reserved"), "{v:?}");
+        assert!(parse("[steps.ci2]\nimage = \"x\"\ncommands = [\"y\"]\n").is_ok());
     }
 }
