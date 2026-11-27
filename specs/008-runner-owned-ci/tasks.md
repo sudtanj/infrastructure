@@ -63,7 +63,7 @@
 
 ## Phase 6: Polish (last)
 
-- [ ] T022 Update `README.md` (section "Run factory-monorepo CI by hand", secrets and variables, the owner exception, the selftest exception, oversize-line behaviour, owner settings of T017) and `rust-ci-runner/README.md` (command list with `ci`, image contents, release and bootstrap order, minimal-output rule); mark `specs/005-plain-actions-ci/spec.md`, `specs/006-runner-unit-tests/spec.md` and `specs/007-runner-image/spec.md` as superseded in part by 008; state whether the GitHub repository description changes and give the text for the owner to apply (FR-029, FR-031). Last task. Brief B11.
+- [X] T022 Update `README.md` (section "Run factory-monorepo CI by hand", secrets and variables, the owner exception, the selftest exception, oversize-line behaviour, owner settings of T017) and `rust-ci-runner/README.md` (command list with `ci`, image contents, release and bootstrap order, minimal-output rule); mark `specs/005-plain-actions-ci/spec.md`, `specs/006-runner-unit-tests/spec.md` and `specs/007-runner-image/spec.md` as superseded in part by 008; state whether the GitHub repository description changes and give the text for the owner to apply (FR-029, FR-031). Last task. Brief B11.
 
 ## Review fixes (Landing A)
 

@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-27
 
-**Status**: Draft
+**Status**: Draft. Superseded in part by 008-runner-owned-ci: FR-003 to FR-008, for `factory-monorepo-ci.yml`
 
 **Input**: User description: "A `.factory-ci.toml` in `rust-ci-runner/` that runs the runner's `--lib` unit tests through rust-ci-runner itself, and a `pipeline` choice input (`factory-monorepo` or `rust-ci-runner`) on the manual workflow `factory-monorepo-ci.yml`. Extends 005-plain-actions-ci and keeps its owner exception."
 

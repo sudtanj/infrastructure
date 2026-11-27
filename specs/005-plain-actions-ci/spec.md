@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-27
 
-**Status**: Draft
+**Status**: Draft. Superseded in part by 008-runner-owned-ci: FR-001 to FR-012 where they conflict, for `factory-monorepo-ci.yml`
 
 **Input**: User description: "A manually started plain GitHub Actions workflow that builds rust-ci-runner from source and runs the private repo sudtanj/factory-monorepo's `.factory-ci.toml` pipeline with it, with minimal public output. Stopgap until the runner image release (feature 003) lands."
 

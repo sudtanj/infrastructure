@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-27
 
-**Status**: Draft
+**Status**: Draft. Superseded in part by 008-runner-owned-ci: FR-002 to FR-009, for `factory-monorepo-ci.yml` (FR-012, the native arm64 build, stays)
 
 **Input**: User description: "Stop compiling rust-ci-runner inside factory-monorepo-ci.yml. The workflow uses the released runner image and checks that the Grafana Loki settings work."
 

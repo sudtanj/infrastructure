@@ -59,9 +59,18 @@ dispatch one tick, delete the old token.
 ## Release the runner
 
 Push a tag `rust-ci-runner-vX.Y.Z` on a commit on `main`. The tag must match `version` in `Cargo.toml`. The
-`rust-ci-runner-release` workflow builds static x86_64 and aarch64 binaries, each on a native runner (no cross compiler), attaches them to a release, and pushes a
-multi-arch image holding only the binary to `ghcr.io/<owner>/rust-ci-runner`. The last step prints the image digest in
-the run summary: "Set the repository variable RUNNER_IMAGE_DIGEST to ...". Set that variable to the digest alone, `sha256:<64 hex>`, without the image name.
+`rust-ci-runner-release` workflow builds static x86_64 and aarch64 binaries, each on a native runner (no cross compiler),
+then builds and pushes the multi-arch image (runner, docker CLI, `git`, `bws`) with provenance under `:X.Y.Z`. A smoke step
+runs the pushed digest with the flags of the manual workflow: it checks `git`, `docker` and `bws`, runs the arm64 image,
+runs `ci` against a repo outside the watch list (it must print `[runner] repository or ref not in the watch list` and exit 1)
+and copies the binary out. Only then does the workflow move `:latest`, create the GitHub release (a rerun skips an
+existing one) and print two lines in the run summary: set the repository variable `RUNNER_IMAGE_DIGEST` to the digest
+alone, `sha256:<64 hex>`, and set `RUNNER_IMAGE` in `factory-monorepo-ci.yml` to `<image>:X.Y.Z@<digest>`.
+
+Bootstrap order for a release that changes the image: land the runner and image changes, check that the `rust-ci-runner`
+pipeline passes, push the tag, verify the digest with `docker pull` and `docker run --entrypoint docker <image>@<digest>
+--version`, then land the workflow commit that carries the new digest. The old digest keeps working until then; never
+delete a published package version.
 
 Run the manual workflow `factory-ci-mirror-images` once for the clone and docker-in-docker images, and make the
 GHCR packages public. A tick pulls the runner by digest. When `RUNNER_IMAGE_DIGEST` is unset, the tick fails before
@@ -138,10 +147,30 @@ rust-ci-runner plan --repos FILE --check
 rust-ci-runner plan --repos FILE --rows-out CAND
 rust-ci-runner plan --rows-in CAND --rows-out ROWS --summary FILE [--cap N]
 rust-ci-runner job --repo OWNER/NAME --sha SHA --project PATH --branch NAME --run-id ID [--prev SHA] [--allow-docker] [--quiet-logs] [--private] [--retry]
+rust-ci-runner ci --repos FILE --repo OWNER/NAME --ref REF [--project PATH] --work DIR [--allow-docker]
 rust-ci-runner status --repo OWNER/NAME --sha SHA --project PATH --run-id ID --state error|failure|success --description TEXT [--retry]
 ```
 
-The workflow calls `plan`, `job` and `status`. You use `run` and `plan --check`.
+The tick calls `plan`, `job` and `status`. The manual workflow calls `ci`. You use `run` and `plan --check`.
+
+## The `ci` command
+
+`ci` is the whole manual CI job in one process. `factory-monorepo-ci.yml` starts it in a container and does nothing else. In order, it:
+
+1. checks the flags (no repeated flag, no value that starts with `--`, `--work` equal to its canonical path) and the repo and branch against the watch list; an entry needs a numeric `id`;
+2. reads `BWS_ACCESS_TOKEN` once, removes it from its environment and runs `bws secret list` for `FACTORY_CI_TOKEN`, `FACTORY_CI_LOG_URL`, `FACTORY_CI_LOG_USER` and `FACTORY_CI_LOG_TOKEN`; each key must match exactly one secret;
+3. probes Loki with one line, retried once;
+4. runs `docker version`, then compares the repo's id from the GitHub API with the watch entry;
+5. fetches `refs/heads/<ref>` into a new directory under `--work` with `git`, refuses a docker step or a declared secret, and runs the pipeline;
+6. removes that directory and exits 0 only if the pipeline passed and Loki took every line.
+
+**Minimal output rule.** Every line passes one function in `log.rs`. Stdout carries only `[<step>] started`, `success in <N>s`, `failed in <N>s`, `skipped`, `[runner] pipeline passed|failed`, `[runner] log store answered HTTP <code>` and `[runner] log lines were dropped`. Stderr carries one line from a fixed list (`bad arguments`, `clone failed`, `pipeline file refused` and so on). A step named `runner` or `ci` is refused. Step output, failure reasons and error details go to Loki only, as step `ci` for the runner's own text. Every child process starts with a cleared environment and explicit stdio.
+
+The engine is `docker` and `bws` is `/usr/local/bin/bws`; nothing in the environment changes either.
+
+## The image
+
+`Dockerfile` builds `ghcr.io/<owner>/rust-ci-runner` for linux/amd64 and linux/arm64 on Alpine 3.23 (pinned by index digest). It holds the runner at `/rust-ci-runner`, the docker CLI, `git`, CA certificates and `bws` 2.1.0 at `/usr/local/bin/bws`. Each `bws` zip is pinned by SHA-256 with `ADD --checksum`. The image runs as `65532:65532`; the manual workflow overrides that with the VM user so the container can use the docker socket group. `Cargo.lock` is committed and every build uses `--locked`.
 
 ## Pipeline file `.factory-ci.toml`
 
