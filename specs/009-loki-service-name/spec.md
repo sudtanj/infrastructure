@@ -2,7 +2,7 @@
 
 **Feature Branch**: `009-loki-service-name`
 **Created**: 2026-11-27
-**Status**: Implemented
+**Status**: In progress
 **Input**: Owner: "Fix those unit test and run, I want to see logs on Grafana."
 
 ## User Scenarios & Testing

@@ -10,7 +10,7 @@
 ]}
 ```
 
-- Exactly the four labels. Values: `repo` from the item, `project` (`.` for root), `step` (a step
+- Exactly the four labels, plus `service_name="factory-ci"` since 009. Values: `repo` from the item, `project` (`.` for root), `step` (a step
   name, or `runner`), `stream` (`stdout` or `stderr`).
 - One stream entry per label set per batch; values sorted by timestamp.
 - A batch is sent when 1 s has passed since its first line or its text reaches 1 MB.
