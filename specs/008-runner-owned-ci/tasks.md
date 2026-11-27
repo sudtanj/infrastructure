@@ -76,7 +76,7 @@ Found by the review and security pass of Landing A. Each is one commit naming it
 - [X] R05 Release workflow: push only `:<version>` before the smoke step, tag `:latest` after the smoke step passes.
 - [X] R06 `ci.rs`: in production read neither `FACTORY_CI_BWS` nor `FACTORY_CI_ENGINE`; use `/usr/local/bin/bws` and `docker`. Tests inject through `Seams`.
 - [X] R07 `pipeline.rs`: `ci` joins the reserved step names, with a test.
-- [ ] R08 `ci.rs`: remove `ci-<run>-<rand>/` under `--work` after `cleanup_run`, as root through the container like `job.rs` `remove_ws`. Test: the directory is gone after the run.
+- [X] R08 `ci.rs`: remove `ci-<run>-<rand>/` under `--work` after `cleanup_run`, as root through the container like `job.rs` `remove_ws`. Test: the directory is gone after the run.
 - [ ] R09 `factory-ci-selftest.yml`: the guard also fails on `secrets:` (with `inherit`), `secrets[`, `toJSON(secrets`, `workflow_run`, `repository_dispatch`; `persist-credentials: false` on every checkout.
 - [ ] R10 Document in `rust-ci-runner/README.md` and `plan.md` that `remove_var` leaves the process environment file under proc readable by the same uid (the runner container stays uid-isolated) and that the Loki host is not allowlisted (Bitwarden write access is a trust root).
 

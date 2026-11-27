@@ -4,7 +4,7 @@
 //! of lines (`Log` in public mode); every detail goes to the log store only.
 
 use crate::engine::{run_capped, Engine};
-use crate::job::{dind_image, prepare, project_dir, run_env, run_pipeline, with_shipper, MAX_LOG_BYTES};
+use crate::job::{dind_image, prepare, project_dir, remove_ws, run_env, run_pipeline, with_shipper, MAX_LOG_BYTES};
 use crate::log::{Log, LOG_STORE_HINT};
 use crate::pipeline::valid_name;
 use crate::projects::folder_name_ok;
@@ -42,6 +42,8 @@ pub struct Seams {
     /// Where `GET /repos/<repo>` goes.
     pub api_base: String,
     pub limits: Limits,
+    /// Delete the checkout directory after the run. Tests that read the checkout afterwards turn it off.
+    pub remove_work: bool,
 }
 
 impl Seams {
@@ -54,6 +56,7 @@ impl Seams {
             clone_base: "https://github.com".to_string(),
             protocol: "https".to_string(),
             api_base: "https://api.github.com".to_string(),
+            remove_work: true,
             limits: Limits {
                 bws: Duration::from_secs(60),
                 probe: Duration::from_secs(15),
@@ -233,7 +236,21 @@ fn steps(a: &Args, want_id: u64, token: &str, run_id: &str, env: &dyn Fn(&str) -
         }
     };
     log.out("ci", "stdout", &format!("checked out {sha}"));
-    let loaded = project_dir(&src, &a.project).and_then(|dir| {
+    let (passed, image) = run_checkout(a, &src, &sha, run_id, env, &engine, log);
+    if s.remove_work {
+        // Steps run as root, so what they wrote needs root to go: remove it through the container.
+        if let Some(root) = src.parent() {
+            remove_ws(&engine, image.as_deref().unwrap_or(""), root);
+        }
+    }
+    passed
+}
+
+/// Pipeline checks and the run, on a checkout. Returns whether it passed and a step image that can
+/// remove the directory. Faults print their fixed line; the detail goes to the log store.
+fn run_checkout(a: &Args, src: &Path, sha: &str, run_id: &str, env: &dyn Fn(&str) -> Option<String>, engine: &Engine, log: &Log) -> (bool, Option<String>) {
+    let detail = |text: &str| log.out("ci", "stderr", text);
+    let loaded = project_dir(src, &a.project).and_then(|dir| {
         prepare(&dir, None, |_| None, true).map(|(p, _)| (dir, p)).map_err(|bad| bad.join("\n"))
     });
     let (dir, p) = match loaded {
@@ -241,24 +258,25 @@ fn steps(a: &Args, want_id: u64, token: &str, run_id: &str, env: &dyn Fn(&str) -
         Err(e) => {
             detail(&e);
             log.fault("pipeline file refused");
-            return false;
+            return (false, None);
         }
     };
+    let image = p.steps.values().next().map(|st| st.image.clone());
     let dind = match (p.docker_problems(a.allow_docker), dind_image(env, &p)) {
-        (bad, Ok(image)) if bad.is_empty() => image,
-        (bad, image) => {
-            detail(&bad.into_iter().chain(image.err()).collect::<Vec<_>>().join(". "));
+        (bad, Ok(dind)) if bad.is_empty() => dind,
+        (bad, dind) => {
+            detail(&bad.into_iter().chain(dind.err()).collect::<Vec<_>>().join(". "));
             log.fault("docker steps are refused");
-            return false;
+            return (false, image);
         }
     };
-    let mut step_env = run_env(run_id, &sha, None, &a.git_ref, "manual");
+    let mut step_env = run_env(run_id, sha, None, &a.git_ref, "manual");
     // The checkout belongs to the runner's user, not to root in the step: let git use it.
     let safe = [("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "safe.directory"), ("GIT_CONFIG_VALUE_0", "/workspace")];
     step_env.extend(safe.map(|(k, v)| (k.to_string(), v.to_string())));
-    let out = run_pipeline(&engine, run_id, &dir, &p, step_env, BTreeMap::new(), log, &dind);
+    let out = run_pipeline(engine, run_id, &dir, &p, step_env, BTreeMap::new(), log, &dind);
     engine.cleanup_run(run_id);
-    match out {
+    let passed = match out {
         Ok(o) => {
             log.event("runner", if o.ok() { "pipeline passed" } else { "pipeline failed" });
             o.ok()
@@ -268,7 +286,8 @@ fn steps(a: &Args, want_id: u64, token: &str, run_id: &str, env: &dyn Fn(&str) -
             log.fault("runner fault");
             false
         }
-    }
+    };
+    (passed, image)
 }
 
 /// `GET <api>/repos/<repo>`: the numeric id must be the one in the watch entry. Errors are fixed text.

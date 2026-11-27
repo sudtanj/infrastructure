@@ -229,7 +229,7 @@ The lint script `factory-ci-lint-workflow.sh` and its self-test rows stay unchan
 9. Fetch into `<work>/ci-<runid>-<random>/src`: `git init -q <dir>`, then `git -C <dir> fetch -q --depth 1 --no-tags -- <base>/<repo>.git refs/heads/<ref>` (only a branch can match, never a tag), then `git -C <dir> checkout -q --detach FETCH_HEAD`, then `git rev-parse HEAD` for the Loki line and `FACTORY_CI_SHA`. Header via `GIT_CONFIG_*` env as `http.https://github.com/.extraHeader` = `Authorization: basic <base64("x-access-token:" + token)>`. Limit 300 s for the fetch. The seam carries the base URL and the allowed protocol: production `https://github.com` and `https`, tests a `file://` path and `file`. Failure means line 11.
 10. `project_dir`, then `prepare(dir, None, |_| None, allow_docker)`. A docker problem is line 13; any other problem is line 12, detail to Loki.
 11. `run_pipeline` with a `Log` in quiet public mode plus the shipper sink. `run_env(..., "manual")`.
-12. Print `pipeline passed|failed`, `engine.cleanup_run(id)`. The work directory stays (shortcut: ephemeral hosted VM; add removal before a persistent host runs this).
+12. Print `pipeline passed|failed`, `engine.cleanup_run(id)`, then the run directory under `--work` is removed, as root through a step image when a plain delete fails (R08).
 13. `Shipper::finish(FLUSH_WINDOW)`. A passing run that dropped lines prints `[runner] log lines were dropped`. Exit 0 only for a pass with nothing dropped; everything else exits 1.
 
 ## Test plan (names are the contract)

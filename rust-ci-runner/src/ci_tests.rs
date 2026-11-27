@@ -148,6 +148,7 @@ struct W {
     panic_on_env: bool,
     out: Buf,
     err: Buf,
+    remove_work: bool,
 }
 
 fn pipe(names: &[&str]) -> String {
@@ -194,6 +195,7 @@ impl W {
             panic_on_env: false,
             out: Buf::default(),
             err: Buf::default(),
+            remove_work: false,
         }
     }
 
@@ -298,6 +300,7 @@ impl W {
             clone_base: self.base.clone(),
             protocol: self.protocol.clone(),
             api_base: self.hub.url.clone(),
+            remove_work: self.remove_work,
             limits: Limits {
                 bws: Duration::from_secs(5),
                 probe: Duration::from_secs(2),
@@ -1287,4 +1290,19 @@ fn a_step_writing_over_10_mb_cannot_hide_the_result_lines() {
     assert_eq!(w.ok(), 0, "{}", w.stderr());
     assert_eq!(norm(&w.stdout()), ["[runner] log store answered HTTP 204", "[a] started", "[a] success in Ns", "[runner] pipeline passed"]);
     assert_public(&w);
+}
+
+#[test]
+fn the_checkout_directory_is_removed_after_the_run() {
+    let mut w = W::new(&pipe(&["a"]));
+    w.remove_work = true;
+    assert_eq!(w.ok(), 0, "{}", w.stderr());
+    assert!(!std::path::Path::new(&w.checkout()).exists(), "the src directory is still there");
+    assert_eq!(work_entries(&w), Vec::<String>::new(), "the ci-<run> directory is still there");
+    // a failed run is cleaned up too
+    let mut w = W::new(&pipe(&["a"]));
+    w.remove_work = true;
+    w.docker_body = "case \"$1\" in run) exit 1;; esac".to_string();
+    assert_eq!(w.ok(), 1);
+    assert_eq!(work_entries(&w), Vec::<String>::new());
 }

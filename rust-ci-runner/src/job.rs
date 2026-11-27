@@ -419,7 +419,7 @@ fn attempt(o: &Opts, env: Env, engine: &Engine, ws: &Path, creds: &[String], shi
     Done { state, reason, secrets: vals }
 }
 
-fn remove_ws(engine: &Engine, image: &str, ws: &Path) {
+pub(crate) fn remove_ws(engine: &Engine, image: &str, ws: &Path) {
     if std::fs::remove_dir_all(ws).is_ok() {
         return;
     }
