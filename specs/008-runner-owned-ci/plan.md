@@ -416,6 +416,8 @@ Reviewed by the security role; the lead handed the findings over. The findings a
 12. **Pinned image.** The workflow references `tag@sha256:digest`; the owner bumps the digest by reviewed commit. Alpine packages float inside a release (accepted).
 13. **Clone.** Host fixed to `github.com`, `GIT_ALLOW_PROTOCOL` fixed to `https` in production, no submodules, no tags, `env_clear`, empty global and system config, header scoped by URL so a redirect to another host gets none.
 14. **Bitwarden scope.** A second project with the same keys makes the run fail as ambiguous, not pick one.
+15. **`remove_var` is not a wipe (R10).** Removing the access token from the process environment keeps it out of children and of `std::env`, but the process environment file under proc still shows the initial environment to anything running as the same uid. The runner container must stay uid-isolated: it runs as the VM user, step containers are separate containers and never see it.
+16. **The Loki host is not allowlisted (R10).** The log URL comes from Bitwarden, so the log token and the shipped step output go to whatever host the stored URL names. Write access to the Bitwarden project is a trust root, like the access token itself.
 
 ## Open decisions (made by the planner)
 

@@ -78,7 +78,7 @@ Found by the review and security pass of Landing A. Each is one commit naming it
 - [X] R07 `pipeline.rs`: `ci` joins the reserved step names, with a test.
 - [X] R08 `ci.rs`: remove `ci-<run>-<rand>/` under `--work` after `cleanup_run`, as root through the container like `job.rs` `remove_ws`. Test: the directory is gone after the run.
 - [X] R09 `factory-ci-selftest.yml`: the guard also fails on `secrets:` (with `inherit`), `secrets[`, `toJSON(secrets`, `workflow_run`, `repository_dispatch`; `persist-credentials: false` on every checkout.
-- [ ] R10 Document in `rust-ci-runner/README.md` and `plan.md` that `remove_var` leaves the process environment file under proc readable by the same uid (the runner container stays uid-isolated) and that the Loki host is not allowlisted (Bitwarden write access is a trust root).
+- [X] R10 Document in `rust-ci-runner/README.md` and `plan.md` that `remove_var` leaves the process environment file under proc readable by the same uid (the runner container stays uid-isolated) and that the Loki host is not allowlisted (Bitwarden write access is a trust root).
 
 ## Dependencies
 
