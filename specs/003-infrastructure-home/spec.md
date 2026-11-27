@@ -49,10 +49,10 @@ Answers come from the lead's brief. Nothing blocked on the user; open questions 
 - R2-11: The owner asked the README to tell the public that these tools are tailored to the owner's needs and may not fit every use case (FR-040).
 - R2-12: The README still said blob keys need "32 characters or more"; FR-036 requires 64 lower-case hex characters. The README follows FR-036, and a docs-test row fails on the old wording (FR-041).
 - R2-13: The lint `permissions` rule only checked that the key exists, so `write-all` and `read-all` passed. It now requires `{}` or a block mapping of `scope: read|write|none` lines, at workflow level and job level (FR-042).
-- R2-14: The `blob-key-length` rule passed when one of the two guards was deleted from the plan job. It now needs both blob-key variable names guarded (FR-043).
+- R2-14 (withdrawn, see FR-043): The `blob-key-length` rule passed when one of the two guards was deleted from the plan job. It now needs both blob-key variable names guarded (FR-043).
 - R2-15: Flow-style (`- {uses: x@v4}`) and quoted (`"uses": x@v4`, `'runs-on': x`) keys slipped past the pin and runner rules. The line regex now reads both. A full YAML parse stays deferred (FR-044).
 - R2-16: The `main` guard check for release jobs read only the mirror workflow by name. It now covers every workflow with a job in `factory-ci-release`; the release workflow's publish job keeps its tag-ref guard (FR-045).
-- R2-17: Nothing checked that `FACTORY_CI_BLOB_KEY` and `FACTORY_CI_BLOB_KEY_DOCKER` differ. The plan guard step and `factory-ci-plan.sh` fail when both are set and equal (FR-046).
+- R2-17 (withdrawn, see FR-046): Nothing checked that `FACTORY_CI_BLOB_KEY` and `FACTORY_CI_BLOB_KEY_DOCKER` differ. The plan guard step and `factory-ci-plan.sh` fail when both are set and equal (FR-046).
 - R2-18: The label "security L1" named two findings. The deferred one (a test that fetched file content never reaches the summary `problems` text) is now "security L7". QA's residual risk is recorded in `plan.md` Open risks as R-13: a pipeline that names owner-scoped secrets on a row with empty `repo_id` skips the early store check; the job still refuses. No code change.
 
 ### What this feature changes in 002
@@ -288,10 +288,10 @@ After the owner finishes Setup, the live checks that 002 could not run (T046, T0
 - **FR-040**: The root `README.md` MUST say, right after its first paragraph, that the tools are tailored to the owner's repositories and needs, may not fit every use case, and come with no promise of support or stable interfaces.
 - **FR-041**: The root `README.md` MUST say the blob keys are 64 lower-case hex characters from `openssl rand -hex 32` everywhere it mentions their form, and MUST NOT contain "32 characters". A docs-test row MUST fail on that phrase.
 - **FR-042**: The lint `permissions` rule MUST accept only `permissions: {}` or a block mapping (the key alone on its line, followed by indented `scope: read|write|none` lines) at workflow level in every workflow file, and MUST reject `write-all` and `read-all` at workflow level and job level. Mutation rows for both values.
-- **FR-043**: The lint `blob-key-length` rule MUST require a 64-hex guard for each of `FACTORY_CI_BLOB_KEY` and `FACTORY_CI_BLOB_KEY_DOCKER` in the plan job. A mutation row deletes the `_DOCKER` guard.
+- **FR-043** (withdrawn, owner scope change: blob keys are redesigned separately): The lint `blob-key-length` rule MUST require a 64-hex guard for each of `FACTORY_CI_BLOB_KEY` and `FACTORY_CI_BLOB_KEY_DOCKER` in the plan job. A mutation row deletes the `_DOCKER` guard.
 - **FR-044**: The lint `uses:` pin and `runs-on:` rules MUST also read keys with optional quotes and a leading `{` or `- {`. Mutation rows for one flow-style and one quoted form. A full YAML parse stays deferred.
 - **FR-045**: The lint MUST apply the `main` guard check to every scanned workflow with a job that has `environment: factory-ci-release`. Accepted guards: the `if: github.ref == 'refs/heads/main'( && .*)?$` form, or, for a workflow triggered only by a tag push, the `verify` job check `git merge-base --is-ancestor "$GITHUB_SHA" origin/main` (the form `rust-ci-runner-release.yml` uses today, T051). A mutation row copies the mirror workflow under another name without the guard and must fail `main-guard`.
-- **FR-046**: When `FACTORY_CI_BLOB_KEY_DOCKER` is set and equal to `FACTORY_CI_BLOB_KEY`, the tick plan guard step and `factory-ci-plan.sh` MUST fail with a message naming the two variables, never their values. An unset docker key passes. The README Setup secrets step MUST say the two keys differ.
+- **FR-046** (withdrawn, same reason): When `FACTORY_CI_BLOB_KEY_DOCKER` is set and equal to `FACTORY_CI_BLOB_KEY`, the tick plan guard step and `factory-ci-plan.sh` MUST fail with a message naming the two variables, never their values. An unset docker key passes. The README Setup secrets step MUST say the two keys differ.
 
 ### Key Entities
 

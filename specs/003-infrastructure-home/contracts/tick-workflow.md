@@ -48,5 +48,8 @@ The lint stays line-based. Each rule below has a mutation row in `--self-test` t
 | `tick-environment` | the tick's jobs | `plan` or `verdict` not in `factory-ci-plan`, `run` not in `factory-ci`, `run-docker` not in `factory-ci-docker` |
 | `main-guard` (existing rule, regex tightened) | the tick job `if:` lines the rule reads, and the mirror job | the line does not match `if: github.ref == 'refs/heads/main'( && .*)?$`, or holds `\|\|` |
 | `selftest-shell` (extended) | the selftest | `secrets: inherit` or `secrets[` appears |
+| `permissions` (tightened) | every workflow file | a `permissions:` that is not `{}` or a block of `scope: read\|write\|none` lines, at workflow or job level (`write-all`, `read-all`) |
+| `uses-pin`, `runs-on-pinned` (tightened) | every workflow file | a `uses:` or `runs-on:` key in flow style (`{uses: x}`) or with quotes is read like a plain one; `runs-on` must be the plain block form `runs-on: ubuntu-24.04` |
+| `main-guard` (every release job) | every workflow file with a job in `factory-ci-release` | the job has no end-anchored main `if:`, and the file is not a tag-push workflow whose `verify` step runs `git merge-base --is-ancestor "$GITHUB_SHA" origin/main` |
 
 Known gap, accepted: YAML escape sequences in trigger keys. Only the owner can merge (R2-2), which covers it.

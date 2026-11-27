@@ -17,12 +17,13 @@ if [ "${1:-}" = --self-test ]; then
   tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
   fails=0
   bash "$0" "$wf" "$rel" > "$tmp/good.out" 2>&1 || { echo "FAIL self-test: the good copy does not pass"; cat "$tmp/good.out"; fails=1; }
-  # rule | target (wf, rel, self, mir, or yaml for a .yaml copy of wf) | sed expression
+  # rule | target (wf, rel, self, mir, yaml for a .yaml copy of wf, mircopy for a copy of mir under another name) | sed expression
   while IFS='|' read -r rule target expr; do
     [ -n "$rule" ] || continue
-    rm -f "$tmp/extra.yaml"; cp "$wf" "$tmp/wf.yml"; cp "$rel" "$tmp/rel.yml"; cp "$(dirname "$wf")/factory-ci-selftest.yml" "$(dirname "$wf")/factory-ci-mirror-images.yml" "$tmp/" 2> /dev/null
+    rm -f "$tmp/extra.yaml" "$tmp/extra-mirror.yml"; cp "$wf" "$tmp/wf.yml"; cp "$rel" "$tmp/rel.yml"; cp "$(dirname "$wf")/factory-ci-selftest.yml" "$(dirname "$wf")/factory-ci-mirror-images.yml" "$tmp/" 2> /dev/null
     [ "$target" = yaml ] && cp "$wf" "$tmp/extra.yaml"
-    src=$tmp/wf.yml; [ "$target" = rel ] && src=$tmp/rel.yml; [ "$target" = self ] && src=$tmp/factory-ci-selftest.yml; [ "$target" = mir ] && src=$tmp/factory-ci-mirror-images.yml; [ "$target" = yaml ] && src=$tmp/extra.yaml
+    [ "$target" = mircopy ] && cp "$tmp/factory-ci-mirror-images.yml" "$tmp/extra-mirror.yml"
+    src=$tmp/wf.yml; [ "$target" = rel ] && src=$tmp/rel.yml; [ "$target" = self ] && src=$tmp/factory-ci-selftest.yml; [ "$target" = mir ] && src=$tmp/factory-ci-mirror-images.yml; [ "$target" = yaml ] && src=$tmp/extra.yaml; [ "$target" = mircopy ] && src=$tmp/extra-mirror.yml
     sed -E "$expr" "$src" > "$tmp/m"
     if cmp -s "$tmp/m" "$src"; then echo "FAIL self-test: mutation for $rule changed nothing"; fails=1; continue; fi
     mv "$tmp/m" "$src"
@@ -106,6 +107,18 @@ main-guard|wf|s/^    if: github.ref == 'refs\/heads\/main' && needs.plan.outputs
 main-guard|mir|s/^    if: github.ref == 'refs\/heads\/main'$/& || x/
 selftest-shell|self|s/^  list:/    secrets: inherit\n&/
 selftest-shell|self|s/^  list:/    x: ${{ secrets[1] }}\n&/
+permissions|wf|s/^permissions: \{\}$/permissions: write-all/
+permissions|wf|s/^permissions: \{\}$/permissions: read-all/
+permissions|rel|s/^permissions:$/permissions: write-all/
+permissions|wf|s/^    permissions: \{\}$/    permissions: write-all/
+permissions|rel|s/^    permissions:$/    permissions: read-all/
+permissions|rel|s/^( *)contents: read$/\1contents: admin/
+uses-pin|wf|s/^( *)- uses: (actions\/checkout@)[0-9a-f]{40}.*$/\1- {uses: \2v4}/
+uses-pin|wf|s/^( *)- uses: (actions\/checkout@)[0-9a-f]{40}.*$/\1- "uses": \2v4/
+runs-on-pinned|wf|s/^( *)runs-on: ubuntu-24.04$/\1'runs-on': ubuntu-latest/
+runs-on-pinned|wf|s/^( *)runs-on: ubuntu-24.04$/\1{runs-on: ubuntu-latest}/
+main-guard|mircopy|/^    if: github.ref == 'refs\/heads\/main'$/d
+main-guard|rel|/is-ancestor/d
 MUTATIONS
   [ "$fails" -eq 0 ] && echo "self-test ok"
   exit "$fails"
@@ -132,14 +145,43 @@ has '^permissions: \{\}$' || bad permissions "workflow-level permissions: {} is 
 
 # every workflow in the directory (research D9): pinned runner, no pull_request_target, cargo only
 # in the bootstrap-exception workflows. Comment lines are not read.
+# the main-only guard: end-anchored, extra conditions only with &&, never ||
+guard_ok() { printf '%s\n' "$1" | grep -Eq "^    if: github\.ref == 'refs/heads/main'( && .*)?\$" && ! printf '%s\n' "$1" | grep -Fq '||'; }
 dir=$(dirname "$wf")
 code() { grep -Ev '^ *#' "$1"; }
+# a key with optional quotes; flow-style `{` or `,` may come before it
+q="[\"']?"
+# permissions: {} or a block of `scope: read|write|none` lines; write-all, read-all and anything else fail
+perm_bad() { code "$1" | awk '
+  function shut() { if (inb && !n) print "a permissions: block has no scope line"; inb = 0 }
+  { match($0, /^ */); ind = RLENGTH }
+  inb && $0 ~ /^ *$/ { next }
+  inb { if (ind > pi) { if ($0 ~ /^ *[a-z-]+: (read|write|none)$/) n++; else print "line " NR " is not scope: read|write|none"; next } shut() }
+  $0 ~ /^ *[\"\047]?permissions[\"\047]?:/ {
+    v = $0; sub(/^[^:]*:[ ]*/, "", v); sub(/[ ]+#.*$/, "", v); sub(/[ ]+$/, "", v)
+    if (v == "{}") next
+    if (v == "") { inb = 1; pi = ind; n = 0; next }
+    print "line " NR " has permissions: " v
+  }
+  END { shut() }'; }
 for f in "$dir"/*.yml "$dir"/*.yaml; do
   [ -r "$f" ] || continue
-  code "$f" | grep 'runs-on:' | grep -Evq 'runs-on: ubuntu-24\.04$' && bad runs-on-pinned "$f: a runs-on is not exactly ubuntu-24.04"
+  code "$f" | grep -E "${q}runs-on${q}:" | grep -Evq '^ +runs-on: ubuntu-24\.04$' && bad runs-on-pinned "$f: a runs-on is not exactly ubuntu-24.04 in block form"
   code "$f" | grep -Eq '(^|[^A-Za-z_-])pull_request_target([^A-Za-z_-]|$)' && bad no-pull-request-target "$f: pull_request_target is present"
-  code "$f" | grep -E '^ *(- )?uses:' | grep -Ev '@[0-9a-f]{40}( |$)' | grep -q . && bad uses-pin "$f: a uses: is not pinned to a 40-hex commit"
+  code "$f" | grep -E "(^ *(- )?|[{,] *)${q}uses${q}:" | grep -Ev '@[0-9a-f]{40}([ "'"'"'},]|$)' | grep -q . && bad uses-pin "$f: a uses: is not pinned to a 40-hex commit"
   code "$f" | grep -Eq '^permissions:' || bad permissions "$f: workflow-level permissions: is missing"
+  pb=$(perm_bad "$f"); [ -z "$pb" ] || bad permissions "$f: $(printf '%s' "$pb" | head -1)"
+  # a job in factory-ci-release runs only from main or a tag on main (FR-033, FR-045): an end-anchored
+  # main if:, or no if: in a tag-push workflow whose verify step checks the commit is on main
+  for j in $(code "$f" | awk '/^  [A-Za-z0-9_-]+:[ ]*$/ { j = $1 } /^    environment: factory-ci-release$/ { print j }' | tr -d :); do
+    jt=$(code "$f" | awk -v j="$j" '$0 ~ /^  [A-Za-z0-9_-]+:[ ]*$/ { on = ($1 == j ":") } on')
+    ji=$(printf '%s\n' "$jt" | grep -E '^    if:' | head -1)
+    if [ -n "$ji" ]; then guard_ok "$ji" || bad main-guard "$f: job $j: the if: is not end-anchored main-only without ||"
+    else
+      code "$f" | grep -Eq '^ +tags:' && code "$f" | grep -Fq 'git merge-base --is-ancestor "$GITHUB_SHA" origin/main' \
+        || bad main-guard "$f: job $j runs in factory-ci-release with no main guard and no tag-on-main check"
+    fi
+  done
   case $f in "$dir"/factory-ci-selftest.yml | "$rel") continue ;; esac
   code "$f" | grep -Eq '(^|[^A-Za-z_-])cargo ' && bad no-cargo "$f: a cargo command outside the bootstrap-exception workflows"
 done
@@ -160,8 +202,6 @@ lines=$(awk '
   }' "$wf" | tr '\n' ' ')
 [ -z "$lines" ] || bad run-expression "\${{ inside run: at line(s) $lines"
 
-# the main-only guard: end-anchored, extra conditions only with &&, never ||
-guard_ok() { printf '%s\n' "$1" | grep -Eq "^    if: github\.ref == 'refs/heads/main'( && .*)?\$" && ! printf '%s\n' "$1" | grep -Fq '||'; }
 # the Environment each tick job runs in (the allowlist)
 want_env() { case $1 in run) echo factory-ci ;; run-docker) echo factory-ci-docker ;; *) echo factory-ci-plan ;; esac; }
 # guards: every job but verdict
