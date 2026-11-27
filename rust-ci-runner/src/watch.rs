@@ -2,6 +2,8 @@
 //! validated completely, every problem reported at once.
 
 use crate::pipeline::valid_secret_name;
+use std::io::Read;
+use std::path::Path;
 use toml::{Table, Value};
 
 pub const MAX_BYTES: usize = 64 * 1024;
@@ -181,4 +183,16 @@ pub fn parse(text: &str) -> Result<Vec<WatchEntry>, Vec<String>> {
     } else {
         Err(bad)
     }
+}
+
+/// Reads and parses the watch list at `path`.
+pub fn read(path: &Path) -> Result<Vec<WatchEntry>, String> {
+    // One byte over the limit is enough for parse to refuse the file without reading all of it.
+    let mut buf = Vec::new();
+    let read = std::fs::File::open(path).and_then(|f| f.take(MAX_BYTES as u64 + 1).read_to_end(&mut buf));
+    if let Err(e) = read {
+        return Err(format!("cannot read {}: {e}", path.display()));
+    }
+    let Ok(text) = String::from_utf8(buf) else { return Err("watch list is not valid UTF-8".to_string()) };
+    parse(&text).map_err(|p| p.join("\n"))
 }

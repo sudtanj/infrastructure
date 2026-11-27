@@ -376,7 +376,6 @@ fn quiet_run(sb: &Sandbox, fixture: &Path, run_exit: i32, loki_code: u16) -> Res
 }
 
 #[test]
-#[ignore = "test-first"]
 fn run_quiet_logs_fails_when_a_passing_run_dropped_lines() {
     let sb = Sandbox::new("qdrop");
     let fx = sb.fixture(&[(".factory-ci.toml", &pipeline(&[("a", "")]))]);

@@ -19,7 +19,7 @@ pub type Env<'a> = &'a dyn Fn(&str) -> Option<String>;
 const RETRY: &str = " (retry)";
 const LOG_VARS: [&str; 3] = ["FACTORY_CI_LOG_URL", "FACTORY_CI_LOG_USER", "FACTORY_CI_LOG_TOKEN"];
 /// Output of one run, printed and shipped (data-model.md limits).
-const MAX_LOG_BYTES: u64 = 10 << 20;
+pub(crate) const MAX_LOG_BYTES: u64 = 10 << 20;
 
 /// What every step sees about the run: commit, previous commit, branch, event.
 pub fn run_env(
@@ -54,7 +54,7 @@ fn load_pipeline(dir: &Path, step: Option<&str>) -> Result<Pipeline, Vec<String>
 
 /// Reads the pipeline in `dir`, then checks docker steps and looks up the listed secrets, so
 /// that nothing starts on a bad file. Every problem is returned.
-fn prepare(
+pub(crate) fn prepare(
     dir: &Path,
     step: Option<&str>,
     lookup: impl Fn(&str) -> Option<String>,
@@ -74,7 +74,7 @@ fn prepare(
 
 /// Runs the graph in `dir`: the one executor behind both `run` and `job`. The caller cleans up.
 #[allow(clippy::too_many_arguments)]
-fn run_pipeline(
+pub(crate) fn run_pipeline(
     engine: &Engine,
     id: &str,
     dir: &Path,
@@ -101,7 +101,7 @@ fn run_pipeline(
 
 /// The log store settings, or `None` when shipping is off. `required` (`--quiet-logs`,
 /// `--private`) turns "off" into an error, before anything runs.
-fn log_config(env: Env, required: bool) -> Result<Option<LogConfig>, String> {
+pub(crate) fn log_config(env: Env, required: bool) -> Result<Option<LogConfig>, String> {
     let cfg = LogConfig::from_env(&|k| var(env, k)).map_err(|v| v.join(". "))?;
     if cfg.is_none() && required {
         return Err(format!("log store required: set {}", LOG_VARS.join(", ")));
@@ -111,32 +111,36 @@ fn log_config(env: Env, required: bool) -> Result<Option<LogConfig>, String> {
 
 /// `rust-ci-runner run`: the same graph and executor as `job`, on one directory.
 /// Secrets come from environment variables of the same name. Returns whether it passed.
-/// With a log store configured it ships, and prints too unless `quiet`.
+/// With a log store configured it ships, and prints too unless `quiet`. A pass that dropped
+/// log lines is an error (FR-017).
 pub fn local(dir: &Path, step: Option<&str>, engine: &str, quiet: bool) -> Result<bool, String> {
-    let cfg = log_config(&|k| std::env::var(k).ok(), quiet)?;
+    local_with(dir, step, engine, quiet, &|k| std::env::var(k).ok(), ship::Timing::default())
+}
+
+/// `local` with the environment and the shipper timing passed in, so a test can shorten them.
+pub fn local_with(dir: &Path, step: Option<&str>, engine: &str, quiet: bool, env: Env, timing: ship::Timing) -> Result<bool, String> {
+    let cfg = log_config(env, quiet)?;
     let ws = std::fs::canonicalize(dir)
         .map_err(|e| format!("cannot use {}: {e}", dir.display()))?;
-    let var = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
     // When FACTORY_CI_SECRETS is set (a comma-separated list), only those names are
     // looked up: a CI system can expose a short list instead of its whole environment.
-    let allow: Option<Vec<String>> = std::env::var("FACTORY_CI_SECRETS")
-        .ok()
+    let allow: Option<Vec<String>> = env("FACTORY_CI_SECRETS")
         .map(|v| v.split(',').map(|n| n.trim().to_string()).collect());
     let lookup = |n: &str| {
         let listed = allow.as_ref().is_none_or(|a| a.iter().any(|x| x == n));
-        listed.then(|| var(n)).flatten()
+        listed.then(|| var(env, n)).flatten()
     };
     // A local run needs no opt-in for docker steps.
     let (p, secrets) = prepare(&ws, step, lookup, true).map_err(|v| v.join("\n"))?;
     let id = random_id();
     let shipper = cfg.map(|c| {
-        let labels = Labels { repo: var("GITHUB_REPOSITORY").unwrap_or_else(|| "local".to_string()), project: ".".to_string() };
+        let labels = Labels { repo: var(env, "GITHUB_REPOSITORY").unwrap_or_else(|| "local".to_string()), project: ".".to_string() };
         let meta = Meta {
             run_id: id.clone(),
-            sha: var("FACTORY_CI_SHA").unwrap_or_default(),
-            branch: var("FACTORY_CI_BRANCH").unwrap_or_default(),
+            sha: var(env, "FACTORY_CI_SHA").unwrap_or_default(),
+            branch: var(env, "FACTORY_CI_BRANCH").unwrap_or_default(),
         };
-        Shipper::start(c, labels, meta)
+        Shipper::start_with(c, labels, meta, timing)
     });
     let log = Log::new(
         Box::new(std::io::stdout()),
@@ -147,36 +151,37 @@ pub fn local(dir: &Path, step: Option<&str>, engine: &str, quiet: bool) -> Resul
     let log = with_shipper(log, &shipper);
     let engine = Engine::new(engine);
     // A CI system that calls this command can pass the same variables the server sets.
-    let env = run_env(
+    let run = run_env(
         &id,
-        &var("FACTORY_CI_SHA").unwrap_or_default(),
-        var("FACTORY_CI_PREV_SHA").as_deref(),
-        &var("FACTORY_CI_BRANCH").unwrap_or_default(),
-        &var("FACTORY_CI_EVENT").unwrap_or_else(|| "local".to_string()),
+        &var(env, "FACTORY_CI_SHA").unwrap_or_default(),
+        var(env, "FACTORY_CI_PREV_SHA").as_deref(),
+        &var(env, "FACTORY_CI_BRANCH").unwrap_or_default(),
+        &var(env, "FACTORY_CI_EVENT").unwrap_or_else(|| "local".to_string()),
     )
     .into_iter()
     .filter(|(_, v)| !v.is_empty())
     .collect();
-    let out = run_pipeline(&engine, &id, &ws, &p, env, secrets, &log, DIND_IMAGE);
+    let out = run_pipeline(&engine, &id, &ws, &p, run, secrets, &log, DIND_IMAGE);
     engine.cleanup_run(&id);
     let res = out.map(|out| {
         log.event("runner", if out.ok() { "pipeline passed" } else { "pipeline failed" });
         out.ok()
     });
-    if let Some(s) = &shipper {
-        s.finish(FLUSH_WINDOW);
+    let delivered = shipper.is_none_or(|s| s.finish(FLUSH_WINDOW));
+    match res {
+        Ok(true) if !delivered => Err("log shipping dropped lines".to_string()),
+        other => other,
     }
-    res
 }
 
-fn with_shipper(log: Log, shipper: &Option<Arc<Shipper>>) -> Log {
+pub(crate) fn with_shipper(log: Log, shipper: &Option<Arc<Shipper>>) -> Log {
     match shipper {
         Some(s) => log.with_sink(s.clone()),
         None => log,
     }
 }
 
-fn var(env: Env, k: &str) -> Option<String> {
+pub(crate) fn var(env: Env, k: &str) -> Option<String> {
     env(k).filter(|v| !v.is_empty())
 }
 
@@ -356,6 +361,15 @@ fn require_pinned(env: Env, name: &str) -> Result<String, String> {
     var(env, name).filter(|i| pinned(i)).ok_or_else(|| format!("{name}: image is not pinned"))
 }
 
+/// The project directory inside the checkout `ws`: a real directory, not a link, whose canonical
+/// path stays inside `ws`. The checkout is untrusted.
+pub(crate) fn project_dir(ws: &Path, project: &str) -> Result<PathBuf, String> {
+    let dir = ws.join(project);
+    let real = std::fs::symlink_metadata(&dir).is_ok_and(|m| m.is_dir());
+    let dir = std::fs::canonicalize(&dir).ok().filter(|d| real && std::fs::canonicalize(ws).is_ok_and(|w| d.starts_with(w)));
+    dir.ok_or_else(|| "project directory is missing or not a plain directory".to_string())
+}
+
 /// Clones into `ws` and returns the project directory.
 fn checkout(o: &Opts, env: Env, engine: &Engine, ws: &Path, log: &Log, image: &str) -> Result<PathBuf, Done> {
     let server = var(env, "GITHUB_SERVER_URL").unwrap_or_else(|| "https://github.com".to_string());
@@ -366,11 +380,7 @@ fn checkout(o: &Opts, env: Env, engine: &Engine, ws: &Path, log: &Log, image: &s
     if let State::Failed(m) = st {
         return Err(done("error", format!("clone failed: {m}")));
     }
-    // The checkout is untrusted: the project must be a real directory inside it, not a link.
-    let dir = ws.join(&o.t.project);
-    let real = std::fs::symlink_metadata(&dir).is_ok_and(|m| m.is_dir());
-    let dir = std::fs::canonicalize(&dir).ok().filter(|d| real && std::fs::canonicalize(ws).is_ok_and(|w| d.starts_with(w)));
-    dir.ok_or_else(|| done("error", "project directory is missing or not a plain directory"))
+    project_dir(ws, &o.t.project).map_err(|e| done("error", e))
 }
 
 /// Clone, check, run. Every way out is a `Done`; nothing here posts or cleans up.

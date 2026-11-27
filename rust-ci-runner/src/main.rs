@@ -1,6 +1,6 @@
 use rust_ci_runner::github::HttpApi;
 use rust_ci_runner::{job, plan, ship, watch};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -52,14 +52,7 @@ fn run(args: &[String]) -> ExitCode {
 /// Reads and validates the watch list and the log settings.
 fn load_list(repos: &Path) -> Result<Vec<watch::WatchEntry>, String> {
     ship::LogConfig::from_env(&|n| std::env::var(n).ok()).map_err(|e| e.join(". "))?;
-    // One byte over the limit is enough for parse to refuse the file without reading all of it.
-    let mut buf = Vec::new();
-    let read = std::fs::File::open(repos).and_then(|f| f.take(watch::MAX_BYTES as u64 + 1).read_to_end(&mut buf));
-    if let Err(e) = read {
-        return Err(format!("cannot read {}: {e}", repos.display()));
-    }
-    let Ok(text) = String::from_utf8(buf) else { return Err("watch list is not valid UTF-8".to_string()) };
-    watch::parse(&text).map_err(|p| p.join("\n"))
+    watch::read(repos)
 }
 
 /// Settings from the environment: token and log values are redacted, the log store counts as

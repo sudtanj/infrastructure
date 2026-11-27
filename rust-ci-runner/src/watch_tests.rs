@@ -239,7 +239,6 @@ fn temp_file(bytes: &[u8]) -> std::path::PathBuf {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn read_helper_parses_and_caps_like_the_old_load_list() {
     let p = temp_file(b"[[watch]]\nrepo = \"o/r\"\nid = 7\nbranches = [\"main\"]\n");
     let v = crate::watch::read(&p).unwrap();
@@ -267,7 +266,6 @@ fn read_helper_parses_and_caps_like_the_old_load_list() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn entries_without_branches_match_every_ref() {
     let v = parse(&one("id = 1")).unwrap();
     let long = "z".repeat(200);
