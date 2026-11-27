@@ -142,13 +142,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      CARGO_TARGET_DIR: ${{ runner.temp }}/own-target
       FACTORY_CI_EVENT: push
       FACTORY_CI_BRANCH: selftest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - name: separate target directory
+        run: echo "CARGO_TARGET_DIR=$RUNNER_TEMP/own-target" >> "$GITHUB_ENV"
       - name: install the pinned toolchain
         working-directory: rust-ci-runner
         run: rustup toolchain install
@@ -171,6 +172,12 @@ jobs:
           persist-credentials: false
       - name: lint every workflow
         run: .github/scripts/factory-ci-lint-workflow.sh .github/workflows/factory-ci-tick.yml .github/workflows/rust-ci-runner-release.yml
+      - name: the pinned bws archive matches BWS_SHA256
+        run: |
+          set -eu
+          . .github/scripts/factory-ci-secrets.sh
+          curl -fsSL --max-time 120 -o bws.zip https://github.com/bitwarden/sdk-sm/releases/download/bws-v2.1.0/bws-x86_64-unknown-linux-musl-2.1.0.zip
+          [ "$(sha256sum bws.zip | cut -d ' ' -f 1)" = "$BWS_SHA256" ] || { echo "the bws archive does not match BWS_SHA256" >&2; exit 1; }
 
   shell:
     runs-on: ubuntu-24.04
