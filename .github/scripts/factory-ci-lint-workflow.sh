@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Lint for the tick workflow and the release workflow (T026; FR-001, FR-003, FR-015, FR-026;
-# AS 5.1, 5.4, 6.2, 10.1, 10.2). Rules: end of specs/002-ci-runner/contracts/tick-workflow.md.
+# Lint for the tick workflow, the release workflow and the rest of the workflow directory (T026, T015;
+# FR-001, FR-003, FR-015, FR-026, FR-029; AS 5.1, 5.4, 6.2, 10.1, 10.2). Rules: end of specs/002-ci-runner/contracts/tick-workflow.md.
 #   factory-ci-lint-workflow.sh WORKFLOW [RELEASE]     lint; one "FAIL rule: why" line per problem
 #   factory-ci-lint-workflow.sh --self-test WORKFLOW [RELEASE]
 # RELEASE defaults to rust-ci-runner-release.yml beside WORKFLOW. FACTORY_CI_LINT_STRICT=1 refuses the
@@ -56,6 +56,7 @@ verdict-ping|wf|s/^( *)set \+x$/\1set -x/
 verdict-ping|wf|s/^( *)(curl -fsS --max-time 10 .*)$/&\n\1echo "$FACTORY_CI_HEARTBEAT_URL"/
 verdict-ping|wf|s/^( *)(curl -fsS --max-time 10 .*)$/&\n\1curl -fsS --max-time 10 "$FACTORY_CI_HEARTBEAT_URL"/
 verdict-ping|wf|s/GITHUB_REF" = refs\/heads\/main/GITHUB_REF" != x/
+verdict-ping|wf|s/suffix=\/fail/suffix=/
 verdict-fail|wf|s/"\$FAIL_TICK" != 1/true/
 verdict-fail|wf|s/"\$PLAN_RESULT" = success/true/
 verdict-always|wf|s/needs: \[plan, run, run-docker\]/needs: [plan, run]/
@@ -74,6 +75,21 @@ release-digest|rel|s/RUNNER_IMAGE_DIGEST/X/
 selftest-shell|self|s/^  shell:/  other:/
 selftest-shell|self|s/test-factory-ci-hardening.sh/x.sh/
 selftest-shell|self|s/^  list:/      - uses: actions\/upload-artifact@v4\n&/
+no-pull-request-target|wf|s/^on:$/on: [pull_request_target]\nxon:/
+no-pull-request-target|wf|s/^on:$/on: {pull_request_target: {types: [opened]}}\nxon:/
+no-pull-request-target|rel|s/^on:$/on: [pull_request_target]\nxon:/
+no-pull-request-target|self|s/^  pull_request:/  pull_request_target:/
+runs-on-pinned|rel|s/runs-on: ubuntu-24.04/runs-on: ubuntu-latest/
+runs-on-pinned|rel|s/runs-on: ubuntu-24.04/runs-on: ubuntu-24.04.1/
+runs-on-pinned|self|s/runs-on: ubuntu-24.04/runs-on: ubuntu-22.04/
+no-cargo|wf|s/^( *)chmod \+x .*/&\n\1cargo build/
+selftest-isolated|self|s/^  workflow_dispatch:/&\n  workflow_run:/
+selftest-isolated|self|s/^( *)group: selftest-.*/&\n\1x: ${{ secrets.X }}/
+selftest-isolated|self|s/^  check:/&\n    environment: x/
+selftest-isolated|self|s/^  contents: read/&\n  id-token: write/
+selftest-paths|self|s/^  pull_request:/&\n    paths: ["x"]/
+selftest-checkout|self|s/persist-credentials: false/persist-credentials: true/
+selftest-checkout|self|s/^( *)- uses: actions\/checkout@.*/&\n\1- uses: actions\/checkout@0000000000000000000000000000000000000000/
 MUTATIONS
   [ "$fails" -eq 0 ] && echo "self-test ok"
   exit "$fails"
@@ -90,11 +106,22 @@ job() { awk -v j="$1" '$0 ~ /^  [A-Za-z0-9_-]+:[ ]*$/ { on = ($1 == j ":") } on'
 
 # triggers
 has '^  schedule:' && bad no-schedule "a schedule trigger is present"
-has '^  pull_request_target:' && bad no-pull-request-target "pull_request_target is present"
 has '^  workflow_dispatch:' || bad dispatch "workflow_dispatch is missing"
 has '^  group: factory-ci-tick$' || bad concurrency-group "group: factory-ci-tick is missing"
 has '^  cancel-in-progress: false$' || bad concurrency-cancel "cancel-in-progress: false is missing"
 has '^permissions: \{\}$' || bad permissions "workflow-level permissions: {} is missing"
+
+# every workflow in the directory (research D9): pinned runner, no pull_request_target, cargo only
+# in the bootstrap-exception workflows. Comment lines are not read.
+dir=$(dirname "$wf")
+code() { grep -Ev '^ *#' "$1"; }
+for f in "$dir"/*.yml; do
+  [ -r "$f" ] || continue
+  code "$f" | grep 'runs-on:' | grep -Evq 'runs-on: ubuntu-24\.04$' && bad runs-on-pinned "$f: a runs-on is not exactly ubuntu-24.04"
+  code "$f" | grep -Eq '(^|[^A-Za-z_-])pull_request_target([^A-Za-z_-]|$)' && bad no-pull-request-target "$f: pull_request_target is present"
+  case $f in "$dir"/factory-ci-selftest.yml | "$dir"/factory-ci-bootstrap.yml | "$rel") continue ;; esac
+  code "$f" | grep -Eq '(^|[^A-Za-z_-])cargo ' && bad no-cargo "$f: a cargo command outside the bootstrap-exception workflows"
+done
 
 # runners and matrix limits
 [ "$(grep -c 'runs-on:' "$wf")" -ge 4 ] || bad runs-on "fewer than four runs-on lines"
@@ -131,7 +158,8 @@ v=$(job verdict)
 [ -n "$v" ] || bad job "job verdict is missing"
 printf '%s\n' "$v" | grep -Eq '^    if: always\(\)$' || bad verdict-always "verdict has no if: always()"
 printf '%s\n' "$v" | grep -Eq '^    needs: \[plan, run, run-docker\]$' || bad verdict-always "verdict does not need plan, run and run-docker"
-printf '%s\n' "$v" | grep -q 'curl -fsS --max-time 10 "\$FACTORY_CI_HEARTBEAT_URL" > /dev/null 2>&1 || true' || bad verdict-ping "the heartbeat is not one quiet curl --max-time 10 that ignores failure"
+printf '%s\n' "$v" | grep -q 'curl -fsS --max-time 10 "\$ping" > /dev/null 2>&1 || true' || bad verdict-ping "the heartbeat is not one quiet curl --max-time 10 that ignores failure"
+printf '%s\n' "$v" | grep -q 'suffix=/fail' || bad verdict-ping "a red tick does not ping /fail"
 printf '%s\n' "$v" | grep -Eq '^ *set \+x$' || bad verdict-ping "the heartbeat step has no set +x"
 printf '%s\n' "$v" | grep -Eq 'set -x|xtrace|bash -x' && bad verdict-ping "the verdict job turns tracing on"
 printf '%s\n' "$v" | grep -Eq '(echo|printf|cat).*HEARTBEAT_URL' && bad verdict-ping "the verdict job prints the heartbeat URL"
@@ -211,6 +239,13 @@ if [ -r "$self" ]; then
     printf '%s\n' "$sj" | grep -q -- "$s" || bad selftest-shell "the shell job does not run $s"
   done
   grep -q 'upload-artifact' "$self" && bad selftest-shell "factory-ci-selftest.yml still has an upload-artifact step"
+  sc=$(code "$self")
+  for t in 'workflow_run' 'secrets\.' 'environment:' 'id-token'; do
+    printf '%s\n' "$sc" | grep -Eq "(^|[^A-Za-z_-])$t" && bad selftest-isolated "factory-ci-selftest.yml has $t"
+  done
+  printf '%s\n' "$sc" | grep -Eq '^    paths(-ignore)?:' && bad selftest-paths "factory-ci-selftest.yml filters pull_request by paths"
+  [ "$(printf '%s\n' "$sc" | grep -c 'uses: actions/checkout@')" -eq "$(printf '%s\n' "$sc" | grep -c 'persist-credentials: false')" ] \
+    || bad selftest-checkout "a checkout in factory-ci-selftest.yml lacks persist-credentials: false"
 else
   bad selftest-shell "cannot read $self"
 fi

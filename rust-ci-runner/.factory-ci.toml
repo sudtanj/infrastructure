@@ -1,0 +1,11 @@
+# Pipeline of the runner itself, run by the selftest job own-pipelines and by a tick.
+# Tests that need a container engine are #[ignore]d; the selftest pipeline job runs them with --include-ignored.
+[steps.lint]
+image = "rust:1.90"
+commands = ["rustup component add clippy rustfmt", "cargo fmt --check", "cargo clippy --locked -- -D warnings"]
+timeout = 1200
+
+[steps.test]
+image = "rust:1.90"
+commands = ["cargo test --locked"]
+timeout = 1800

@@ -138,14 +138,38 @@ jobs:
       - name: check the watch list
         run: rust-ci-runner/target/release/rust-ci-runner plan --repos .github/factory-ci-repos.toml --check
 
-  workflow:
+  own-pipelines:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 45
+    env:
+      CARGO_TARGET_DIR: ${{ runner.temp }}/own-target
+      FACTORY_CI_EVENT: push
+      FACTORY_CI_BRANCH: selftest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - name: lint the tick and release workflows
+      - name: install the pinned toolchain
+        working-directory: rust-ci-runner
+        run: rustup toolchain install
+      - name: build the runner from source
+        working-directory: rust-ci-runner
+        run: cargo build --locked --release
+      - name: run the pipeline of the runner
+        run: FACTORY_CI_SHA=$(git rev-parse HEAD) "$CARGO_TARGET_DIR/release/rust-ci-runner" run --dir rust-ci-runner
+      - name: run the pipeline of the repository
+        run: FACTORY_CI_SHA=$(git rev-parse HEAD) "$CARGO_TARGET_DIR/release/rust-ci-runner" run --dir .
+
+  workflow:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      FACTORY_CI_LINT_STRICT: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: lint every workflow
         run: .github/scripts/factory-ci-lint-workflow.sh .github/workflows/factory-ci-tick.yml .github/workflows/rust-ci-runner-release.yml
 
   shell:

@@ -128,7 +128,7 @@ fn with_a_log_store_the_private_row_is_planned_fail_closed() {
     };
     let (_, fin) = plan_all(&api, &entries(&[(R, "")]), &o);
     assert!(rows(&fin)[0].fail_closed);
-    // a public repo is never fail_closed; a private B needs no gate
+    // a public repo is never fail_closed; a private central repo needs no gate
     let api = fake();
     add_repo(&api, R, &[("main", 1, 10)], &["."]);
     let (_, fin) = plan_all(

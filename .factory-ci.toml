@@ -1,0 +1,11 @@
+# Repo-wide checks, run by the selftest job own-pipelines and by a tick. The shell tests run here
+# without a container engine. The selftest shell job runs the same scripts on the host.
+[steps.shell]
+image = "ubuntu:24.04"
+commands = ["apt-get update -qq", "apt-get install -y -qq --no-install-recommends git jq curl unzip openssl ca-certificates", "git config --global --add safe.directory '*'", ".github/scripts/test-factory-ci-secrets.sh", ".github/scripts/test-factory-ci-hardening.sh", ".github/scripts/test-factory-ci-docs.sh"]
+timeout = 900
+
+[steps.lint-workflows]
+image = "ubuntu:24.04"
+commands = ["apt-get update -qq", "apt-get install -y -qq --no-install-recommends git jq curl unzip openssl ca-certificates", "git config --global --add safe.directory '*'", ".github/scripts/factory-ci-lint-workflow.sh --self-test .github/workflows/factory-ci-tick.yml .github/workflows/rust-ci-runner-release.yml"]
+timeout = 600

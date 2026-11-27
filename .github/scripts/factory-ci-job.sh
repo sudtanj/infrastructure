@@ -27,6 +27,8 @@ refuse() {
   exit 1
 }
 
+fci_log_env || refuse "$FCI_ERR"
+case ${FACTORY_CI_BWS_SERVER_URL:-} in ''|https://*) ;; *) refuse "FACTORY_CI_BWS_SERVER_URL must start with https://" ;; esac
 runner=$(command -v rust-ci-runner) || refuse "job did not finish"
 row=$(printf '%s' "${ITEM_BLOB:-}" | fci_blob_decrypt) || refuse "job did not finish"
 field() { printf '%s' "$row" | jq -r --arg k "$1" '.[$k] // "" | tostring'; }
@@ -70,9 +72,9 @@ if [ "${#names[@]}" -gt 0 ]; then
   [ -n "${BWS_ACCESS_TOKEN:-}" ] || refuse "no secret store configured"
 fi
 
-# One list call resolves the names and the log credentials. Nothing is exported before all resolved.
+# One list call resolves the names. Nothing is exported before all resolved.
 declare -A vals=()
-if [ -n "${BWS_ACCESS_TOKEN:-}" ]; then
+if [ "${#names[@]}" -gt 0 ]; then
   fci_list "${FACTORY_CI_BWS_PROJECT:-}" "$BWS_ACCESS_TOKEN" || refuse "$FCI_ERR"
   FCI_REPO=$repo FCI_REPO_ID=$repo_id FCI_SHARED=$shared
   for name in "${names[@]}"; do
@@ -84,12 +86,11 @@ if [ -n "${BWS_ACCESS_TOKEN:-}" ]; then
       *) refuse "secret $name not found" ;;
     esac
   done
-  fci_log_creds || refuse "$FCI_ERR"
-  if [ -n "$FCI_HAVE_LOGS" ]; then
-    for v in "$FCI_LOG_URL" "$FCI_LOG_USER" "$FCI_LOG_TOKEN"; do
-      ! fci_short_line "$v" || refuse "log credentials have a line under 4 characters"
-    done
-  fi
+fi
+if [ -n "$FCI_HAVE_LOGS" ]; then
+  for v in "$FCI_LOG_URL" "$FCI_LOG_USER" "$FCI_LOG_TOKEN"; do
+    ! fci_short_line "$v" || refuse "log credentials have a line under 4 characters"
+  done
 fi
 if [ "$fail_closed" = true ] && [ -z "${FCI_HAVE_LOGS:-}" ]; then
   refuse "private repository and no log store"

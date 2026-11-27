@@ -1,6 +1,6 @@
 name: factory-ci-tick
 
-# One tick: plan what changed in the watched repos, run each item, report. B is public, so
+# One tick: plan what changed in the watched repos, run each item, report. This repo is public, so
 # nothing printed here may name a branch, SHA, project path or secret (FR-059): the matrix
 # carries only an index and an encrypted blob. Dispatch and rules: contracts/tick-workflow.md.
 on:
@@ -59,7 +59,8 @@ jobs:
           set -eu
           owner=$(printf '%s' "$OWNER" | tr 'A-Z' 'a-z')
           mkdir -p "$RUNNER_TEMP/bin"
-          id=$(docker create "ghcr.io/$owner/rust-ci-runner@$RUNNER_IMAGE_DIGEST")
+          id=$(docker create "ghcr.io/$owner/rust-ci-runner@$RUNNER_IMAGE_DIGEST" 2> /dev/null) \
+            || { echo "the runner image is not pullable; make the GHCR package public" >&2; exit 1; }
           docker cp "$id:/rust-ci-runner" "$RUNNER_TEMP/bin/rust-ci-runner"
           docker rm "$id" > /dev/null
           chmod +x "$RUNNER_TEMP/bin/rust-ci-runner"
@@ -71,6 +72,7 @@ jobs:
         run: |
           set -eu
           [ "$HAVE_BWS" = true ] || exit 0
+          case $FACTORY_CI_BWS_SERVER_URL in ''|https://*) ;; *) echo "FACTORY_CI_BWS_SERVER_URL must start with https://" >&2; exit 1 ;; esac
           . .github/scripts/factory-ci-secrets.sh
           printf '%s' "$BWS_SHA256" | grep -Eqx '[0-9a-f]{64}' \
             || { echo "BWS_SHA256 is not a pinned digest" >&2; exit 1; }
@@ -94,6 +96,9 @@ jobs:
       - name: plan
         id: plan
         env:
+          FACTORY_CI_LOG_URL: ${{ secrets.FACTORY_CI_LOG_URL }}
+          FACTORY_CI_LOG_USER: ${{ secrets.FACTORY_CI_LOG_USER }}
+          FACTORY_CI_LOG_TOKEN: ${{ secrets.FACTORY_CI_LOG_TOKEN }}
           FACTORY_CI_TOKEN: ${{ secrets.FACTORY_CI_TOKEN }}
           FACTORY_CI_TOKEN_DOCKER: ${{ secrets.FACTORY_CI_TOKEN_DOCKER }}
           BWS_ACCESS_TOKEN: ${{ secrets.BWS_ACCESS_TOKEN }}
@@ -153,7 +158,8 @@ jobs:
           set -eu
           owner=$(printf '%s' "$OWNER" | tr 'A-Z' 'a-z')
           mkdir -p "$RUNNER_TEMP/bin"
-          id=$(docker create "ghcr.io/$owner/rust-ci-runner@$RUNNER_IMAGE_DIGEST")
+          id=$(docker create "ghcr.io/$owner/rust-ci-runner@$RUNNER_IMAGE_DIGEST" 2> /dev/null) \
+            || { echo "the runner image is not pullable; make the GHCR package public" >&2; exit 1; }
           docker cp "$id:/rust-ci-runner" "$RUNNER_TEMP/bin/rust-ci-runner"
           docker rm "$id" > /dev/null
           chmod +x "$RUNNER_TEMP/bin/rust-ci-runner"
@@ -165,6 +171,7 @@ jobs:
         run: |
           set -eu
           [ "$HAVE_BWS" = true ] || exit 0
+          case $FACTORY_CI_BWS_SERVER_URL in ''|https://*) ;; *) echo "FACTORY_CI_BWS_SERVER_URL must start with https://" >&2; exit 1 ;; esac
           . .github/scripts/factory-ci-secrets.sh
           printf '%s' "$BWS_SHA256" | grep -Eqx '[0-9a-f]{64}' \
             || { echo "BWS_SHA256 is not a pinned digest" >&2; exit 1; }
@@ -188,6 +195,9 @@ jobs:
       - name: job
         id: job
         env:
+          FACTORY_CI_LOG_URL: ${{ secrets.FACTORY_CI_LOG_URL }}
+          FACTORY_CI_LOG_USER: ${{ secrets.FACTORY_CI_LOG_USER }}
+          FACTORY_CI_LOG_TOKEN: ${{ secrets.FACTORY_CI_LOG_TOKEN }}
           ITEM_BLOB: ${{ matrix.blob }}
           FACTORY_CI_BLOB_KEY: ${{ secrets.FACTORY_CI_BLOB_KEY }}
           FACTORY_CI_TOKEN: ${{ secrets.FACTORY_CI_TOKEN }}
@@ -251,7 +261,8 @@ jobs:
           set -eu
           owner=$(printf '%s' "$OWNER" | tr 'A-Z' 'a-z')
           mkdir -p "$RUNNER_TEMP/bin"
-          id=$(docker create "ghcr.io/$owner/rust-ci-runner@$RUNNER_IMAGE_DIGEST")
+          id=$(docker create "ghcr.io/$owner/rust-ci-runner@$RUNNER_IMAGE_DIGEST" 2> /dev/null) \
+            || { echo "the runner image is not pullable; make the GHCR package public" >&2; exit 1; }
           docker cp "$id:/rust-ci-runner" "$RUNNER_TEMP/bin/rust-ci-runner"
           docker rm "$id" > /dev/null
           chmod +x "$RUNNER_TEMP/bin/rust-ci-runner"
@@ -263,6 +274,7 @@ jobs:
         run: |
           set -eu
           [ "$HAVE_BWS" = true ] || exit 0
+          case $FACTORY_CI_BWS_SERVER_URL in ''|https://*) ;; *) echo "FACTORY_CI_BWS_SERVER_URL must start with https://" >&2; exit 1 ;; esac
           . .github/scripts/factory-ci-secrets.sh
           printf '%s' "$BWS_SHA256" | grep -Eqx '[0-9a-f]{64}' \
             || { echo "BWS_SHA256 is not a pinned digest" >&2; exit 1; }
@@ -286,6 +298,9 @@ jobs:
       - name: job
         id: job
         env:
+          FACTORY_CI_LOG_URL: ${{ secrets.FACTORY_CI_LOG_URL }}
+          FACTORY_CI_LOG_USER: ${{ secrets.FACTORY_CI_LOG_USER }}
+          FACTORY_CI_LOG_TOKEN: ${{ secrets.FACTORY_CI_LOG_TOKEN }}
           ITEM_BLOB: ${{ matrix.blob }}
           FACTORY_CI_BLOB_KEY: ${{ secrets.FACTORY_CI_BLOB_KEY_DOCKER }}
           FACTORY_CI_TOKEN: ${{ secrets.FACTORY_CI_TOKEN_DOCKER }}
@@ -325,8 +340,15 @@ jobs:
         if: always()
         env:
           FACTORY_CI_HEARTBEAT_URL: ${{ secrets.FACTORY_CI_HEARTBEAT_URL }}
+          PLAN_RESULT: ${{ needs.plan.result }}
+          FAIL_TICK: ${{ needs.plan.outputs.fail_tick }}
+          RUN_RESULTS: ${{ needs.run.result }} ${{ needs.run-docker.result }}
         run: |
           set +x
           if [ "$GITHUB_REF" = refs/heads/main ] && [ -n "$FACTORY_CI_HEARTBEAT_URL" ]; then
-            curl -fsS --max-time 10 "$FACTORY_CI_HEARTBEAT_URL" > /dev/null 2>&1 || true
+            suffix=
+            case " $RUN_RESULTS " in *failure*|*cancelled*) suffix=/fail ;; esac
+            { [ "$PLAN_RESULT" = success ] && [ "$FAIL_TICK" != 1 ]; } || suffix=/fail
+            ping=${FACTORY_CI_HEARTBEAT_URL%/}$suffix
+            curl -fsS --max-time 10 "$ping" > /dev/null 2>&1 || true
           fi
