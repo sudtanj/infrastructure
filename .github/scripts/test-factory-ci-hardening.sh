@@ -229,7 +229,7 @@ eq "README names the digest as sha256:<64 hex>" 1 "$([ "$(grep -c 'sha256:<64 he
 eq "README marks FACTORY_CI_BLOB_KEY_DOCKER optional" 1 "$([ "$(grep -m1 'FACTORY_CI_BLOB_KEY_DOCKER' "$here/../../rust-ci-runner/README.md" | grep -c optional)" -ge 1 ] && echo 1 || echo 0)"
 
 # ---------------------------------------------------------------- names (M3)
-for hostile in '$(touch PWNED)' 'a;b' 'A B' '1BAD' '`touch PWNED`' 'A-B' '../x'; do
+for hostile in '$(touch PWNED)' 'a;b' 'A Z' '1BAD' '`touch PWNED`' 'A-Q' '../x'; do
   new_world_hard; mkrow secrets=NPM_TOKEN; printf '%s\n' "$hostile" | sed "s|PWNED|$W/pwned|" > "$W/state/prepare.names"; store_add NPM_TOKEN v-12345
   run_job
   eq "hostile name [$hostile]: refused" 1 "$([ "$RC" -ne 0 ] && echo 1 || echo 0)"
@@ -257,8 +257,8 @@ new_world_hard; mkrow secrets=SHORTY; names SHORTY; store_add SHORTY "$(printf '
 eq "short second line: refused" 0 "$([ "$RC" -eq 0 ] && echo 1 || echo 0)"; lacks "short second line: first line not printed" "$OUT$ERR$(reason)" longenough1; rm -rf "$W"
 
 # ---------------------------------------------------------------- metadata block and flags (M7, FR-054)
-new_world_hard; mkrow fail_closed=true retry=true; names; store_add FACTORY_CI_LOG_URL https://loki.example.com; store_add FACTORY_CI_LOG_USER u-1234; store_add FACTORY_CI_LOG_TOKEN t-12345
-run_job; sl=$(cat "$W/state/sudo.log" 2>/dev/null || true)
+new_world_hard; mkrow fail_closed=true retry=true; names
+run_job FACTORY_CI_LOG_URL=https://loki.example.com FACTORY_CI_LOG_USER=u-1234 FACTORY_CI_LOG_TOKEN=t-12345; sl=$(cat "$W/state/sudo.log" 2>/dev/null || true)
 has "block 169.254.169.254" "$sl" "iptables -I DOCKER-USER -d 169.254.169.254 -j DROP"; has "block 168.63.129.16" "$sl" "iptables -I DOCKER-USER -d 168.63.129.16 -j DROP"
 lacks "both blocks come before any runner call" "$sl" "count=1"; lacks "not after the prepare run either" "$sl" "count=2"
 a=$(runner_arg "$(real_n)")
@@ -304,6 +304,174 @@ wf="$here/../workflows/factory-ci-tick.yml"
 bash "$tmp/factory-ci-lint-workflow.sh" "$wf" > /dev/null 2>&1; eq "placeholder tolerated by the lint" 0 "$?"
 FACTORY_CI_LINT_STRICT=1 bash "$tmp/factory-ci-lint-workflow.sh" "$wf" > /dev/null 2>&1; eq "placeholder refused under FACTORY_CI_LINT_STRICT=1" 1 "$([ "$?" -ne 0 ] && echo 1 || echo 0)"
 rm -rf "$tmp"
+
+
+# ================================================================ 003 bootstrap secrets from Actions (T008)
+# Log credentials come from FACTORY_CI_LOG_URL/_USER/_TOKEN in the environment (FR-010 to FR-012),
+# never from Bitwarden (FR-013, I4). Each block names its FR and invariant.
+LOGV=(FACTORY_CI_LOG_URL FACTORY_CI_LOG_USER FACTORY_CI_LOG_TOKEN)
+# Sentinels carry `%`, a newline and nothing shorter than 4 characters per line.
+SENT=("https://loki.sentinel-U1.example/p%41th" "user-sentinel-U2%7" "$(printf 'token-sentinel-L3a%%25\ntoken-sentinel-L3b')")
+mkrow secrets=NPM_TOKEN; BLOB003=$BLOB   # one encryption, reused by every world below
+tick="$here/../workflows/factory-ci-tick.yml"
+
+# logargs MASK MODE: sets LA to VAR=value words; a clear bit gives VAR= (empty) or nothing (unset).
+logargs() {
+  local i; LA=()
+  for i in 0 1 2; do
+    if [ $(($1 >> i & 1)) -eq 1 ]; then LA+=("${LOGV[$i]}=${SENT[$i]}")
+    elif [ "$2" = empty ]; then LA+=("${LOGV[$i]}="); fi
+  done
+}
+# empties MASK: the sorted names of the variables whose bit is clear.
+empties() { local i o=; for i in 0 1 2; do [ $(($1 >> i & 1)) -eq 1 ] || o="$o ${LOGV[$i]}"; done; printf '%s\n' $o | sort | tr '\n' ' ' | sed 's/ $//'; }
+named() { printf '%s' "$1" | grep -o 'FACTORY_CI_LOG_[A-Z]*' | sort -u | tr '\n' ' ' | sed 's/ $//'; }
+# alltext: everything a run printed or left behind, `::add-mask::` lines removed.
+alltext() {
+  printf '%s\n' "$OUT" | grep -v '^::add-mask::' || true
+  printf '%s\n' "$ERR"
+  cat "$W"/rt/* "$W/summary" "$W/gh_out" "$W/gh_summary" 2> /dev/null || true
+}
+# leaks LABEL VALUE...: no line of any VALUE outside a mask line (P2, I2, FR-015).
+leaks() {
+  local label=$1 t v l; shift; t=$(alltext)
+  for v in "$@"; do
+    while IFS= read -r l; do [ "${#l}" -lt 4 ] || lacks "$label: $l" "$t" "$l"; done <<< "$v"
+  done
+}
+# masked LABEL VALUE: every line of 4 or more characters has a mask line, `%` escaped.
+masked() {
+  local l
+  while IFS= read -r l; do [ "${#l}" -lt 4 ] || has "$1: mask for $l" "$OUT" "::add-mask::${l//%/%25}"; done <<< "$2"
+}
+
+# ---- P1 / FR-011 / FR-012 / I1: the plan stops before the first runner call on a partial set.
+for mode in empty unset; do
+  for m in 1 2 3 4 5 6; do
+    t="plan partial mask=$m ($mode)"
+    plan_world; cand_row; logargs $m $mode; run_plan "${LA[@]}"
+    eq "$t: non-zero" 1 "$([ "$RC" -ne 0 ] && echo 1 || echo 0)"
+    eq "$t: no runner call" 0 "$(count runner)"; eq "$t: no store call" 0 "$(bwscalls)"
+    has "$t: reason" "$(cat "$W/gh_summary")" "log credentials incomplete"
+    eq "$t: names exactly the empty variables" "$(empties $m)" "$(named "$(cat "$W/gh_summary")")"
+    eq "$t: no output" "" "$(cat "$W/gh_out")"; leaks "$t" "${SENT[@]}"
+    rm -rf "$W"
+  done
+done
+
+# ---- FR-010: all three set and no Bitwarden token: phase C gets them, masked, no store call.
+plan_world; cand_row; logargs 7 empty; run_plan BWS_ACCESS_TOKEN= HAVE_BWS=false "${LA[@]}"
+eq "plan, logs on, no store token: exit" 0 "$RC"; eq "plan, logs on, no store token: phases" "A C" "$(phases)"
+cenv=$(cat "$W/state/runner.env.2")
+for i in 0 1; do has "plan phase C gets ${LOGV[$i]}" "$cenv" "${LOGV[$i]}=${SENT[$i]}"; done
+has "plan phase C gets the token's first line" "$cenv" "FACTORY_CI_LOG_TOKEN=token-sentinel-L3a%25"
+eq "plan, no store token: no bws call" 0 "$(bwscalls)"
+for i in 0 1 2; do masked "plan logs on, ${LOGV[$i]}" "${SENT[$i]}"; done
+leaks "plan logs on" "${SENT[@]}"; rm -rf "$W"
+# no log variable at all: off, phase C runs without them
+plan_world; cand_row; run_plan BWS_ACCESS_TOKEN= HAVE_BWS=false
+eq "plan, logs off: exit" 0 "$RC"; lacks "plan, logs off: phase C has no log url" "$(cat "$W/state/runner.env.2")" "FACTORY_CI_LOG_URL="; rm -rf "$W"
+
+# ---- FR-011: a 3-character line in any log variable stops the plan; nothing printed.
+for i in 0 1 2; do
+  plan_world; cand_row; logargs 7 empty; LA+=("${LOGV[$i]}=q7Z"); run_plan "${LA[@]}"
+  eq "plan short ${LOGV[$i]}: non-zero" 1 "$([ "$RC" -ne 0 ] && echo 1 || echo 0)"; has "plan short ${LOGV[$i]}: reason" "$(cat "$W/gh_summary")" "under 4 characters"
+  eq "plan short ${LOGV[$i]}: phase C never started" A "$(phases)"; leaks "plan short ${LOGV[$i]}" q7Z "${SENT[@]}"; rm -rf "$W"
+done
+
+# ---- FR-031: a server URL that is not https:// is refused before the first bws call, by both scripts.
+for u in http://bw.example.com ftp://x.example.com bw.example.com "http://" "HTTPS://bw.example.com"; do
+  plan_world; cand_row; run_plan FACTORY_CI_BWS_SERVER_URL="$u"
+  eq "plan refuses server url [$u]" 1 "$([ "$RC" -ne 0 ] && echo 1 || echo 0)"; eq "plan [$u]: no bws call" 0 "$(bwscalls)"
+  has "plan [$u]: reason names the rule" "$(cat "$W/gh_summary")" "https://"; rm -rf "$W"
+  new_world_hard; BLOB=$BLOB003; names NPM_TOKEN; store_add NPM_TOKEN v-12345; run_job FACTORY_CI_BWS_SERVER_URL="$u"
+  eq "job refuses server url [$u]" 1 "$RC"; eq "job [$u]: no bws call" 0 "$(bwscalls)"; has "job [$u]: reason names the rule" "$(reason)" "https://"
+  eq "job [$u]: no real run" 0 "$(real_n)"; rm -rf "$W"
+done
+for u in "" https://vault.bitwarden.eu https://bw.example.com:8443/x; do
+  plan_world; cand_row; run_plan FACTORY_CI_BWS_SERVER_URL="$u"; eq "plan accepts server url [$u]" 0 "$RC"; rm -rf "$W"
+  new_world_hard; BLOB=$BLOB003; names NPM_TOKEN; store_add NPM_TOKEN v-12345; run_job FACTORY_CI_BWS_SERVER_URL="$u"; eq "job accepts server url [$u]" 0 "$RC"; rm -rf "$W"
+done
+
+# ---- FR-011 / FR-012 / P1: the job refuses a partial set first: no runner call, no store call.
+for mode in empty unset; do
+  for m in 1 2 3 4 5 6; do
+    t="job partial mask=$m ($mode)"
+    new_world_hard; BLOB=$BLOB003; names NPM_TOKEN; store_add NPM_TOKEN v-12345; logargs $m $mode; run_job GITHUB_STEP_SUMMARY="$W/summary" "${LA[@]}"
+    eq "$t: exit" 1 "$RC"; has "$t: reason" "$(reason)" "log credentials incomplete"
+    eq "$t: names exactly the empty variables" "$(empties $m)" "$(named "$(reason)")"
+    eq "$t: no runner call (refused first)" 0 "$(count runner)"; eq "$t: no store call" 0 "$(bwscalls)"; eq "$t: no real run" 0 "$(real_n)"
+    leaks "$t" "${SENT[@]}"; rm -rf "$W"
+  done
+done
+# an empty pipeline refuses the same way: logs are not optional once one variable is set
+new_world_hard; BLOB=$BLOB003; names; run_job FACTORY_CI_LOG_URL=${SENT[0]}; eq "job partial, no secrets: refused" 1 "$RC"; has "job partial, no secrets: reason" "$(reason)" "log credentials incomplete"; rm -rf "$W"
+
+# ---- I3 / FR-013: a pipeline with no secret never calls bws, token set or not, logs on or off.
+for m in 0 7; do
+  new_world_hard; BLOB=$BLOB003; names; logargs $m empty; run_job "${LA[@]}"
+  eq "no-secret pipeline, store token set, logs mask=$m: exit" 0 "$RC"; eq "no-secret pipeline, logs mask=$m: zero bws calls (I3)" 0 "$(bwscalls)"
+  rm -rf "$W"
+done
+new_world_hard; BLOB=$BLOB003; names; run_job FACTORY_CI_BWS_PROJECT=; eq "no-secret pipeline, no project: runs" 0 "$RC"; eq "no-secret pipeline, no project: zero bws calls" 0 "$(bwscalls)"; rm -rf "$W"
+# logs on: --quiet-logs and the three variables reach the real run, masked.
+new_world_hard; BLOB=$BLOB003; names; logargs 7 empty; echo "${LOGV[*]}" > "$W/state/dumpnames"; run_job "${LA[@]}"
+n=$(real_n); has "job logs on: --quiet-logs" "$(runner_arg "$n")" "--quiet-logs"
+for i in 0 1 2; do eq "job logs on: ${LOGV[$i]} reaches the real run" "${SENT[$i]}" "$(cat "$W/state/val.${LOGV[$i]}.$n")"; masked "job logs on" "${SENT[$i]}"; done; rm -rf "$W"
+
+# ---- FR-013 / I4: no fallback. Store token unset, the pipeline's secret name set as a plain variable (a GitHub secret).
+new_world_hard; BLOB=$BLOB003; names NPM_TOKEN; echo NPM_TOKEN > "$W/state/dumpnames"
+run_job -BWS_ACCESS_TOKEN HAVE_BWS=false NPM_TOKEN=gh-secret-fallback-99 GITHUB_STEP_SUMMARY="$W/summary"
+eq "no fallback: item refused" 1 "$RC"; has "no fallback: reason" "$(reason)" "no secret store configured"
+eq "no fallback: no real run" 0 "$(real_n)"; eq "no fallback: no bws call" 0 "$(bwscalls)"; leaks "no fallback" gh-secret-fallback-99
+# the status fallback turns the reason into an error status
+BLOB=$BLOB003; run_status; sa=$(tr '\n' ' ' < "$W/state/runner.argv.$(count runner)")
+has "no fallback: status is error" "$sa" "--state error"; has "no fallback: status carries the reason" "$sa" "--description no secret store configured"
+rm -rf "$W"
+
+# ---- P2 / I2 / FR-015: sentinels in every bootstrap variable; masks only, escaped for `%` and newline.
+CT="clone-tok-%sentinel-T1" BT="bws-tok-%sentinel-B2" PS="$(printf 'pipe-sentinel-P3%%\npipe-sentinel-P4')" DT="docker-tok-%sentinel-D5"
+new_world_hard; BLOB=$BLOB003; names NPM_TOKEN; store_add NPM_TOKEN "$PS"; logargs 7 empty
+run_job GITHUB_STEP_SUMMARY="$W/summary" FACTORY_CI_TOKEN="$CT" BWS_ACCESS_TOKEN="$BT" "${LA[@]}"
+eq "sentinels (job): exit" 0 "$RC"; leaks "sentinels (job)" "$CT" "$BT" "$PS" "$KEY" "${SENT[@]}"
+masked "sentinels (job) pipeline secret" "$PS"; for i in 0 1 2; do masked "sentinels (job) ${LOGV[$i]}" "${SENT[$i]}"; done
+rm -rf "$W"
+plan_world; cand_row; logargs 7 empty
+run_plan FACTORY_CI_TOKEN="$CT" BWS_ACCESS_TOKEN="$BT" FACTORY_CI_TOKEN_DOCKER="$DT" "${LA[@]}"
+eq "sentinels (plan): exit" 0 "$RC"; leaks "sentinels (plan)" "$CT" "$BT" "$DT" "$KEY" "$KEYD" "${SENT[@]}"
+for i in 0 1 2; do masked "sentinels (plan) ${LOGV[$i]}" "${SENT[$i]}"; done; rm -rf "$W"
+# refusals print no value either: a 3-character line in the pipeline secret, the other values still valid
+new_world_hard; BLOB=$BLOB003; names NPM_TOKEN; store_add NPM_TOKEN q7Z; logargs 7 empty
+run_job GITHUB_STEP_SUMMARY="$W/summary" FACTORY_CI_TOKEN="$CT" BWS_ACCESS_TOKEN="$BT" "${LA[@]}"
+eq "short pipeline secret: refused" 1 "$RC"; leaks "short pipeline secret" q7Z "$CT" "$BT" "$KEY" "${SENT[@]}"; rm -rf "$W"
+for i in 0 1 2; do
+  new_world_hard; BLOB=$BLOB003; names; logargs 7 empty; LA+=("${LOGV[$i]}=q7Z"); run_job GITHUB_STEP_SUMMARY="$W/summary" "${LA[@]}"
+  eq "job short ${LOGV[$i]}: refused" 1 "$RC"; has "job short ${LOGV[$i]}: reason" "$(reason)" "under 4 characters"; eq "job short ${LOGV[$i]}: no real run" 0 "$(real_n)"
+  leaks "job short ${LOGV[$i]}" q7Z "${SENT[@]}"; rm -rf "$W"
+done
+
+# ---- FR-004 / FR-010 / FR-031: the tick workflow. Which step holds each log secret, and the guards.
+eq "tick: secrets.FACTORY_CI_LOG_ appears 9 times" 9 "$(grep -c 'secrets.FACTORY_CI_LOG_' "$tick")"
+where=$(awk '/^  [a-z][a-z-]*:$/ { job=$1 } /^      - name:/ { sub(/^      - name: */, ""); step=$0 } /secrets\.FACTORY_CI_LOG_/ { print job step }' "$tick" | LC_ALL=C sort | uniq -c | sed "s/^ *//")
+eq "tick: three variables in exactly the plan step and both job steps" "3 plan:plan
+3 run-docker:job
+3 run:job" "$where"
+for v in "${LOGV[@]}"; do
+  eq "tick: $v maps to its own secret 3 times" 3 "$(grep -c "^          $v: \${{ secrets.$v }}$" "$tick")"
+done
+msg='the runner image is not pullable; make the GHCR package public'
+eq "tick: three fetch runner steps" 3 "$(grep -c 'name: fetch runner' "$tick")"
+eq "tick: the fixed GHCR message appears in all three" 3 "$(grep -cF "$msg" "$tick")"
+eq "tick: every docker create is guarded and silent" 3 "$(grep -c 'id=$(docker create .* 2> /dev/null) \\$' "$tick")"
+eq "tick: no bare docker create left" 0 "$(grep 'docker create' "$tick" | grep -vc '2> /dev/null')"
+eq "tick: three install bws steps" 3 "$(grep -c 'name: install bws' "$tick")"
+eq "tick: the https guard appears in all three" 3 "$(grep -cF 'FACTORY_CI_BWS_SERVER_URL must start with https://' "$tick")"
+early=$(awk '/^      - name:/ { instep = ($0 ~ /install bws/); g = 0 } instep && /must start with https:\/\// { g = 1 } instep && /curl|unzip|bws" config/ && !g { bad++ } END { print bad + 0 }' "$tick")
+eq "tick: the guard comes before any download or config in each install bws step" 0 "$early"
+# the existing container-environment test is the LOG_VARS coverage (FR-031: step containers never get the log variables)
+jr="$here/../../rust-ci-runner/tests/job_rules.rs"
+eq "LOG_VARS test exists: the_runner_environment_never_becomes_a_container_environment" 1 "$(grep -c 'fn the_runner_environment_never_becomes_a_container_environment' "$jr")"
+eq "LOG_VARS test checks FACTORY_CI_LOG in -e names" 1 "$([ "$(grep -c 'starts_with("FACTORY_CI_LOG")' "$jr")" -ge 1 ] && echo 1 || echo 0)"
 
 printf '%s checks, %s failed\n' "$total" "$failed"
 [ "$failed" -eq 0 ]
