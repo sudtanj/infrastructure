@@ -17,11 +17,12 @@ if [ "${1:-}" = --self-test ]; then
   tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
   fails=0
   bash "$0" "$wf" "$rel" > "$tmp/good.out" 2>&1 || { echo "FAIL self-test: the good copy does not pass"; cat "$tmp/good.out"; fails=1; }
-  # rule | target (wf or rel) | sed expression
+  # rule | target (wf, rel, self, mir, or yaml for a .yaml copy of wf) | sed expression
   while IFS='|' read -r rule target expr; do
     [ -n "$rule" ] || continue
-    cp "$wf" "$tmp/wf.yml"; cp "$rel" "$tmp/rel.yml"; cp "$(dirname "$wf")/factory-ci-selftest.yml" "$tmp/" 2> /dev/null
-    src=$tmp/wf.yml; [ "$target" = rel ] && src=$tmp/rel.yml; [ "$target" = self ] && src=$tmp/factory-ci-selftest.yml
+    rm -f "$tmp/extra.yaml"; cp "$wf" "$tmp/wf.yml"; cp "$rel" "$tmp/rel.yml"; cp "$(dirname "$wf")/factory-ci-selftest.yml" "$(dirname "$wf")/factory-ci-mirror-images.yml" "$tmp/" 2> /dev/null
+    [ "$target" = yaml ] && cp "$wf" "$tmp/extra.yaml"
+    src=$tmp/wf.yml; [ "$target" = rel ] && src=$tmp/rel.yml; [ "$target" = self ] && src=$tmp/factory-ci-selftest.yml; [ "$target" = mir ] && src=$tmp/factory-ci-mirror-images.yml; [ "$target" = yaml ] && src=$tmp/extra.yaml
     sed -E "$expr" "$src" > "$tmp/m"
     if cmp -s "$tmp/m" "$src"; then echo "FAIL self-test: mutation for $rule changed nothing"; fails=1; continue; fi
     mv "$tmp/m" "$src"
@@ -64,7 +65,7 @@ matrix-ref|wf|s/^( *)B_PRIVATE: .*/&\n\1X: ${{ matrix.blob }}/
 item-name|wf|s/run: bash .github\/scripts\/factory-ci-status.sh/run: echo "$ITEM_BLOB"/
 run-docker-name|wf|s/fromJSON\(needs.plan.outputs.matrix_docker\)/fromJSON(needs.plan.outputs.matrix)/
 bws-scope|wf|s/secrets.FACTORY_CI_TOKEN_DOCKER/secrets.FACTORY_CI_TOKEN/
-blob-key-length|wf|s/-ge 32/-ge 8/
+blob-key-length|wf|s/\{64\} \]\]/{8} ]]/
 no-packages|wf|s/^( *)contents: read/&\n\1packages: read/
 blob-key-scope|wf|s/secrets.FACTORY_CI_BLOB_KEY_DOCKER \}\}$/secrets.FACTORY_CI_BLOB_KEY }}/
 blob-key-scope|wf|s/^( *)FACTORY_CI_TOKEN: \$\{\{ secrets.FACTORY_CI_TOKEN \}\}$/&\n\1FACTORY_CI_BLOB_KEY_DOCKER: ${{ secrets.FACTORY_CI_BLOB_KEY_DOCKER }}/
@@ -90,6 +91,21 @@ selftest-isolated|self|s/^  contents: read/&\n  id-token: write/
 selftest-paths|self|s/^  pull_request:/&\n    paths: ["x"]/
 selftest-checkout|self|s/persist-credentials: false/persist-credentials: true/
 selftest-checkout|self|s/^( *)- uses: actions\/checkout@.*/&\n\1- uses: actions\/checkout@0000000000000000000000000000000000000000/
+tick-on-only-dispatch|wf|s/^  workflow_dispatch:/&\n  "push":/
+tick-on-only-dispatch|wf|s/^  workflow_dispatch:/&\n  push:/
+tick-on-only-dispatch|wf|s/^on:$/on: [workflow_dispatch]\nxon:/
+runs-on-pinned|yaml|s/runs-on: ubuntu-24.04/runs-on: ubuntu-latest/
+uses-pin|rel|s/(actions\/checkout@)[0-9a-f]{40}/\1v4/
+permissions|rel|/^permissions:/d
+tick-environment|wf|s/^    environment: factory-ci-docker$/    environment: factory-ci/
+tick-environment|wf|s/^    environment: factory-ci$/    environment: factory-ci-docker/
+tick-environment|wf|/^  verdict:/,$ s/^    environment: factory-ci-plan$/    environment: factory-ci/
+main-guard|wf|s/^    if: github.ref == 'refs\/heads\/main'$/& || github.event_name == 'x'/
+main-guard|wf|s/(main' && needs.plan.outputs.count !=) '0'/\1 '0' || true/
+main-guard|wf|s/^    if: github.ref == 'refs\/heads\/main' && needs.plan.outputs.count_docker != '0'/& || x/
+main-guard|mir|s/^    if: github.ref == 'refs\/heads\/main'$/& || x/
+selftest-shell|self|s/^  list:/    secrets: inherit\n&/
+selftest-shell|self|s/^  list:/    x: ${{ secrets[1] }}\n&/
 MUTATIONS
   [ "$fails" -eq 0 ] && echo "self-test ok"
   exit "$fails"
@@ -107,6 +123,9 @@ job() { awk -v j="$1" '$0 ~ /^  [A-Za-z0-9_-]+:[ ]*$/ { on = ($1 == j ":") } on'
 # triggers
 has '^  schedule:' && bad no-schedule "a schedule trigger is present"
 has '^  workflow_dispatch:' || bad dispatch "workflow_dispatch is missing"
+# the on: block allows workflow_dispatch only; a flow-style on: hides keys from this reader
+has '^on:[ ]*$' || bad tick-on-only-dispatch "on: is not a block (a flow-style on: is refused)"
+awk '/^on:/ { on = 1; next } /^[^ #]/ { on = 0 } on && /^  [^ #]/' "$wf" | grep -Evq '^  workflow_dispatch:[ ]*$' && bad tick-on-only-dispatch "the on: block has a key other than workflow_dispatch"
 has '^  group: factory-ci-tick$' || bad concurrency-group "group: factory-ci-tick is missing"
 has '^  cancel-in-progress: false$' || bad concurrency-cancel "cancel-in-progress: false is missing"
 has '^permissions: \{\}$' || bad permissions "workflow-level permissions: {} is missing"
@@ -115,10 +134,12 @@ has '^permissions: \{\}$' || bad permissions "workflow-level permissions: {} is 
 # in the bootstrap-exception workflows. Comment lines are not read.
 dir=$(dirname "$wf")
 code() { grep -Ev '^ *#' "$1"; }
-for f in "$dir"/*.yml; do
+for f in "$dir"/*.yml "$dir"/*.yaml; do
   [ -r "$f" ] || continue
   code "$f" | grep 'runs-on:' | grep -Evq 'runs-on: ubuntu-24\.04$' && bad runs-on-pinned "$f: a runs-on is not exactly ubuntu-24.04"
   code "$f" | grep -Eq '(^|[^A-Za-z_-])pull_request_target([^A-Za-z_-]|$)' && bad no-pull-request-target "$f: pull_request_target is present"
+  code "$f" | grep -E '^ *(- )?uses:' | grep -Ev '@[0-9a-f]{40}( |$)' | grep -q . && bad uses-pin "$f: a uses: is not pinned to a 40-hex commit"
+  code "$f" | grep -Eq '^permissions:' || bad permissions "$f: workflow-level permissions: is missing"
   case $f in "$dir"/factory-ci-selftest.yml | "$rel") continue ;; esac
   code "$f" | grep -Eq '(^|[^A-Za-z_-])cargo ' && bad no-cargo "$f: a cargo command outside the bootstrap-exception workflows"
 done
@@ -139,24 +160,32 @@ lines=$(awk '
   }' "$wf" | tr '\n' ' ')
 [ -z "$lines" ] || bad run-expression "\${{ inside run: at line(s) $lines"
 
+# the main-only guard: end-anchored, extra conditions only with &&, never ||
+guard_ok() { printf '%s\n' "$1" | grep -Eq "^    if: github\.ref == 'refs/heads/main'( && .*)?\$" && ! printf '%s\n' "$1" | grep -Fq '||'; }
+# the Environment each tick job runs in (the allowlist)
+want_env() { case $1 in run) echo factory-ci ;; run-docker) echo factory-ci-docker ;; *) echo factory-ci-plan ;; esac; }
 # guards: every job but verdict
 for j in plan run run-docker; do
   t=$(job "$j")
   [ -n "$t" ] || { bad job "job $j is missing"; continue; }
-  printf '%s\n' "$t" | grep -Eq "^    if: .*github\.ref == 'refs/heads/main'" || bad main-guard "job $j has no main-only if:"
-  printf '%s\n' "$t" | grep -Eq '^    environment: factory-ci' || bad environment "job $j has no environment"
+  guard_ok "$(printf '%s\n' "$t" | grep -E '^    if:' | head -1)" || bad main-guard "job $j: the if: is not end-anchored main-only without ||"
+  printf '%s\n' "$t" | grep -Eq '^    environment:' || bad environment "job $j has no environment"
+  printf '%s\n' "$t" | grep -Eqx "    environment: $(want_env "$j")" || bad tick-environment "job $j is not in $(want_env "$j")"
   # the guard step comes before the wrapper call
   g=$(printf '%s\n' "$t" | grep -n 'name: guard, pinned images' | head -1 | cut -d: -f1)
   w=$(printf '%s\n' "$t" | grep -nE 'run: bash \.github/scripts/factory-ci-(plan|job)\.sh' | head -1 | cut -d: -f1)
   { [ -n "$g" ] && [ -n "$w" ] && [ "$g" -lt "$w" ]; } || bad guard-first "job $j: the pinned-image guard is missing or comes after the wrapper"
-  printf '%s\n' "$t" | grep -q -- '-ge 32' || bad blob-key-length "job $j: the guard does not refuse a blob key under 32 characters"
+  printf '%s\n' "$t" | grep -Fq '=~ ^[0-9a-f]{64}$ ]]' || bad blob-key-length "job $j: the guard does not require a 64 lower-case hex blob key"
   for v in RUNNER_IMAGE_DIGEST FACTORY_CI_CLONE_IMAGE FACTORY_CI_DIND_IMAGE; do
     printf '%s\n' "$t" | grep -q "$v: \\\${{ vars\\.$v }}" || bad guard-first "job $j: guard does not read $v"
   done
 done
 v=$(job verdict)
+mirror=$dir/factory-ci-mirror-images.yml
+[ -r "$mirror" ] && { guard_ok "$(grep -E '^    if:' "$mirror" | head -1)" || bad main-guard "$mirror: the if: is not end-anchored main-only without ||"; }
 [ -n "$v" ] || bad job "job verdict is missing"
 printf '%s\n' "$v" | grep -Eq '^    if: always\(\)$' || bad verdict-always "verdict has no if: always()"
+printf '%s\n' "$v" | grep -Eqx '    environment: factory-ci-plan' || bad tick-environment "job verdict is not in factory-ci-plan"
 printf '%s\n' "$v" | grep -Eq '^    needs: \[plan, run, run-docker\]$' || bad verdict-always "verdict does not need plan, run and run-docker"
 printf '%s\n' "$v" | grep -q 'curl -fsS --max-time 10 "\$ping" > /dev/null 2>&1 || true' || bad verdict-ping "the heartbeat is not one quiet curl --max-time 10 that ignores failure"
 printf '%s\n' "$v" | grep -q 'suffix=/fail' || bad verdict-ping "a red tick does not ping /fail"
@@ -206,8 +235,6 @@ job run-docker | grep -q 'matrix_docker' || bad run-docker-name "run-docker does
 job run | grep -q 'outputs\.matrix)' || bad run-docker-name "run does not read matrix"
 job run | grep -q 'name: status fallback' || bad fallback "run has no status fallback step"
 
-# actions pinned to a 40-hex commit
-grep -E '^ *(- )?uses:' "$wf" | grep -Ev '@[0-9a-f]{40}( |$)' | grep -q . && bad uses-pin "a uses: is not pinned to a 40-hex commit"
 
 # bws install, once it exists (T051): checksum and archive listing
 if has 'unzip|\.zip'; then
@@ -244,6 +271,7 @@ if [ -r "$self" ]; then
     printf '%s\n' "$sc" | grep -Eq "(^|[^A-Za-z_-])$t" && bad selftest-isolated "factory-ci-selftest.yml has $t"
   done
   printf '%s\n' "$sc" | grep -Eq '^    paths(-ignore)?:' && bad selftest-paths "factory-ci-selftest.yml filters pull_request by paths"
+  printf '%s\n' "$sc" | grep -Eq 'secrets: *inherit|secrets\[' && bad selftest-shell "factory-ci-selftest.yml has secrets: inherit or secrets["
   [ "$(printf '%s\n' "$sc" | grep -c 'uses: actions/checkout@')" -eq "$(printf '%s\n' "$sc" | grep -c 'persist-credentials: false')" ] \
     || bad selftest-checkout "a checkout in factory-ci-selftest.yml lacks persist-credentials: false"
 else
