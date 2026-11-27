@@ -2,78 +2,84 @@
 
 **Input**: `specs/008-runner-owned-ci/` (spec.md, plan.md; the plan holds the contracts, test names and briefs B1 to B11)
 
-**Tests**: required by Constitution Principle V and FR-028. Rust tests sit beside each task and run only through the `rust-ci-runner` pipeline. No one runs `cargo`, `docker` or a build on the engineer's machine (1 GB); the check there is `bash -n`, grep and review.
+**Tests**: required by Constitution Principle V and FR-028. Rust tests sit beside each task and run only through the `rust-ci-runner` pipeline (and type-check in the selftest). No one runs `cargo`, `docker` or a build on the engineer's machine (1 GB, no docker); the check there is `bash -n`, grep and review.
 
 **Format**: `[ID] [P?] [Story] Description with paths`. `[P]` means no file or ordering conflict with the other `[P]` tasks of its phase. `[owner]` marks a human action.
+
+**Landing**: both landings go to `main` by direct push (PRs return 403): Landing A is T001 to T016, Landing B is T019, T020, T022.
 
 ## Phase 1: Setup
 
 - [x] T001 Amend `.specify/memory/constitution.md` to 1.1.0 (Principle II: the manual workflow holds only `BWS_ACCESS_TOKEN`) and set `.specify/feature.json` to this folder. Done in the commit that adds this folder. Brief: none.
 
-## Phase 2: Shared runner changes (blocks Phase 3; all `[P]` except T003)
+## Phase 2: Shared runner changes (blocks Phase 3; parallel streams)
 
 **Goal**: the parts of the `ci` command that also fix `job`, `plan` and `run`.
 
 - [ ] T002 [P] [US3] Edit `rust-ci-runner/src/ship.rs` and `ship_tests.rs`: `LogConfig::from_env` strips a trailing `/`, then `/loki/api/v1/push`, then a trailing `/`; tests `url_loses_the_push_path_and_slashes`, `url_normalisation_is_idempotent`, `url_with_another_path_is_kept` (FR-015, I3). Brief B1.
-- [ ] T003 [US3] Edit `rust-ci-runner/src/ship.rs` and `ship_tests.rs`: `pub fn probe(cfg, run_id) -> Result<u16, u16>` with a 15 s limit, basic auth, probe labels, no redirects; tests `probe_204_is_ok`, `probe_401_reports_the_code`, `probe_with_no_answer_reports_000_in_time`, `probe_posts_one_line_with_probe_labels_and_basic_auth` (FR-016). After T002 (same files). Brief B1.
-- [ ] T004 [P] [US2] Edit `rust-ci-runner/src/log.rs`: `Log::public_events(bool)` and `public_form(who, text)`; tests `public_mode_prints_only_the_closed_grammar`, `public_mode_drops_the_reason_after_failed_and_skipped`, `public_mode_ships_the_full_text`, `public_mode_refuses_a_bad_name` (FR-018, I1). Brief B2.
-- [ ] T005 [P] [US4] Edit `rust-ci-runner/src/engine.rs`: `command()` removes `BWS_ACCESS_TOKEN`; add `rust-ci-runner/src/engine_tests.rs` with `bws_token_is_absent_from_engine_children` and one `mod` line in `lib.rs` (FR-012, I9). Brief B3.
-- [ ] T006 [P] [US1] Add `rust-ci-runner/src/store.rs`, `store_tests.rs` and `mod` lines in `lib.rs`: `fetch`, `parse_list`, `StoreError`, `Secrets`; the nine tests of the plan's test plan (FR-009, FR-010, FR-011, I8). Brief B4.
-- [ ] T007 [P] [US3] Edit `rust-ci-runner/src/watch.rs`, `watch_tests.rs`, `job.rs`, `job_tests.rs`, `main.rs` (`load_list` only): `watch::read`, `pub(crate)` helpers, `project_dir`, and `local` fails when a passing run dropped lines; tests `read_helper_parses_and_caps_like_the_old_load_list`, `entries_without_branches_match_every_ref`, `run_quiet_logs_fails_when_a_passing_run_dropped_lines` (FR-014, FR-017). Brief B5.
+- [ ] T003 [US3] Edit `rust-ci-runner/src/ship.rs` and `ship_tests.rs`: extract `render(labels, meta, batch)` from `Shipper::body`; `pub fn probe(cfg, run_id, limit: Duration) -> Result<u16, u16>` builds its body through `render` (five labels with `service_name`), one retry on 000, 429 and 5xx; tests `probe_204_is_ok`, `probe_401_reports_the_code`, `probe_with_no_answer_reports_000_in_time`, `probe_retries_once_on_5xx_and_429`, `probe_posts_one_line_with_the_five_labels_and_basic_auth` (FR-016). After T002 (same files). Brief B1.
+- [ ] T004 [P] [US2] Edit `rust-ci-runner/src/log.rs` and `pipeline.rs`: `Log::public_events(bool)`, `public_form`, `FAULTS` and `Log::fault`, `Log::emit` as the single choke point (every printed line starts with `[`); a step named `runner` is refused; tests `public_mode_prints_only_the_closed_grammar`, `public_mode_drops_the_reason_after_failed_and_skipped`, `public_mode_ships_the_full_text`, `public_mode_refuses_a_bad_name`, `fault_accepts_only_the_fixed_list`, `step_named_runner_is_refused` (FR-018, FR-030, I1). Brief B2.
+- [ ] T005 [P] [US4] Edit `rust-ci-runner/src/engine.rs`: `command()` uses `env_clear`, the allowlist, `env_remove("BWS_ACCESS_TOKEN")`; step containers get `--cap-drop ALL --cap-add DAC_OVERRIDE --memory 6g --memory-swap 6g --cpus 3`; create `rust-ci-runner/src/store_tests.rs` with `command_removes_the_inherited_token`, `explicit_env_entry_still_passes`, `engine_child_env_is_the_allowlist`, and the `mod` lines in `lib.rs` (FR-012, FR-024, I9, I10, I11). Brief B3.
+- [ ] T006 [US1] Add `rust-ci-runner/src/store.rs` and append to `store_tests.rs`: `fetch(bws_bin, token, server_url, limit)` with its own `Command` (cleared env, `PATH`, `HOME`, `BWS_ACCESS_TOKEN`, `BWS_SERVER_URL`), `parse_list`, `StoreError`, `Secrets`; the ten store tests of the plan (FR-009, FR-010, FR-011, I8). After T005 (same file, same stream). Brief B3.
+- [ ] T007 [P] [US3] Edit `rust-ci-runner/src/watch.rs`, `watch_tests.rs`, `job.rs`, `job_tests.rs`, `main.rs` (`load_list` only): `watch::read`, `pub(crate)` helpers, `project_dir`, and `local` fails when a passing run dropped lines; tests `read_helper_parses_and_caps_like_the_old_load_list`, `entries_without_branches_match_every_ref`, `run_quiet_logs_fails_when_a_passing_run_dropped_lines` (FR-014, FR-017). Brief B4.
 
 ## Phase 3: User Story 1, 2, 3, 4 - the `ci` command (Priority: P1)
 
 **Goal**: `rust-ci-runner ci` runs the whole job and prints only the closed grammar.
 
-**Independent Test**: `ci_tests` pass in the `rust-ci-runner` pipeline: exit codes, grammar, containment, no secret in output or argv.
+**Independent Test**: `ci_tests` pass in the `rust-ci-runner` pipeline: exit 0 or 1, grammar, containment, no secret in output, argv or engine child environment.
 
-- [ ] T008 [US1] [US2] [US3] [US4] Add `rust-ci-runner/src/ci.rs`: argument parsing and validation, watch gate, `store::fetch`, `LogConfig` from the fetched map, probe, shipper, engine check, `git` clone with the env header and fixed host, `project_dir`, `prepare` with no secrets and the docker gate, `run_pipeline` in quiet public mode, exit-code table, fixed stderr list (FR-006 to FR-008, FR-013, FR-016, FR-017, FR-019 to FR-024). After T002 to T007. Brief B9.
-- [ ] T009 [US1] Edit `rust-ci-runner/src/main.rs` and `lib.rs`: `ci` dispatch, usage text, a panic hook that prints `[runner] internal error` for `ci`, `mod ci;` and `mod ci_tests;` (FR-019). After T008. Brief B9.
-- [ ] T010 [US1] [US2] [US3] [US4] Add `rust-ci-runner/src/ci_tests.rs` with every `ci_tests` row of the plan's test plan and invariants I1, I2, I4 to I7, I10 (FR-028). Stubs for `bws`, `docker`, `git`; `tiny_http` for Loki; clone from a local `file://` repo through the base-URL seam. Also `missing_access_token_exits_2_without_calling_bws`, `ci_leaves_the_process_environment_unchanged`, `engine_fault_during_run_exits_2_with_runner_fault`. Written with T008. Brief B9.
-- [ ] T011 [US1] Edit `rust-ci-runner/.factory-ci.toml` (add `--skip ci_tests::` to the first command and a fourth command `cargo test --lib ci_tests::`, update the comments) and `rust-ci-runner/Cargo.toml` (version 0.2.0) (FR-026, FR-027). After T010. Brief B9.
+- [ ] T008 [US1] [US2] [US3] [US4] Add `rust-ci-runner/src/ci.rs`: strict `parse_args` (canonical `--work`, no repeated flags, no `--`-prefixed values), watch gate with required `id`, `store::fetch`, `LogConfig` from the fetched map, probe, shipper, engine check, identity check, `git init`/`fetch refs/heads/<ref>`/`checkout` with the env header and the protocol seam, `project_dir`, `prepare` with no secrets and the docker gate, `run_pipeline` in quiet public mode, exit 0 or 1, fault lines through `Log::fault`, explicit stdio and cleared env on every child, the full redactor (FR-006 to FR-008, FR-013, FR-016, FR-017, FR-019 to FR-024, FR-030). After T002 to T007. Brief B5.
+- [ ] T009 [US1] Edit `rust-ci-runner/src/main.rs` and `lib.rs`: `ci` dispatch, usage text, read `BWS_ACCESS_TOKEN` once and `remove_var` before any thread, a panic hook that prints `[runner] internal error` for `ci`, `mod ci;` and `mod ci_tests;` (FR-009, FR-019). After T008. Brief B5.
+- [ ] T010 [US1] [US2] [US3] [US4] Add `rust-ci-runner/src/ci_tests.rs` with every `ci_tests` row of the plan's test plan and invariants I1, I2, I4 to I7, I10, I11 (FR-028). Stubs for `bws`, `docker`, `git`; `tiny_http` for Loki and the API; one real `file://` fetch test through the protocol seam; hostile-children test. Written with T008. Brief B5.
+- [ ] T011 [US1] Edit `rust-ci-runner/.factory-ci.toml` (`--locked`, `--skip ci_tests::` on the first command, a fourth command `cargo test --locked --lib ci_tests::`, comments) and `rust-ci-runner/Cargo.toml` (version 0.2.0) (FR-026, FR-027). After T010 and T016. Brief B5.
 
-## Phase 4: User Story 5 - image and release (Priority: P2), parallel with Phases 2 and 3
+## Phase 4: User Story 5 - image, release, selftest, lockfile (Priority: P2), parallel with Phases 2 and 3
 
-**Goal**: a published image with the runner, `docker`, `git`, CA certificates and `bws`.
+**Goal**: a published multi-arch image with the runner, `docker`, `git`, CA certificates and `bws`, and checks that run before the direct push.
 
-**Independent Test**: the release run for `rust-ci-runner-v0.2.0` ends green and prints a digest.
+**Independent Test**: the release run for `rust-ci-runner-v0.2.0` ends green, the smoke step passes and the summary prints both pins.
 
-- [ ] T012 [P] [US5] Rewrite `rust-ci-runner/Dockerfile`: Alpine base pinned by digest (looked up, not guessed), `bws` stage with SHA-256 and `unzip -Z1` checks, `apk add git docker-cli ca-certificates`, binary at `/rust-ci-runner`, non-root user (FR-025). Brief B6.
-- [ ] T013 [P] [US5] Edit `.github/workflows/rust-ci-runner-release.yml` (image for `linux/amd64`, both binary assets kept, digest line kept) and `.github/scripts/factory-ci-lint-workflow.sh` (`release-platforms` rule and its self-test row) (FR-026). Brief B7.
-- [ ] T014 [P] [US1] Edit `.github/factory-ci-repos.toml`: entries for `sudtanj/factory-monorepo` and `sudtanj/infrastructure`; header comment says which keys `ci` reads (FR-006). Brief B8.
+- [ ] T012 [P] [US5] Rewrite `rust-ci-runner/Dockerfile`: `alpine:3.23` by index digest (looked up with `curl`, not typed), one `bws` stage per architecture with `ADD --checksum`, throwaway `unzip` stage, `unzip -p`, `FROM bws-${TARGETARCH}`, `apk add git docker-cli ca-certificates`, `LABEL org.opencontainers.image.source`, binary at `/rust-ci-runner`, non-root user (FR-025). Brief B6.
+- [ ] T013 [P] [US5] Edit `.github/workflows/rust-ci-runner-release.yml`: QEMU by SHA, `provenance: mode=max`, smoke step (amd64 and arm64, `docker create` plus `docker cp`), `gh release create` after the smoke and idempotent, summary naming `RUNNER_IMAGE_DIGEST` and `RUNNER_IMAGE` (FR-026). The lint script stays unchanged. Brief B7.
+- [ ] T014 [P] [US5] Edit `.github/workflows/factory-ci-selftest.yml`: `push` trigger for branches other than `main`; `list` job runs `cargo test --lib --no-run` then `cargo run -q -- plan --check`; `pipeline` job adds a no-push `docker buildx build --platform linux/amd64`; temporary `cargo generate-lockfile` step with artifact upload; header comment records the exception (FR-027, FR-028). Brief B7.
+- [ ] T015 [P] [US1] Edit `.github/factory-ci-repos.toml`: entries for `sudtanj/infrastructure` and `sudtanj/factory-monorepo` with numeric `id` (looked up with `gh api`) and `branches = ["main"]`; header lines: which keys `ci` reads, and that listing a repo also makes the by-hand tick plan it (FR-006). Brief B8.
+- [ ] T016 [US5] After T014 ran on a branch push: download the generated `Cargo.lock` artifact, commit `rust-ci-runner/Cargo.lock`, add `--locked` to every `cargo build` and `cargo test` in the release workflow and the selftest, remove the generator and upload steps (FR-027). Brief B9.
 
-## Gate: bootstrap (the owner or lead; not an engineer task)
+## Gate: bootstrap and owner settings (owner or lead; not engineer tasks)
 
-- [ ] T015 [owner] Merge PR-A (T001 to T014). Start the old `factory-monorepo-ci` with `pipeline = rust-ci-runner` on `main`; it must pass. Push the tag `rust-ci-runner-v0.2.0` on a commit on `main`. Copy the digest from the release summary, then verify it with `docker pull` and `docker run --rm --entrypoint docker <image>@<digest> --version`. Give the digest to the engineer for T016 (spec Assumptions; plan Rollout steps 1 to 3).
+- [ ] T017 [owner] GitHub settings, before the first workflow run (not code): Environment `factory-ci` with a deployment-branch rule for `main` only and the owner as required reviewer; `BWS_ACCESS_TOKEN` only in that Environment; `FACTORY_CI_TOKEN` a read-only fine-grained PAT; the Loki token `logs:write` only; the Bitwarden machine account with read access to one project; a tag ruleset for `rust-ci-runner-v*`. After landing B: a ruleset on `main` (pull request required, code-owner review for `.github/**` and `rust-ci-runner/**`, no force-push, no deletion). Optional: make the GHCR package public so the login step can go.
+- [ ] T018 [owner] Land A (T001 to T016) on `main`. Start the old `factory-monorepo-ci` with `pipeline = rust-ci-runner` on `main`; it must pass. Push the tag `rust-ci-runner-v0.2.0` on a commit on `main`. Copy the digest from the release summary, verify it with `docker pull` and `docker run --rm --entrypoint docker <image>@<digest> --version`. Give the digest to the engineer for T019 (plan Rollout steps 1 to 3).
 
-## Phase 5: User Story 1 - the trimmed workflow (Priority: P1), after T015
+## Phase 5: User Story 1 - the trimmed workflow (Priority: P1), after T018
 
 **Goal**: `factory-monorepo-ci.yml` is a trigger.
 
-**Independent Test**: `test-factory-monorepo-ci.sh` passes in the selftest; the owner's first runs (T018) pass.
+**Independent Test**: `test-factory-monorepo-ci.sh` passes in the selftest; the owner's first runs (T021) pass.
 
-- [ ] T016 [US1] Rewrite `.github/workflows/factory-monorepo-ci.yml`: inputs `repo`, `ref`, `project`; main guard; Environment `factory-ci`; `RUNNER_IMAGE` with the verified digest; steps: pinned checkout, one step with ghcr login over stdin, `mkdir`, one `docker run` as in the plan; job limit 35 minutes; concurrency per repo, ref and project; no summary, no status; header comment states the owner exception and the specs it supersedes (FR-001 to FR-005). Brief B10.
-- [ ] T017 [US1] Add `.github/scripts/test-factory-monorepo-ci.sh` (checks in the plan's test plan, with a `--self-test` that mutates a temp copy) and call it from the `shell` job of `.github/workflows/factory-ci-selftest.yml` (FR-028, SC-001, SC-005). After T016. Brief B10.
-- [ ] T018 [owner] First runs: `sudtanj/infrastructure` ref `main` project `rust-ci-runner`, then `sudtanj/factory-monorepo` ref `main` project `.`. Check: the log holds only grammar lines; Loki holds the step output; a wrong `FACTORY_CI_LOG_USER` fails at the probe; a step reads a file of the clone (mount path check) (SC-001, SC-004, SC-006; plan pre-mortem 1 and 2).
+- [ ] T019 [US1] Rewrite `.github/workflows/factory-monorepo-ci.yml`: inputs `repo`, `ref`, `project`; main guard; Environment `factory-ci`; `RUNNER_IMAGE` with the verified digest; pinned checkout, one step with temporary `DOCKER_CONFIG`, quiet login over stdin, `mkdir`, one quoted `docker run -q` as in the plan; job limit 45 minutes; concurrency per repo, ref and project; no summary, no status; no `--allow-docker`; header comment states the owner exception, the specs it supersedes and never a self-hosted runner (FR-001 to FR-005). Brief B10.
+- [ ] T020 [US1] Add `.github/scripts/test-factory-monorepo-ci.sh` (plain grep checks of the plan's test plan, no self-mutation) and call it from the `shell` job of `.github/workflows/factory-ci-selftest.yml` (FR-028, SC-001, SC-005). After T019. Brief B10.
+- [ ] T021 [owner] First runs, after T017: `sudtanj/infrastructure` ref `main` project `rust-ci-runner`, then `sudtanj/factory-monorepo` ref `main` project `.`. Check: the log holds only grammar lines; Loki holds the step output with `service_name="factory-ci"`; a wrong `FACTORY_CI_LOG_USER` fails at the probe; a step reads and writes a file of the checkout (mount path and ownership check) (SC-001, SC-004, SC-006; plan pre-mortem 1 and 2).
 
 ## Phase 6: Polish (last)
 
-- [ ] T019 Update `README.md` (section "Run factory-monorepo CI by hand", secrets and variables, the owner exception) and `rust-ci-runner/README.md` (command list with `ci`, image contents, release and bootstrap order, minimal-output rule); state whether the GitHub repository description changes and give the text for the owner to apply (FR-029). Last task. Brief B11.
+- [ ] T022 Update `README.md` (section "Run factory-monorepo CI by hand", secrets and variables, the owner exception, the selftest exception, oversize-line behaviour, owner settings of T017) and `rust-ci-runner/README.md` (command list with `ci`, image contents, release and bootstrap order, minimal-output rule); mark `specs/005-plain-actions-ci/spec.md`, `specs/006-runner-unit-tests/spec.md` and `specs/007-runner-image/spec.md` as superseded in part by 008; state whether the GitHub repository description changes and give the text for the owner to apply (FR-029, FR-031). Last task. Brief B11.
 
 ## Dependencies
 
-- T001 done. T002 then T003 (same files). T004, T005, T006, T007 independent of each other and of T002. T012, T013, T014 independent of everything in Phases 2 and 3.
-- T008 needs T002 to T007. T009 and T010 need T008. T011 needs T010.
-- T015 needs T001 to T014 merged. T016 needs T015. T017 needs T016. T018 needs T016. T019 needs T017 and T018 (it documents what ran).
-- User stories: US3 is T002, T003, T007 plus T008; US2 is T004 plus T008; US4 is T005, T006 plus T008; US1 is T006, T008 to T011, T014, T016 to T018; US5 is T012, T013, T015.
+- T001 done. T002 then T003 (same files). T005 then T006 (same file). T004, T007 independent of each other and of T002. T012 to T015 independent of Phases 2 and 3.
+- T016 needs T014 pushed on a branch and its selftest run finished. T008 needs T002 to T007. T009 and T010 need T008. T011 needs T010 and T016.
+- T018 needs T001 to T016 landed. T019 needs T018. T020 needs T019. T021 needs T017 and T019. T022 needs T020 and T021 (it documents what ran).
+- User stories: US3 is T002, T003, T007 plus T008; US2 is T004 plus T008; US4 is T005, T006 plus T008; US1 is T006, T008 to T011, T015, T019 to T021; US5 is T012, T013, T014, T016, T018.
+- FR coverage: FR-001 to FR-005 T019, T020; FR-006 T008, T015; FR-007 T008; FR-008 T008; FR-009 T006, T009; FR-010, FR-011 T006, T008; FR-012 T005; FR-013 T008; FR-014 T007, T008; FR-015 T002; FR-016 T003, T008; FR-017 T007, T008; FR-018 T004; FR-019 T004, T008, T009; FR-020 T008; FR-021 to FR-023 T008; FR-024 T005, T008; FR-025 T012; FR-026 T011, T013; FR-027 T011, T014, T016; FR-028 T010, T020; FR-029 T022; FR-030 T004, T005, T008; FR-031 T022.
 
 ## Parallel execution
 
-- Group 1 (start together): T002 then T003 in one stream; T004; T005; T006; T007; T012; T013; T014. `lib.rs` gets one line each from T005 and T006: merge by keeping both.
-- Group 2: T008, T009, T010, T011, one engineer.
-- Group 3: T016 then T017, after the gate.
-- Last: T019.
+- Group 1 (start together): T002 then T003; T004; T005 then T006; T007; T012; T013 with T014; T015. T016 after T014 is pushed and its run is done.
+- Group 2: T008, T009, T010, T011, one engineer, after Group 1 and T016.
+- Group 3: T019 then T020, after the gate.
+- Last: T022.
 
 ## Implementation strategy
 
-MVP is Phase 2 plus Phase 3 plus Phase 4, merged as PR-A, because the workflow cannot change before the image exists. PR-B (T016, T017, T019) follows the gate. Each phase can be reviewed alone. Stop after PR-A if the owner wants to review the runner before the workflow changes: the old workflow keeps working on the 0.1.0 digest.
+MVP is Phase 2 plus Phase 3 plus Phase 4, landed as A, because the workflow cannot change before the image exists. B (T019, T020, T022) follows the gate. Stop after A if the owner wants to review the runner before the workflow changes: the old workflow keeps working on the 0.1.0 digest.

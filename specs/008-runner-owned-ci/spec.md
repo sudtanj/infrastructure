@@ -23,7 +23,7 @@
 - Q: Which TOML names what to run? → A: The existing watch list `.github/factory-ci-repos.toml`, unchanged in format. An entry says which repo may run (`repo`), which refs may run (`branches`, default all) and whether docker steps are allowed (`allow_docker`). It has no project key, because the tick finds projects by walking the tree, so the project is a workflow input (default `.`). A new key would change what the tick plans.
 - Q: Does a step get pipeline secrets? → A: No, as in 005. The runner looks up no secret for steps, so a step that declares `secrets` fails the run. Bitwarden is read only for the four bootstrap keys.
 - Q: Native Bitwarden client or `bws`? → A: `bws` 2.1.0, pinned by the SHA-256 the 003 branch already uses (`f59ee150e42b82128d437087e9bac920053c6bfddcb960d20ce9386e5ac9bba6` for the x86_64 musl zip). A native client would have to re-implement token decoding, key derivation and AES-CBC-HMAC decryption of every secret: more security-critical code than the whole `ci` command, with no upstream test suite. The `bws` call is a child process and the token travels in its environment.
-- Q: Which architectures does the image have? → A: `linux/amd64` only. The only consumer is the hosted `ubuntu-24.04` runner. An arm64 image would need QEMU in the release build and an aarch64 `bws` asset whose hash and existence are unverified. The arm64 binary stays a release asset. See the owner question in `plan.md`.
+- Q: Which architectures does the image have? → A: `linux/amd64` and `linux/arm64`, as in 007. Owner decision (Q1): the image keeps both. `bws` 2.1.0 has an aarch64 musl asset (SHA-256 `eb0f1ae61d1c3b74244d2841233276e05c77e8be4da197ed90fc6248387005e1`), so the Dockerfile has one `bws` stage per architecture, each pinned with `ADD --checksum`, and the release build adds QEMU.
 - Q: What was the cause of the missing Grafana logs? → A: The likely cause is a `FACTORY_CI_LOG_URL` that included `/loki/api/v1/push`; the runner appends the path again. The runner now strips the suffix, probes the store before the first step, and exits non-zero when shipping drops lines.
 - Q: The constitution says Loki credentials come from GitHub. → A: Principle II was amended to 1.1.0 in this feature (T001): the manual pipeline workflow holds only `BWS_ACCESS_TOKEN` and reads the rest from Bitwarden.
 
@@ -43,7 +43,7 @@ The owner opens Actions, starts `factory-monorepo-ci` on `main` with a repo, a r
 2. **Given** a step fails, **When** the run ends, **Then** the job fails, the log shows `[step] failed in Ns` and `[runner] pipeline failed`, and no reason.
 3. **Given** the workflow is started from a branch other than `main`, **When** the job is evaluated, **Then** it does not run.
 4. **Given** repo `sudtanj/infrastructure`, ref `main`, project `rust-ci-runner`, **When** the run ends, **Then** the unit tests of the runner ran through the released image.
-5. **Given** a repo that is not in `.github/factory-ci-repos.toml`, or a ref that no `branches` pattern of its entry matches, **When** the runner starts, **Then** it exits 2 before it reads Bitwarden.
+5. **Given** a repo that is not in `.github/factory-ci-repos.toml`, or a ref that no `branches` pattern of its entry matches, **When** the runner starts, **Then** it exits 1 before it reads Bitwarden.
 
 ---
 
@@ -77,8 +77,8 @@ The owner saw no logs in Grafana and nothing said so. The runner now fixes the U
 
 1. **Given** `FACTORY_CI_LOG_URL` ends with `/`, `/loki/api/v1/push` or `/loki/api/v1/push/`, **When** the settings load, **Then** the stored URL has none of those endings.
 2. **Given** correct settings, **When** the probe posts one line, **Then** stdout shows `[runner] log store answered HTTP 204` and the first step starts.
-3. **Given** the store answers a non-2xx code or nothing within 15 s, **When** the probe ends, **Then** the runner exits 2 with the fixed hint and starts no step.
-4. **Given** the pipeline passed but a push was dropped, **When** the runner finishes, **Then** it exits 3 and prints `log lines were dropped`.
+3. **Given** the store answers a non-2xx code, or nothing within 15 s, after one retry for no answer, 429 and 5xx, **When** the probe ends, **Then** the runner exits 1 with a fixed line (the hint only for 401 and 403) and starts no step.
+4. **Given** the pipeline passed but a push was dropped, **When** the runner finishes, **Then** it prints `[runner] log lines were dropped` and exits 1.
 
 ---
 
@@ -92,7 +92,7 @@ A branch of a watched repo carries a malicious `.factory-ci.toml`. The runner ho
 
 **Acceptance Scenarios**:
 
-1. **Given** a step has `docker = true`, **When** the runner reads the file, **Then** it exits 2 with `docker steps are refused` before it starts any container. The flag `--allow-docker` lifts this only when the watch entry also sets `allow_docker = true`.
+1. **Given** a step has `docker = true`, **When** the runner reads the file, **Then** it exits 1 with `docker steps are refused` before it starts any container. The flag `--allow-docker` lifts this only when the watch entry also sets `allow_docker = true`.
 2. **Given** a step declares `secrets`, **When** the runner prepares the run, **Then** the run fails before any container and no value is looked up.
 3. **Given** any step container, **When** it starts, **Then** its argv holds no docker socket mount and its environment holds no bootstrap value.
 
@@ -113,18 +113,19 @@ The release builds an image with the runner, a docker CLI, git, CA certificates 
 
 ### Edge Cases
 
-- `ref` has a leading `-`, contains `..`, or uses characters outside `[A-Za-z0-9._/-]`: the runner exits 2 before it reads Bitwarden.
-- `project` is not `.` or a top-level folder name, or is a symlink or leaves the clone: exit 2.
-- `BWS_ACCESS_TOKEN` is unset or empty: exit 2, fixed text, no `bws` call.
-- Bitwarden holds zero or two secrets with one of the four keys: exit 2, names the key and the count, never a value. A value that is empty, multi-line, shorter than 4 characters or padded with whitespace: exit 2.
-- Bitwarden is down or slow: each call has a time limit, one retry, then exit 2.
+- `ref` has a leading `-`, contains `..`, or uses characters outside `[A-Za-z0-9._/-]`: the runner exits 1 before it reads Bitwarden.
+- `project` is not `.` or a top-level folder name, or is a symlink or leaves the clone: exit 1.
+- `BWS_ACCESS_TOKEN` is unset or empty: exit 1, fixed text, no `bws` call.
+- Bitwarden holds zero or two secrets with one of the four keys: exit 1, names the key and the count, never a value. A value that is empty, multi-line, shorter than 4 characters or padded with whitespace: exit 1.
+- Bitwarden is down or slow: each call has a time limit, one retry, then exit 1.
 - The Loki URL is not https (except loopback), carries a user name, or has a path other than the push path: refused or kept as given, never doubled.
-- The docker socket is missing or its group is not added: exit 2 with `cannot reach the container engine`, before the clone.
-- The work directory is missing, relative, or contains `:`: exit 2.
-- The clone times out or the ref does not exist: exit 2 with `clone failed`; git's own text goes to Loki, redacted.
+- The docker socket is missing or its group is not added: exit 1 with `cannot reach the container engine`, before the clone.
+- The work directory is missing, relative, or contains `:`: exit 1.
+- The clone times out or the ref does not exist: exit 1 with `clone failed`; git's own text goes to Loki, redacted.
+- The GitHub API says the repo id differs from the watch entry (renamed, moved, name taken), or answers an error: exit 1 with `repository identity check failed`, before the fetch.
 - Two runs of the same repo, ref and project start together: they queue.
 - The step runs longer than the run deadline of 30 minutes: the runner ends it and exits 1. The job limit is longer than the runner deadline.
-- Loki fails after the probe passed: the run goes on, the exit code is 3 if it would have been 0.
+- Loki fails after the probe passed: the run goes on, and a pass ends with `[runner] log lines were dropped` and exit 1.
 - A step prints more than 10 MB: the log is cut and Loki gets the cut notice.
 - The runner image has no digest or a wrong one: the pull fails, the job fails.
 
@@ -134,39 +135,39 @@ The release builds an image with the runner, a docker CLI, git, CA certificates 
 
 **Workflow**
 
-- **FR-001**: `factory-monorepo-ci.yml` MUST start only by `workflow_dispatch` with inputs `repo` (default `sudtanj/factory-monorepo`), `ref` (default `main`) and `project` (default `.`), run only on `main`, in the Environment `factory-ci`, with job permissions `contents: read` and `packages: read` and an empty top-level `permissions`. The job limit is 35 minutes, longer than the runner deadline of 30. Concurrency is per repo, ref and project.
-- **FR-002**: The workflow MUST contain no Bitwarden call, no `jq`, no `curl`, no `git clone`, no output filter and no secret other than `secrets.BWS_ACCESS_TOKEN` and `secrets.GITHUB_TOKEN`. Its only steps are the pinned checkout (for the watch list) and one step that logs in to ghcr.io over stdin, creates the work directory and runs one `docker run`.
-- **FR-003**: The `docker run` MUST use the image in the env line `RUNNER_IMAGE` (`ghcr.io/sudtanj/rust-ci-runner:<version>@sha256:<digest>`), mount the host socket, mount the work directory `$RUNNER_TEMP/ci` at the identical path, mount the watch list read-only, and run as the runner user with the socket's group added, `--cap-drop ALL`, `--security-opt no-new-privileges`, `--read-only` and a tmpfs for `/tmp`. It passes `BWS_ACCESS_TOKEN`, `GITHUB_RUN_ID` and `FACTORY_CI_BWS_SERVER_URL` by name only (`-e NAME`), never by value in argv.
+- **FR-001**: `factory-monorepo-ci.yml` MUST start only by `workflow_dispatch` with inputs `repo` (default `sudtanj/factory-monorepo`), `ref` (default `main`) and `project` (default `.`), run only on `main`, in the Environment `factory-ci`, with job permissions `contents: read` and `packages: read` and an empty top-level `permissions`. The job limit is 45 minutes (the budgets sum to about 38), longer than the runner deadline of 30. Concurrency is per repo, ref and project. The header comment says the job must never run on a self-hosted runner.
+- **FR-002**: The workflow MUST contain no Bitwarden call, no `jq`, no `curl`, no `git clone`, no output filter and no secret other than `secrets.BWS_ACCESS_TOKEN` and `secrets.GITHUB_TOKEN`. Its only steps are the pinned checkout (for the watch list) and one step that logs in to ghcr.io over stdin with a temporary `DOCKER_CONFIG`, creates the work directory and runs one `docker run`. The `run:` block holds at most 25 lines.
+- **FR-003**: The `docker run` MUST be `docker run -q`, use the image in the env line `RUNNER_IMAGE` (`ghcr.io/sudtanj/rust-ci-runner:<version>@sha256:<digest>`), mount the host socket, mount the work directory `$RUNNER_TEMP/ci` at the identical path, mount the watch list read-only, and run with `--init`, as the runner user (`--user $(id -u):$(id -g)`) with the socket group added (`--group-add $(stat -c %g /var/run/docker.sock)`), `--cap-drop ALL`, `--security-opt no-new-privileges`, `--read-only`, `--tmpfs /tmp:rw,size=64m` and `HOME=/tmp`. It passes `BWS_ACCESS_TOKEN`, `GITHUB_RUN_ID` and `FACTORY_CI_BWS_SERVER_URL` by name only (`-e NAME`), never by value in argv. Every variable in the command is quoted and the workflow never passes `--allow-docker`. The image pull happens inside this command. The login uses a temporary `DOCKER_CONFIG` removed on exit and prints nothing.
 - **FR-004**: Every input and context value MUST reach the script through `env:`. No `${{ }}` sits inside a `run:` block.
 - **FR-005**: The workflow MUST NOT post commit statuses or write a job summary.
 
 **CLI**
 
-- **FR-006**: The runner MUST gain `rust-ci-runner ci --repos FILE --repo OWNER/NAME --ref REF [--project PATH] --work DIR [--allow-docker]`. It reads the watch list, requires an entry for `--repo` whose `branches` match `--ref`, and exits 2 otherwise, before it reads Bitwarden.
-- **FR-007**: The runner MUST validate `--ref` (`[A-Za-z0-9._/-]`, 1 to 200 characters, no leading `-`, no `..`), `--project` (`.` or a top-level folder name that passes `folder_name_ok`) and `--work` (absolute, no `:`, an existing directory) before any other work.
-- **FR-008**: Exit codes MUST be: 0 the pipeline passed and every log line was delivered; 1 the pipeline failed; 2 a setup fault or refusal; 3 the pipeline passed and a log line was dropped.
+- **FR-006**: The runner MUST gain `rust-ci-runner ci --repos FILE --repo OWNER/NAME --ref REF [--project PATH] --work DIR [--allow-docker]`. It reads the watch list, requires an entry for `--repo` that has a numeric `id` and whose `branches` match `--ref`, and exits 1 otherwise, before it reads Bitwarden.
+- **FR-007**: The runner MUST validate `--ref` (`[A-Za-z0-9._/-]`, 1 to 200 characters, no leading `-`, no `..`), `--project` (`.` or a top-level folder name that passes `folder_name_ok`) and `--work` (absolute, no `:`, an existing directory, equal to its canonical path) before any other work, and MUST refuse a repeated flag, an unknown flag, and any flag value that starts with `--`.
+- **FR-008**: Exit codes MUST be: 0 the pipeline passed and every log line was delivered; 1 anything else. A pass that dropped log lines prints `[runner] log lines were dropped` and exits 1.
 
 **Secrets**
 
-- **FR-009**: The runner MUST read `BWS_ACCESS_TOKEN` and run `bws secret list -o json` as a child process with a 60 s limit and one retry (none after a rejected token), the token only in the child's environment, never in argv. `FACTORY_CI_BWS_SERVER_URL`, when set and not empty, must start with `https://` and goes to the child as `BWS_SERVER_URL`.
+- **FR-009**: The runner MUST read `BWS_ACCESS_TOKEN` once at start and remove it from its own process environment before any thread starts, then run `bws secret list -o json` as a child process with a per-attempt limit (60 s in production, a parameter) and one retry (none after a rejected token). The child is spawned with a cleared environment holding only `PATH`, `HOME`, `BWS_ACCESS_TOKEN` and `BWS_SERVER_URL`; the token is never in argv. `FACTORY_CI_BWS_SERVER_URL`, when set and not empty, must be https on `vault.bitwarden.com` or `vault.bitwarden.eu` and goes to the child as `BWS_SERVER_URL`.
 - **FR-010**: The runner MUST require exactly one secret for each of `FACTORY_CI_TOKEN`, `FACTORY_CI_LOG_URL`, `FACTORY_CI_LOG_USER` and `FACTORY_CI_LOG_TOKEN`, and refuse a value that is empty, has CR, LF or NUL, has leading or trailing whitespace, or is shorter than 4 characters. Errors name keys and counts only.
-- **FR-011**: The fetched values MUST stay in memory. They MUST NOT be set in the runner's own environment, passed to step containers, or printed. The redactor MUST cover all four values, the access token, and their base64 forms.
-- **FR-012**: Every engine child process MUST be started without `BWS_ACCESS_TOKEN` in its environment.
+- **FR-011**: The fetched values MUST stay in memory. They MUST NOT be set in the runner's own environment, passed to step containers, or printed. The redactor MUST cover all four values, the access token, their base64 forms and the base64 of `x-access-token:<FACTORY_CI_TOKEN>`.
+- **FR-012**: Every engine child process MUST start with a cleared environment plus an allowlist (`PATH`, `HOME`, `DOCKER_HOST`, `DOCKER_CONFIG`, `DOCKER_CERT_PATH`, `DOCKER_TLS_VERIFY`, `XDG_RUNTIME_DIR`) and the call's explicit entries, and never inherit `BWS_ACCESS_TOKEN`. No bootstrap value reaches an engine child or a step container; `git` and `bws` children receive only what they need.
 
 **Clone**
 
-- **FR-013**: The runner MUST clone `https://github.com/<repo>.git` at `--ref` with depth 1, no tags and no submodules, into a new directory under `--work`, with `git` as a child process. The host is fixed; no environment variable changes it. The clone token travels in git's environment as an `http.https://github.com/.extraHeader` entry, never in argv or `.git/config`. The clone has a 300 s limit and `GIT_ALLOW_PROTOCOL=https`.
+- **FR-013**: The runner MUST fetch `https://github.com/<repo>.git` into a new directory under `--work` with `git` as a child process: `git init`, then `git fetch --depth 1 --no-tags -- <url> refs/heads/<ref>` (only a branch can match, never a tag), then `git checkout --detach FETCH_HEAD`; no submodules. The host is fixed; no environment variable changes it. Before the fetch the runner MUST compare the `id` of `GET /repos/<repo>` on the GitHub API with the watch entry's `id`, and refuse on a mismatch or an error. The clone token travels in git's environment as an `http.https://github.com/.extraHeader` entry (`Authorization: basic base64("x-access-token:<token>")`), never in argv or `.git/config`. The fetch has a 300 s limit. The allowed protocol (`GIT_ALLOW_PROTOCOL`) and the base URL are parameters of the code: production `https`, tests `file`.
 - **FR-014**: The project directory MUST be a real directory inside the clone, not a link. `.factory-ci.toml` MUST be a regular file, not a link.
 
 **Loki**
 
 - **FR-015**: `LogConfig` loading MUST strip trailing `/` and then a trailing `/loki/api/v1/push` (and a `/` after it) from the URL, for every command that loads it. Normalising twice gives the same result.
-- **FR-016**: Before the first container, the runner MUST post one probe line to the store (15 s limit, https, basic auth, labels `repo`, `project=probe`, `step=probe`, `stream=stdout`), print `[runner] log store answered HTTP <code>` (`000` when nothing answered), and exit 2 on a non-2xx code with the hint: `check FACTORY_CI_LOG_URL (host only, e.g. https://logs-prod-xxx.grafana.net), FACTORY_CI_LOG_USER (numeric user id) and FACTORY_CI_LOG_TOKEN (needs logs:write)`.
-- **FR-017**: At the end, the runner MUST wait for the shipper to drain and, if a line was dropped, print `[runner] log lines were dropped` and return exit 3 (or 1 when the pipeline failed). `run --quiet-logs` MUST apply the same rule.
+- **FR-016**: Before the first container, the runner MUST post one probe line to the store (15 s limit, https, basic auth, retried once on no answer, 429 and 5xx), built by the same code as every other push body so it carries the same five labels (`service_name`, `repo`, `project=probe`, `step=probe`, `stream=stdout`). It prints `[runner] log store answered HTTP <code>` (`000` when nothing answered) and exits 1 on a non-2xx code. The hint `check FACTORY_CI_LOG_URL (host only, e.g. https://logs-prod-xxx.grafana.net), FACTORY_CI_LOG_USER (numeric user id) and FACTORY_CI_LOG_TOKEN (needs logs:write)` prints only for 401 and 403.
+- **FR-017**: At the end, the runner MUST wait for the shipper to drain and, if a line was dropped on a passing run, print `[runner] log lines were dropped` and exit 1. `run --quiet-logs` MUST apply the same rule.
 
 **Minimal output**
 
-- **FR-018**: In `ci` mode stdout MUST carry only these lines: `[<name>] started`, `[<name>] success in <N>s`, `[<name>] failed in <N>s`, `[<name>] skipped`, `[runner] pipeline passed`, `[runner] pipeline failed`, `[runner] log store answered HTTP <code>`, `[runner] log lines were dropped`. `<name>` is a step name (`[A-Za-z0-9_-]`, 1 to 64 characters) or `runner`. The runner MUST drop the reason after `failed in Ns` and after `skipped` from the printed line. Loki gets the full text.
+- **FR-018**: In `ci` mode stdout MUST carry only these lines: `[<name>] started`, `[<name>] success in <N>s`, `[<name>] failed in <N>s`, `[<name>] skipped`, `[runner] pipeline passed`, `[runner] pipeline failed`, `[runner] log store answered HTTP <code>`, `[runner] log lines were dropped`. `<name>` is a step name (`[A-Za-z0-9_-]`, 1 to 64 characters, never `runner`, which is reserved and refused as a step name) or `runner`. The runner MUST drop the reason after `failed in Ns` and after `skipped` from the printed line. Loki gets the full text.
 - **FR-019**: In `ci` mode stderr MUST carry only fixed fault lines `[runner] <text>` from a closed list in `plan.md`. No error text from git, bws, docker, TOML parsing or a panic reaches stdout or stderr. The detail goes to Loki once the store is proven, redacted.
 - **FR-020**: Step output MUST go to Loki only.
 
@@ -174,23 +175,25 @@ The release builds an image with the runner, a docker CLI, git, CA certificates 
 
 - **FR-021**: The runner MUST refuse a step with `docker = true` before it starts any container, unless `--allow-docker` is given and the watch entry has `allow_docker = true`. With `--allow-docker`, `FACTORY_CI_DIND_IMAGE` must be a digest-pinned reference, as in `job`.
 - **FR-022**: The runner MUST look up no step secret. A step that declares `secrets` fails the run before any container.
-- **FR-023**: Before the clone, the runner MUST check the engine answers (`docker version`) and exit 2 with `cannot reach the container engine` if not.
-- **FR-024**: Step containers MUST NOT get the docker socket, and the bind-mount source for `/workspace` MUST be the same string as the path the runner sees. Workspace paths are never rewritten.
+- **FR-023**: Before the clone, the runner MUST check the engine answers (`docker version`) and exit 1 with `cannot reach the container engine` if not.
+- **FR-024**: Step containers MUST NOT get the docker socket, and the bind-mount source for `/workspace` MUST be the same string as the path the runner sees. Workspace paths are never rewritten. Step containers MUST run with `--cap-drop ALL` plus the single `--cap-add DAC_OVERRIDE` (root must write the uid-1001 checkout), `--memory 6g`, `--memory-swap 6g`, `--cpus 3`, and never with `--privileged`, `--pid`, `--network host`, another `--cap-add`, another `-v`, or `docker.sock` in argv.
 
 **Image and release**
 
-- **FR-025**: The image MUST be `linux/amd64`, built from a base pinned by digest, hold `/rust-ci-runner`, a docker CLI, `git`, CA certificates and `bws` 2.1.0, and run as a non-root user. The `bws` zip MUST be checked against `f59ee150e42b82128d437087e9bac920053c6bfddcb960d20ce9386e5ac9bba6` and list exactly `bws`, or the build fails.
-- **FR-026**: `rust-ci-runner-release.yml` MUST build and push that image, keep both binary release assets, keep the `RUNNER_IMAGE_DIGEST` summary line, and publish version 0.2.0 (`Cargo.toml` and the tag agree). The lint `factory-ci-lint-workflow.sh` and its self-test rows MUST match the new platform string.
-- **FR-027**: Only `rust-ci-runner-release.yml` MUST compile the runner. `rust-ci-runner/.factory-ci.toml` MUST run all `--lib` tests, one extra process for the new modules, through the released image.
+- **FR-025**: The image MUST be `linux/amd64` and `linux/arm64`, built from `alpine:3.23` pinned by the multi-arch index digest, hold `/rust-ci-runner`, a docker CLI, `git`, CA certificates and `bws` 2.1.0, carry `LABEL org.opencontainers.image.source=https://github.com/sudtanj/infrastructure`, and run as a non-root user. Each `bws` zip MUST be fetched with `ADD --checksum=sha256:...` (amd64 `f59ee150e42b82128d437087e9bac920053c6bfddcb960d20ce9386e5ac9bba6`, arm64 `eb0f1ae61d1c3b74244d2841233276e05c77e8be4da197ed90fc6248387005e1`) and extracted with `unzip -p bws.zip bws > bws` in a throwaway stage; a hash mismatch fails the build. The digest and hashes are copied from a lookup, not typed.
+- **FR-026**: `rust-ci-runner-release.yml` MUST build both binaries with `--locked`, build and push the image (QEMU, `provenance: mode=max`), smoke-test the pushed digest with the workflow's `docker run` flags (`git --version`, `docker version`, `bws --version`, plus `docker cp` of `/rust-ci-runner`), and only then create the GitHub release, idempotently (`gh release view "$TAG" >/dev/null 2>&1 || gh release create ...`), keeping both binary assets. Its summary names both digest pins: the tick variable `RUNNER_IMAGE_DIGEST` and `RUNNER_IMAGE` of the manual workflow. It publishes version 0.2.0 (`Cargo.toml` and the tag agree). The lint script and its self-test rows are unchanged because the platforms stay `linux/amd64,linux/arm64`.
+- **FR-027**: Only `rust-ci-runner-release.yml` MUST compile the runner for release. As a conscious pre-merge exception, `factory-ci-selftest.yml` keeps its compile jobs: one runs `cargo test --lib --no-run` so test code type-checks, the other builds the release binary and a no-push `linux/amd64` Dockerfile build. The selftest also runs on a push to any branch except `main`, because pull requests return 403. `rust-ci-runner/Cargo.lock` MUST be committed and every `cargo build` and `cargo test` of the release, the selftest and `rust-ci-runner/.factory-ci.toml` MUST use `--locked`. `rust-ci-runner/.factory-ci.toml` MUST run all `--lib` tests, with one extra process for each of `ship_tests::`, `job_tests::` and `ci_tests::`, through the released image.
 
 **Tests and docs**
 
 - **FR-028**: Each behaviour above MUST have a Rust unit test under `cargo test --lib` that runs in the `rust-ci-runner` pipeline. A shell test of the workflow file MUST run in the `factory-ci-selftest` workflow.
 - **FR-029**: `README.md` and `rust-ci-runner/README.md` MUST describe the new CLI, workflow inputs, image contents, bootstrap order and the minimal-output rule, and the GitHub repository description MUST be checked against them. This is the last task.
+- **FR-030**: Every child process the runner spawns (`bws`, `git`, the engine) MUST have stdin, stdout and stderr set explicitly (null or piped, never inherited) and a cleared environment plus its allowlist. All printed output MUST pass one function, `Log::emit`, which drops any line outside the closed grammar or the fixed fault list; every printed line starts with `[`.
+- **FR-031**: A single log line over the store's per-line limit makes the store reject its batch; the shipper drops it and the run ends with `[runner] log lines were dropped` and exit 1. The README says so; the code adds no cap.
 
 ### Key Entities
-
-- **Watch entry**: `repo`, `branches`, `allow_docker` from `.github/factory-ci-repos.toml`. `id`, `secret_branches` and `secrets` are ignored by `ci`.
+- **Watch entry**: `repo`, `id` (required by `ci`), `branches`, `allow_docker` from `.github/factory-ci-repos.toml`. `secret_branches` and `secrets` are ignored by `ci`.
+- **Run**: one `ci` invocation. Inputs `repo`, `ref`, `project`, `work`. Result is an exit code, 0 or 1.
 - **Run**: one `ci` invocation. Inputs `repo`, `ref`, `project`, `work`. Result is an exit code in 0 to 3.
 - **Bootstrap values**: `BWS_ACCESS_TOKEN` (GitHub) and the four Bitwarden keys.
 - **Public line**: a stdout or stderr line from the closed grammar of FR-018 and FR-019.
@@ -199,10 +202,10 @@ The release builds an image with the runner, a docker CLI, git, CA certificates 
 
 ### Measurable Outcomes
 
-- **SC-001**: One manual start runs a pipeline of a watched repo and ends in under 35 minutes with the runner's exit code, and the `run:` block of the workflow has no more than 15 lines.
+- **SC-001**: One manual start runs a pipeline of a watched repo and ends in under 45 minutes with the runner's exit code, and the `run:` block of the workflow has no more than 25 lines.
 - **SC-002**: Across stdout and stderr of a run and a fixture with hostile content, zero lines fall outside the closed grammar, and zero of the five bootstrap values appear anywhere.
-- **SC-003**: A start from a branch other than `main` runs no job. A repo or ref outside the watch list exits 2 before any Bitwarden call.
-- **SC-004**: With a wrong Loki user, the run exits 2 within 20 seconds of the probe starting and starts no step. With a store that fails after the probe, a passing pipeline exits 3.
+- **SC-003**: A start from a branch other than `main` runs no job. A repo or ref outside the watch list exits 1 before any Bitwarden call.
+- **SC-004**: With a wrong Loki user, the run exits 1 within 20 seconds of the probe starting and starts no step. With a store that fails after the probe, a passing pipeline prints `log lines were dropped` and exits 1.
 - **SC-005**: `cargo test --lib` passes in the `rust-ci-runner` pipeline with the new tests, and the word `cargo` is absent from `factory-monorepo-ci.yml`.
 - **SC-006**: The release publishes a digest, and the first run with that digest passes both `sudtanj/infrastructure` project `rust-ci-runner` and `sudtanj/factory-monorepo`.
 
@@ -213,7 +216,7 @@ The release builds an image with the runner, a docker CLI, git, CA certificates 
 - The machine account is limited to the Bitwarden project `rust-ci-runner`, which holds exactly the four keys.
 - `FACTORY_CI_TOKEN` can read `sudtanj/factory-monorepo` and can clone the public `sudtanj/infrastructure`.
 - The hosted `ubuntu-24.04` runner has a docker daemon, `/var/run/docker.sock` owned by a group that the workflow adds to the container with `--group-add`, and `stat`.
-- `factory-ci-selftest.yml` still compiles the runner on pull requests. The owner decides whether that stays (open question in `plan.md`); this feature leaves it alone.
-- Adding `sudtanj/factory-monorepo` and `sudtanj/infrastructure` to the watch list also makes the by-hand tick plan them. The tick is not in use today.
+- `factory-ci-selftest.yml` keeps its compile jobs as a pre-merge exception (owner decision Q2), changes one to `cargo test --lib --no-run`, and gains a `push` trigger for branches other than `main`.
+- Adding `sudtanj/factory-monorepo` and `sudtanj/infrastructure` to the watch list also makes the by-hand tick plan them (the header of the watch list says so). Both entries carry their numeric `id` and `branches = ["main"]`. The tick is not in use today.
 - The first release of the new image is `rust-ci-runner-v0.2.0`. Release `0.1.0` stays in ghcr.io, so a revert of the workflow works.
-- Out of scope: pipeline secrets for steps, commit statuses, arm64 image, caching, `--locked` (no `Cargo.lock` on `main`), and any change to the tick workflow.
+- Out of scope: pipeline secrets for steps, commit statuses, caching, `cargo deny` and `cargo audit` (follow-up), blocking the metadata endpoint (the ephemeral hosted VM is the containment; the job must never run on a self-hosted runner), and any change to the tick workflow.
