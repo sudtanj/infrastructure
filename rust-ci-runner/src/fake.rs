@@ -70,15 +70,26 @@ fn rfc3339(t: i64) -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + i64::from(m <= 2);
-    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", rem / 3600, rem % 3600 / 60, rem % 60)
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
 }
 
 fn tree_of(entries: &[(&str, &str)]) -> Tree {
     let entries = entries
         .iter()
-        .map(|(p, k)| TreeEntry { path: p.to_string(), kind: k.to_string() })
+        .map(|(p, k)| TreeEntry {
+            path: p.to_string(),
+            kind: k.to_string(),
+        })
         .collect();
-    Tree { entries, ..Tree::default() }
+    Tree {
+        entries,
+        ..Tree::default()
+    }
 }
 
 impl FakeApi {
@@ -112,7 +123,11 @@ impl FakeApi {
         if read {
             s.reads += 1;
         }
-        let err = s.fails.iter().find(|(p, _)| call.starts_with(p.as_str())).map(|(_, e)| e.clone());
+        let err = s
+            .fails
+            .iter()
+            .find(|(p, _)| call.starts_with(p.as_str()))
+            .map(|(_, e)| e.clone());
         s.calls.push(call);
         match err {
             Some(e) => Err(e),
@@ -121,15 +136,28 @@ impl FakeApi {
     }
 
     pub fn set_repo(&self, repo: &str, id: u64, private: bool, default_branch: &str) {
-        let r = Repo { id, private, default_branch: default_branch.to_string() };
+        let r = Repo {
+            id,
+            private,
+            default_branch: default_branch.to_string(),
+        };
         self.st().repos.insert(repo.to_string(), r);
     }
     pub fn set_branch(&self, repo: &str, name: &str, sha: &str) {
-        let b = Branch { name: name.to_string(), sha: sha.to_string() };
-        self.st().branches.entry(repo.to_string()).or_default().push(b);
+        let b = Branch {
+            name: name.to_string(),
+            sha: sha.to_string(),
+        };
+        self.st()
+            .branches
+            .entry(repo.to_string())
+            .or_default()
+            .push(b);
     }
     pub fn set_tree(&self, repo: &str, commit_sha: &str, entries: &[(&str, &str)]) {
-        self.st().trees.insert(key(repo, commit_sha), tree_of(entries));
+        self.st()
+            .trees
+            .insert(key(repo, commit_sha), tree_of(entries));
     }
     pub fn set_tree_truncated(
         &self,
@@ -141,17 +169,36 @@ impl FakeApi {
         let mut s = self.st();
         let pairs: Vec<(&str, &str)> = root.iter().map(|(n, k, _)| (*n, *k)).collect();
         let mut t = tree_of(&pairs);
-        t.shas = root.iter().map(|(n, _, o)| (n.to_string(), o.to_string())).collect();
+        t.shas = root
+            .iter()
+            .map(|(n, _, o)| (n.to_string(), o.to_string()))
+            .collect();
         s.roots.insert(key(repo, commit_sha), t);
         for (obj, entries) in sub {
             s.subs.insert(key(repo, obj), tree_of(entries));
         }
     }
-    pub fn set_status(&self, repo: &str, sha: &str, context: &str, state: &str, age_secs: i64, description: &str) {
+    pub fn set_status(
+        &self,
+        repo: &str,
+        sha: &str,
+        context: &str,
+        state: &str,
+        age_secs: i64,
+        description: &str,
+    ) {
         let user = self.st().user.clone();
         self.set_status_by(repo, sha, context, state, age_secs, description, &user);
     }
-    pub fn set_status_raw(&self, repo: &str, sha: &str, context: &str, state: &str, updated_at: &str, description: &str) {
+    pub fn set_status_raw(
+        &self,
+        repo: &str,
+        sha: &str,
+        context: &str,
+        state: &str,
+        updated_at: &str,
+        description: &str,
+    ) {
         let mut s = self.st();
         let e = StatusEntry {
             context: context.to_string(),
@@ -188,19 +235,30 @@ impl FakeApi {
         let now = s.now;
         let v = list
             .into_iter()
-            .map(|(sha, parents, age)| Commit { sha, parents, date: rfc3339(now - age) })
+            .map(|(sha, parents, age)| Commit {
+                sha,
+                parents,
+                date: rfc3339(now - age),
+            })
             .collect();
         s.commits.insert(key(repo, tip), v);
     }
     pub fn set_changed(&self, repo: &str, base: &str, head: &str, files: &[(&str, Option<&str>)]) {
         let v = files
             .iter()
-            .map(|(f, p)| ChangedFile { filename: f.to_string(), previous_filename: p.map(str::to_string) })
+            .map(|(f, p)| ChangedFile {
+                filename: f.to_string(),
+                previous_filename: p.map(str::to_string),
+            })
             .collect();
-        self.st().changed.insert((repo.into(), base.into(), head.into()), Some(v));
+        self.st()
+            .changed
+            .insert((repo.into(), base.into(), head.into()), Some(v));
     }
     pub fn set_changed_unknown(&self, repo: &str, base: &str, head: &str) {
-        self.st().changed.insert((repo.into(), base.into(), head.into()), None);
+        self.st()
+            .changed
+            .insert((repo.into(), base.into(), head.into()), None);
     }
     pub fn fail(&self, prefix: &str, err: ApiError) {
         self.st().fails.push((prefix.to_string(), err));
@@ -226,14 +284,25 @@ impl Api for FakeApi {
 
     fn repo(&self, r: &str) -> Result<Repo, ApiError> {
         let s = self.begin(format!("repo {r}"), true)?;
-        let default = Repo { id: 1, private: false, default_branch: "main".into() };
+        let default = Repo {
+            id: 1,
+            private: false,
+            default_branch: "main".into(),
+        };
         Ok(s.repos.get(r).cloned().unwrap_or(default))
     }
 
     fn branches(&self, r: &str) -> Result<Vec<Branch>, ApiError> {
-        let list = self.begin(format!("branches {r}"), true)?.branches.get(r).cloned().unwrap_or_default();
+        let list = self
+            .begin(format!("branches {r}"), true)?
+            .branches
+            .get(r)
+            .cloned()
+            .unwrap_or_default();
         if list.len() > MAX_LISTED_BRANCHES {
-            return Err(ApiError::Net(format!("{r}: more than {MAX_LISTED_BRANCHES} branches")));
+            return Err(ApiError::Net(format!(
+                "{r}: more than {MAX_LISTED_BRANCHES} branches"
+            )));
         }
         Ok(list)
     }
@@ -244,7 +313,10 @@ impl Api for FakeApi {
         if s.roots.contains_key(&k) {
             // truncated repo: the recursive call is cut off, the plain call answers the root
             return Ok(if recursive {
-                Tree { truncated: true, ..Tree::default() }
+                Tree {
+                    truncated: true,
+                    ..Tree::default()
+                }
             } else {
                 s.roots[&k].clone()
             });
@@ -263,7 +335,12 @@ impl Api for FakeApi {
         Ok(s.commits.get(&key(r, tip)).cloned().unwrap_or_default())
     }
 
-    fn compare(&self, r: &str, base: &str, head: &str) -> Result<Option<Vec<ChangedFile>>, ApiError> {
+    fn compare(
+        &self,
+        r: &str,
+        base: &str,
+        head: &str,
+    ) -> Result<Option<Vec<ChangedFile>>, ApiError> {
         let s = self.begin(format!("compare {r} {base} {head}"), true)?;
         let k = (r.to_string(), base.to_string(), head.to_string());
         Ok(s.changed.get(&k).cloned().unwrap_or(Some(Vec::new())))

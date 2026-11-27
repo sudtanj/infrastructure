@@ -161,7 +161,10 @@ impl Engine {
     /// Deletes `parent/name` as root inside a container: files that steps created as root
     /// cannot be removed by the runner's own user.
     pub fn remove_dir(&self, image: &str, parent: &Path, name: &str) -> Result<(), String> {
-        let p = parent.to_str().filter(|p| !p.contains(':')).ok_or("unusable path")?;
+        let p = parent
+            .to_str()
+            .filter(|p| !p.contains(':'))
+            .ok_or("unusable path")?;
         let mount = format!("{p}:/w");
         let target = format!("/w/{name}");
         let args: [&str; 9] = [
@@ -319,10 +322,13 @@ impl Sidecar {
             format!("factory-ci-{id}-dind"),
         );
         let label = format!("{LABEL}={id}");
-        ctx.log.out("runner", "stdout", "starting the docker sidecar");
+        ctx.log
+            .out("runner", "stdout", "starting the docker sidecar");
         let fail = |m: String| format!("cannot start the docker sidecar: {m}");
-        e.quick(&["network", "create", "--label", &label, &net]).map_err(fail)?;
-        e.quick(&["volume", "create", "--label", &label, &vol]).map_err(fail)?;
+        e.quick(&["network", "create", "--label", &label, &net])
+            .map_err(fail)?;
+        e.quick(&["volume", "create", "--label", &label, &vol])
+            .map_err(fail)?;
         // Plain TCP on the private network: the sidecar is reachable only from this run's
         // steps, so TLS would add certificate plumbing and no isolation.
         let data = format!("{vol}:/var/lib/docker");
@@ -369,8 +375,20 @@ fn run_step(ctx: &RunCtx, name: &str, step: &Step, side: Option<&Sidecar>) -> St
     let container = format!("factory-ci-{}-{name}", ctx.run_id);
     let label = format!("{LABEL}={}", ctx.run_id);
     let mut a = strs(&["run", "--rm", "--name", &container, "--label", &label]);
-    a.extend(strs(&["--pids-limit", "512", "--security-opt", "no-new-privileges"]));
-    a.extend(strs(&["--cap-drop", "NET_RAW", "--cap-drop", "MKNOD", "--cap-drop", "SETFCAP"]));
+    a.extend(strs(&[
+        "--pids-limit",
+        "512",
+        "--security-opt",
+        "no-new-privileges",
+    ]));
+    a.extend(strs(&[
+        "--cap-drop",
+        "NET_RAW",
+        "--cap-drop",
+        "MKNOD",
+        "--cap-drop",
+        "SETFCAP",
+    ]));
     a.extend(strs(&["-v", &mount, "-w", "/workspace"]));
     let plain = format!("factory-ci-{}", ctx.run_id);
     match (step.docker, side) {
@@ -397,19 +415,25 @@ fn run_step(ctx: &RunCtx, name: &str, step: &Step, side: Option<&Sidecar>) -> St
     // One shell, stopping at the first failing command.
     let script = format!("set -e\n{}", step.commands.join("\n"));
     a.extend([s(&step.image), s("sh"), s("-c"), script]);
-    let own = step.timeout.map(|t| (Instant::now() + Duration::from_secs(t), t));
+    let own = step
+        .timeout
+        .map(|t| (Instant::now() + Duration::from_secs(t), t));
     let (end, msg) = match own {
         Some((at, t)) if at < ctx.deadline => (at, format!("timed out after {t}s")),
         _ => (ctx.deadline, s("run timed out")),
     };
-    ctx.engine.run_logged(&a, &env, name, &container, ctx.log, end, &msg)
+    ctx.engine
+        .run_logged(&a, &env, name, &container, ctx.log, end, &msg)
 }
 
 fn blocked(p: &Pipeline, states: &BTreeMap<String, State>, name: &str) -> Option<String> {
-    p.steps[name].depends_on.iter().find_map(|d| match states.get(d) {
-        Some(State::Failed(_)) | Some(State::Skipped(_)) => Some(d.clone()),
-        _ => None,
-    })
+    p.steps[name]
+        .depends_on
+        .iter()
+        .find_map(|d| match states.get(d) {
+            Some(State::Failed(_)) | Some(State::Skipped(_)) => Some(d.clone()),
+            _ => None,
+        })
 }
 
 /// Runs the graph: a step starts when its dependencies succeeded, up to `max_parallel` at

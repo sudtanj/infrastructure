@@ -17,12 +17,22 @@ impl Prep {
     fn new() -> Prep {
         let sb = Sandbox::new();
         let (names, reason) = (sb.dir.join("names.txt"), sb.dir.join("reason.txt"));
-        Prep { sb, api: Fake::start(), names, reason }
+        Prep {
+            sb,
+            api: Fake::start(),
+            names,
+            reason,
+        }
     }
 
     fn args(&self, extra: &[&str]) -> Vec<String> {
         let mut a: Vec<String> = job_args(extra).into_iter().map(String::from).collect();
-        a.extend(["--names-file".into(), self.names.display().to_string(), "--reason-file".into(), self.reason.display().to_string()]);
+        a.extend([
+            "--names-file".into(),
+            self.names.display().to_string(),
+            "--reason-file".into(),
+            self.reason.display().to_string(),
+        ]);
         a
     }
 
@@ -31,7 +41,12 @@ impl Prep {
         self.run_with(&fixture, extra, |_| {})
     }
 
-    fn run_with(&self, fixture: &std::path::Path, extra: &[&str], tweak: impl Fn(&mut std::process::Command)) -> Output {
+    fn run_with(
+        &self,
+        fixture: &std::path::Path,
+        extra: &[&str],
+        tweak: impl Fn(&mut std::process::Command),
+    ) -> Output {
         let args = self.args(extra);
         let refs: Vec<&str> = args.iter().map(String::as_str).collect();
         let mut c = self.sb.cmd(&refs);
@@ -52,8 +67,16 @@ impl Prep {
         assert_eq!(why.trim().lines().count(), 1, "one reason line: {why:?}");
         assert!(why.contains(needle), "{needle} not in {why:?}");
         assert!(!self.names.exists(), "no names file on failure");
-        assert!(self.sb.step_runs().is_empty(), "a container started: {:?}", self.sb.step_runs());
-        assert!(o.stdout.is_empty() && o.stderr.is_empty(), "prepare must print nothing: {}", out_text(o));
+        assert!(
+            self.sb.step_runs().is_empty(),
+            "a container started: {:?}",
+            self.sb.step_runs()
+        );
+        assert!(
+            o.stdout.is_empty() && o.stderr.is_empty(),
+            "prepare must print nothing: {}",
+            out_text(o)
+        );
     }
 }
 
@@ -73,8 +96,15 @@ fn the_names_file_holds_the_sorted_deduplicated_union_of_every_steps_secrets() {
     );
     let o = p.run(&[(".factory-ci.toml", &toml)], &[]);
     assert_eq!(o.status.code(), Some(0), "{}", out_text(&o));
-    assert_eq!(std::fs::read_to_string(&p.names).unwrap(), "A_KEY\nM_KEY\nZ_KEY\n");
-    assert!(o.stdout.is_empty() && o.stderr.is_empty(), "{}", out_text(&o));
+    assert_eq!(
+        std::fs::read_to_string(&p.names).unwrap(),
+        "A_KEY\nM_KEY\nZ_KEY\n"
+    );
+    assert!(
+        o.stdout.is_empty() && o.stderr.is_empty(),
+        "{}",
+        out_text(&o)
+    );
     assert!(p.sb.step_runs().is_empty(), "prepare starts no container");
     assert!(p.api.requests().is_empty(), "prepare posts no status");
 }
@@ -105,14 +135,38 @@ fn invalid_pipelines_are_refused_with_one_reason_line() {
     let big: String = (0..101).map(|i| step(&format!("s{i}"), "")).collect();
     let cases: Vec<(&str, String, &str)> = vec![
         ("invalid toml", "[steps.a\nimage =".to_string(), "invalid"),
-        ("cycle", format!("{}{}", step("a", "depends_on = [\"b\"]"), step("b", "depends_on = [\"a\"]")), "cycl"),
+        (
+            "cycle",
+            format!(
+                "{}{}",
+                step("a", "depends_on = [\"b\"]"),
+                step("b", "depends_on = [\"a\"]")
+            ),
+            "cycl",
+        ),
         ("101 steps", big, "101"),
         ("bad name 1BAD", step("a", "secrets = [\"1BAD\"]"), "1BAD"),
         ("bad name A-B", step("a", "secrets = [\"A-B\"]"), "A-B"),
-        ("reserved BWS", step("a", "secrets = [\"BWS_ACCESS_TOKEN\"]"), "BWS_ACCESS_TOKEN"),
-        ("reserved token", step("a", "secrets = [\"FACTORY_CI_TOKEN\"]"), "FACTORY_CI_TOKEN"),
-        ("reserved log", step("a", "secrets = [\"FACTORY_CI_LOG_URL\"]"), "FACTORY_CI_LOG_URL"),
-        ("docker without opt-in", step("img", "docker = true"), "img needs docker"),
+        (
+            "reserved BWS",
+            step("a", "secrets = [\"BWS_ACCESS_TOKEN\"]"),
+            "BWS_ACCESS_TOKEN",
+        ),
+        (
+            "reserved token",
+            step("a", "secrets = [\"FACTORY_CI_TOKEN\"]"),
+            "FACTORY_CI_TOKEN",
+        ),
+        (
+            "reserved log",
+            step("a", "secrets = [\"FACTORY_CI_LOG_URL\"]"),
+            "FACTORY_CI_LOG_URL",
+        ),
+        (
+            "docker without opt-in",
+            step("img", "docker = true"),
+            "img needs docker",
+        ),
     ];
     for (_label, toml, needle) in cases {
         let p = Prep::new();
@@ -124,7 +178,10 @@ fn invalid_pipelines_are_refused_with_one_reason_line() {
 #[test]
 fn docker_with_the_opt_in_is_accepted() {
     let p = Prep::new();
-    let o = p.run(&[(".factory-ci.toml", &step("img", "docker = true"))], &["--allow-docker"]);
+    let o = p.run(
+        &[(".factory-ci.toml", &step("img", "docker = true"))],
+        &["--allow-docker"],
+    );
     assert_eq!(o.status.code(), Some(0), "{}", out_text(&o));
 }
 
@@ -132,7 +189,8 @@ fn docker_with_the_opt_in_is_accepted() {
 fn a_symlinked_pipeline_file_is_refused() {
     let p = Prep::new();
     let fixture = p.sb.fixture(&[("real.toml", &step("a", ""))]);
-    std::os::unix::fs::symlink(fixture.join("real.toml"), fixture.join(".factory-ci.toml")).unwrap();
+    std::os::unix::fs::symlink(fixture.join("real.toml"), fixture.join(".factory-ci.toml"))
+        .unwrap();
     let o = p.run_with(&fixture, &[], |_| {});
     p.assert_refused(&o, "symlink");
 }
@@ -152,7 +210,12 @@ fn a_failed_clone_gives_clone_failed() {
 #[test]
 fn an_unpinned_clone_image_exits_before_cloning() {
     // FR-057
-    let unpinned = [None, Some("alpine/git"), Some("alpine/git@sha256:abc"), Some("alpine/git@sha256:")];
+    let unpinned = [
+        None,
+        Some("alpine/git"),
+        Some("alpine/git@sha256:abc"),
+        Some("alpine/git@sha256:"),
+    ];
     for image in unpinned {
         let p = Prep::new();
         let fixture = p.sb.fixture(&[(".factory-ci.toml", &step("a", ""))]);
@@ -178,8 +241,15 @@ fn the_clone_token_travels_in_the_environment_only() {
     p.run(&[(".factory-ci.toml", &step("a", ""))], &[]);
     let calls = p.sb.calls();
     assert!(!calls.is_empty());
-    assert!(calls.iter().all(|c| !c.join("\n").contains(JOB_TOKEN)), "token in argv: {calls:?}");
-    assert!(p.sb.client_envs().contains(&format!("FCI_TOKEN={JOB_TOKEN}")), "token not in the client environment");
+    assert!(
+        calls.iter().all(|c| !c.join("\n").contains(JOB_TOKEN)),
+        "token in argv: {calls:?}"
+    );
+    assert!(
+        p.sb.client_envs()
+            .contains(&format!("FCI_TOKEN={JOB_TOKEN}")),
+        "token not in the client environment"
+    );
 }
 
 #[test]
@@ -187,7 +257,8 @@ fn a_docker_pipeline_with_an_unpinned_dind_image_is_refused() {
     // FR-057: the sidecar image is pinned by digest like the clone image
     for image in [None, Some("docker:27.5.1-dind"), Some("docker@sha256:abc")] {
         let p = Prep::new();
-        let fixture = p.sb.fixture(&[(".factory-ci.toml", &step("img", "docker = true"))]);
+        let fixture =
+            p.sb.fixture(&[(".factory-ci.toml", &step("img", "docker = true"))]);
         let o = p.run_with(&fixture, &["--allow-docker"], |c| match image {
             Some(i) => {
                 c.env("FACTORY_CI_DIND_IMAGE", i);

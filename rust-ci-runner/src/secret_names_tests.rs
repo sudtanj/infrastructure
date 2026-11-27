@@ -21,9 +21,15 @@ fn id_parses_as_a_number_and_a_string_is_refused() {
 #[test]
 fn secret_branches_parse_and_follow_the_glob_rules_of_branches() {
     let v = parse(&entry("secret_branches = [\"main\", \"release/*\"]")).unwrap();
-    assert_eq!(v[0].secret_branches, Some(vec!["main".to_string(), "release/*".to_string()]));
+    assert_eq!(
+        v[0].secret_branches,
+        Some(vec!["main".to_string(), "release/*".to_string()])
+    );
     for bad in ["\"\"", "\"a[b\"", "\"a b\"", "\"a..b\""] {
-        assert!(parse(&entry(&format!("secret_branches = [{bad}]"))).is_err(), "{bad}");
+        assert!(
+            parse(&entry(&format!("secret_branches = [{bad}]"))).is_err(),
+            "{bad}"
+        );
     }
 }
 
@@ -65,7 +71,11 @@ fn fake_with(id: u64) -> crate::fake::FakeApi {
 #[test]
 fn rows_carry_the_entry_shared_names_space_separated() {
     let api = fake_with(1);
-    let (_, fin) = plan_all(&api, &entries(&[(R, "secrets = [\"NPM_TOKEN\", \"DEPLOY_KEY\"]")]), &opts());
+    let (_, fin) = plan_all(
+        &api,
+        &entries(&[(R, "secrets = [\"NPM_TOKEN\", \"DEPLOY_KEY\"]")]),
+        &opts(),
+    );
     assert_eq!(rows(&fin)[0].secrets, "NPM_TOKEN DEPLOY_KEY");
     let (_, none) = plan_all(&fake_with(1), &entries(&[(R, "")]), &opts());
     assert_eq!(rows(&none)[0].secrets, "");
@@ -76,15 +86,29 @@ fn secret_branches_default_to_the_default_branch_and_an_explicit_list_wins() {
     // FR-060, AS 12.11, I29
     let api = fake();
     api.set_repo(R, 1, false, "main");
-    add_repo(&api, R, &[("main", 1, 30), ("dev", 2, 20), ("release/1", 3, 10)], &["."]);
+    add_repo(
+        &api,
+        R,
+        &[("main", 1, 30), ("dev", 2, 20), ("release/1", 3, 10)],
+        &["."],
+    );
     let (_, d) = plan_all(&api, &entries(&[(R, "")]), &opts());
     for r in rows(&d) {
         assert_eq!(r.secrets_ok, r.branch == "main", "{}", r.branch);
     }
     let api = fake();
     api.set_repo(R, 1, false, "main");
-    add_repo(&api, R, &[("main", 1, 30), ("dev", 2, 20), ("release/1", 3, 10)], &["."]);
-    let (_, e) = plan_all(&api, &entries(&[(R, "secret_branches = [\"release/*\", \"dev\"]")]), &opts());
+    add_repo(
+        &api,
+        R,
+        &[("main", 1, 30), ("dev", 2, 20), ("release/1", 3, 10)],
+        &["."],
+    );
+    let (_, e) = plan_all(
+        &api,
+        &entries(&[(R, "secret_branches = [\"release/*\", \"dev\"]")]),
+        &opts(),
+    );
     for r in rows(&e) {
         assert_eq!(r.secrets_ok, r.branch != "main", "{}", r.branch);
     }

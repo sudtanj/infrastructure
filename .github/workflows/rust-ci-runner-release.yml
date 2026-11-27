@@ -47,7 +47,7 @@ jobs:
           - target: aarch64-unknown-linux-musl
             arch: arm64
             cc: aarch64-linux-gnu-gcc
-            packages: gcc-aarch64-linux-gnu musl-tools
+            packages: gcc-aarch64-linux-gnu libc6-dev-arm64-cross musl-tools
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

@@ -8,7 +8,10 @@ use crate::projects::{context, discover, find, folder_name_ok, owns};
 const TOML: &str = ".factory-ci.toml";
 
 fn e(path: &str, kind: &str) -> TreeEntry {
-    TreeEntry { path: path.to_string(), kind: kind.to_string() }
+    TreeEntry {
+        path: path.to_string(),
+        kind: kind.to_string(),
+    }
 }
 
 fn paths(tree: &[TreeEntry]) -> Vec<(String, bool)> {
@@ -29,7 +32,10 @@ fn root_and_two_folders_give_three_contexts() {
         e("README.md", "blob"),
     ];
     let found = paths(&t);
-    assert_eq!(found, [(".".into(), true), ("a".into(), true), ("b".into(), true)]);
+    assert_eq!(
+        found,
+        [(".".into(), true), ("a".into(), true), ("b".into(), true)]
+    );
     assert_eq!(context("."), "factory-ci");
     assert_eq!(context("a"), "factory-ci/a");
     assert_eq!(context("b"), "factory-ci/b");
@@ -44,7 +50,11 @@ fn no_root_toml_means_no_root_project() {
 
 #[test]
 fn nested_toml_is_not_a_project() {
-    let t = [e("a", "tree"), e("a/b", "tree"), e(&format!("a/b/{TOML}"), "blob")];
+    let t = [
+        e("a", "tree"),
+        e("a/b", "tree"),
+        e(&format!("a/b/{TOML}"), "blob"),
+    ];
     assert!(paths(&t).is_empty());
 }
 
@@ -113,7 +123,10 @@ fn a_removed_folder_falls_to_the_root() {
 struct Lcg(u64);
 impl Lcg {
     fn next(&mut self, m: u64) -> u64 {
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (self.0 >> 33) % m
     }
 }
@@ -124,16 +137,36 @@ fn every_path_has_exactly_one_owner_or_none_without_a_root() {
     let names = ["a", "ab", "b", "foo", "foobar", ".github"];
     let mut rng = Lcg(7);
     for _ in 0..300 {
-        let mut s: Vec<String> = names.iter().filter(|_| rng.next(2) == 0).map(|n| n.to_string()).collect();
+        let mut s: Vec<String> = names
+            .iter()
+            .filter(|_| rng.next(2) == 0)
+            .map(|n| n.to_string())
+            .collect();
         let root = rng.next(2) == 0;
         if root {
             s.push(".".into());
         }
-        let top = ["a", "ab", "b", "foo", "foobar", ".github", "zzz", "foo.x"][rng.next(8) as usize];
-        let path = if rng.next(4) == 0 { top.to_string() } else { format!("{top}/{}/f", rng.next(3)) };
+        let top =
+            ["a", "ab", "b", "foo", "foobar", ".github", "zzz", "foo.x"][rng.next(8) as usize];
+        let path = if rng.next(4) == 0 {
+            top.to_string()
+        } else {
+            format!("{top}/{}/f", rng.next(3))
+        };
         let owners = s.iter().filter(|p| owns(p, &path, &s)).count();
         // a bare top-level file (no slash) can only belong to the root
-        assert_eq!(owners, if root || s.iter().any(|p| p != "." && path.starts_with(&format!("{p}/"))) { 1 } else { 0 }, "{s:?} {path}");
+        assert_eq!(
+            owners,
+            if root
+                || s.iter()
+                    .any(|p| p != "." && path.starts_with(&format!("{p}/")))
+            {
+                1
+            } else {
+                0
+            },
+            "{s:?} {path}"
+        );
     }
 }
 
@@ -144,8 +177,18 @@ fn truncated_tree_falls_back_to_root_tree_plus_one_call_per_folder() {
     api.set_tree_truncated(
         "o/r",
         "c0",
-        &[(TOML, "blob", "b0"), ("a", "tree", "t1"), ("b", "tree", "t2"), ("src", "tree", "t3"), ("m", "commit", "s4")],
-        &[("t1", &[(TOML, "blob")]), ("t2", &[("x", "blob")]), ("t3", &[("y", "blob")])],
+        &[
+            (TOML, "blob", "b0"),
+            ("a", "tree", "t1"),
+            ("b", "tree", "t2"),
+            ("src", "tree", "t3"),
+            ("m", "commit", "s4"),
+        ],
+        &[
+            ("t1", &[(TOML, "blob")]),
+            ("t2", &[("x", "blob")]),
+            ("t3", &[("y", "blob")]),
+        ],
     );
     let found = discover(&api, "o/r", "c0").unwrap();
     let mut got: Vec<_> = found.into_iter().map(|f| (f.path, f.valid)).collect();
@@ -153,15 +196,29 @@ fn truncated_tree_falls_back_to_root_tree_plus_one_call_per_folder() {
     assert_eq!(got, [(".".to_string(), true), ("a".to_string(), true)]);
     let calls = api.calls();
     for want in ["tree o/r c0", "tree o/r t1", "tree o/r t2", "tree o/r t3"] {
-        assert!(calls.iter().any(|c| c.starts_with(want)), "{want} not in {calls:?}");
+        assert!(
+            calls.iter().any(|c| c.starts_with(want)),
+            "{want} not in {calls:?}"
+        );
     }
-    assert!(!calls.iter().any(|c| c.starts_with("tree o/r s4")), "submodule entries are not followed");
+    assert!(
+        !calls.iter().any(|c| c.starts_with("tree o/r s4")),
+        "submodule entries are not followed"
+    );
 }
 
 #[test]
 fn untruncated_tree_costs_one_call() {
     let api = FakeApi::new("ci-bot", 1_000_000);
-    api.set_tree("o/r", "c0", &[(TOML, "blob"), ("a", "tree"), (&format!("a/{TOML}"), "blob")]);
+    api.set_tree(
+        "o/r",
+        "c0",
+        &[
+            (TOML, "blob"),
+            ("a", "tree"),
+            (&format!("a/{TOML}"), "blob"),
+        ],
+    );
     assert_eq!(discover(&api, "o/r", "c0").unwrap().len(), 2);
     assert_eq!(api.reads(), 1);
 }

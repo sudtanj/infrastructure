@@ -45,7 +45,16 @@ pub fn base64(bytes: &[u8]) -> String {
 pub fn parse_rfc3339(s: &str) -> Option<i64> {
     let b = s.as_bytes();
     let shape = b.len() == 20
-        && [(4, b'-'), (7, b'-'), (10, b'T'), (13, b':'), (16, b':'), (19, b'Z')].iter().all(|&(i, c)| b[i] == c);
+        && [
+            (4, b'-'),
+            (7, b'-'),
+            (10, b'T'),
+            (13, b':'),
+            (16, b':'),
+            (19, b'Z'),
+        ]
+        .iter()
+        .all(|&(i, c)| b[i] == c);
     if !shape {
         return None;
     }
@@ -60,7 +69,20 @@ pub fn parse_rfc3339(s: &str) -> Option<i64> {
     let (y, m, d) = (num(0, 4)?, num(5, 7)?, num(8, 10)?);
     let (h, mi, sec) = (num(11, 13)?, num(14, 16)?, num(17, 19)?);
     let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
-    let dim = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let dim = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     if !(1..=12).contains(&m) || d < 1 || d > dim[m as usize - 1] || h > 23 || mi > 59 || sec > 59 {
         return None;
     }
@@ -121,7 +143,13 @@ mod tests {
         let b = parse_rfc3339("2024-02-29T00:00:00Z").unwrap();
         let c = parse_rfc3339("2024-03-01T00:00:00Z").unwrap();
         assert_eq!((b - a, c - b), (86_400, 86_400), "leap day");
-        for bad in ["", "garbage", "2026-11-26", "2026-13-01T00:00:00Z", "2026-11-26T00:00:00"] {
+        for bad in [
+            "",
+            "garbage",
+            "2026-11-26",
+            "2026-13-01T00:00:00Z",
+            "2026-11-26T00:00:00",
+        ] {
             assert_eq!(parse_rfc3339(bad), None, "{bad:?}");
         }
     }

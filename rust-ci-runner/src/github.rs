@@ -87,7 +87,12 @@ pub trait Api {
     fn status(&self, r: &str, sha: &str) -> Result<Vec<StatusEntry>, ApiError>;
     fn commits(&self, r: &str, tip: &str) -> Result<Vec<Commit>, ApiError>;
     /// `Ok(None)`: still full after 3 pages, so the changed set is unknown.
-    fn compare(&self, r: &str, base: &str, head: &str) -> Result<Option<Vec<ChangedFile>>, ApiError>;
+    fn compare(
+        &self,
+        r: &str,
+        base: &str,
+        head: &str,
+    ) -> Result<Option<Vec<ChangedFile>>, ApiError>;
     fn post_status(
         &self,
         r: &str,
@@ -118,7 +123,10 @@ impl HttpApi {
             remaining: AtomicI64::new(i64::MAX),
             backoff: Duration::from_secs(1),
             // No redirects: the token must not follow a Location header.
-            agent: ureq::AgentBuilder::new().timeout(Duration::from_secs(20)).redirects(0).build(),
+            agent: ureq::AgentBuilder::new()
+                .timeout(Duration::from_secs(20))
+                .redirects(0)
+                .build(),
         }
     }
 
@@ -129,7 +137,11 @@ impl HttpApi {
             return Err(format!("{token_var} is not set"));
         }
         let base = std::env::var("GITHUB_API_URL").unwrap_or_default();
-        let base = if base.is_empty() { "https://api.github.com" } else { &base };
+        let base = if base.is_empty() {
+            "https://api.github.com"
+        } else {
+            &base
+        };
         Ok(HttpApi::new(base, &token))
     }
 
@@ -140,7 +152,10 @@ impl HttpApi {
     }
 
     fn note(&self, r: &ureq::Response) {
-        if let Some(n) = r.header("x-ratelimit-remaining").and_then(|v| v.trim().parse::<i64>().ok()) {
+        if let Some(n) = r
+            .header("x-ratelimit-remaining")
+            .and_then(|v| v.trim().parse::<i64>().ok())
+        {
             self.remaining.store(n, Ordering::Relaxed);
         }
     }
@@ -151,7 +166,8 @@ impl HttpApi {
         let retry = r.header("retry-after").is_some();
         let text = r.into_string().unwrap_or_default().to_lowercase();
         let limited = code == 429
-            || (code == 403 && (zero || retry || text.contains("rate limit") || text.contains("abuse")));
+            || (code == 403
+                && (zero || retry || text.contains("rate limit") || text.contains("abuse")));
         if limited {
             ApiError::RateLimited(format!("{what}: rate limited ({code})"))
         } else {
@@ -182,7 +198,9 @@ impl HttpApi {
             match res {
                 Ok(r) if r.status() < 300 => {
                     self.note(&r);
-                    return r.into_string().map_err(|_| ApiError::Net(format!("{what}: unreadable answer")));
+                    return r
+                        .into_string()
+                        .map_err(|_| ApiError::Net(format!("{what}: unreadable answer")));
                 }
                 Ok(r) | Err(ureq::Error::Status(_, r)) => {
                     self.note(&r);
@@ -191,7 +209,9 @@ impl HttpApi {
                         return Err(last);
                     }
                 }
-                Err(ureq::Error::Transport(_)) => last = ApiError::Net(format!("{what}: transport failure")),
+                Err(ureq::Error::Transport(_)) => {
+                    last = ApiError::Net(format!("{what}: transport failure"))
+                }
             }
         }
         Err(last)
@@ -227,19 +247,30 @@ impl HttpApi {
 }
 
 fn malformed(path: &str) -> ApiError {
-    ApiError::Http(0, format!("{}: malformed answer", path.split('?').next().unwrap_or(path)))
+    ApiError::Http(
+        0,
+        format!(
+            "{}: malformed answer",
+            path.split('?').next().unwrap_or(path)
+        ),
+    )
 }
 
 /// 40 lowercase hex characters.
 pub fn is_sha(s: &str) -> bool {
-    s.len() == 40 && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    s.len() == 40
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 fn check_sha(s: &str) -> Result<(), ApiError> {
     if is_sha(s) {
         Ok(())
     } else {
-        Err(ApiError::Http(0, "not a 40-character lowercase hex sha".into()))
+        Err(ApiError::Http(
+            0,
+            "not a 40-character lowercase hex sha".into(),
+        ))
     }
 }
 
@@ -322,12 +353,23 @@ impl Api for HttpApi {
         let path = format!("/repos/{r}/branches?per_page=100");
         // A sixth page tells exactly 500 branches from more; more is an error (R9).
         let (v, full) = self.pages(&path, 6, |p: Vec<WBranch>| {
-            (p.into_iter().map(|b| Branch { name: b.name, sha: b.commit.sha }).collect(), None)
+            (
+                p.into_iter()
+                    .map(|b| Branch {
+                        name: b.name,
+                        sha: b.commit.sha,
+                    })
+                    .collect(),
+                None,
+            )
         })?;
         if full || v.len() > MAX_LISTED_BRANCHES {
-            return Err(ApiError::Net(format!("{r}: more than {MAX_LISTED_BRANCHES} branches")));
+            return Err(ApiError::Net(format!(
+                "{r}: more than {MAX_LISTED_BRANCHES} branches"
+            )));
         }
-        v.iter().try_for_each(|b| check_sha(&b.sha).map_err(|_| malformed(&path)))?;
+        v.iter()
+            .try_for_each(|b| check_sha(&b.sha).map_err(|_| malformed(&path)))?;
         Ok(v)
     }
 
@@ -335,12 +377,18 @@ impl Api for HttpApi {
         check_sha(sha)?;
         let q = if recursive { "?recursive=1" } else { "" };
         let w: WTree = self.get(&format!("/repos/{r}/git/trees/{sha}{q}"))?;
-        let mut t = Tree { truncated: w.truncated, ..Tree::default() };
+        let mut t = Tree {
+            truncated: w.truncated,
+            ..Tree::default()
+        };
         for e in w.tree {
             if let Some(s) = e.sha {
                 t.shas.insert(e.path.clone(), s);
             }
-            t.entries.push(TreeEntry { path: e.path, kind: e.kind });
+            t.entries.push(TreeEntry {
+                path: e.path,
+                kind: e.kind,
+            });
         }
         Ok(t)
     }
@@ -383,7 +431,12 @@ impl Api for HttpApi {
             .collect()
     }
 
-    fn compare(&self, r: &str, base: &str, head: &str) -> Result<Option<Vec<ChangedFile>>, ApiError> {
+    fn compare(
+        &self,
+        r: &str,
+        base: &str,
+        head: &str,
+    ) -> Result<Option<Vec<ChangedFile>>, ApiError> {
         check_sha(base)?;
         check_sha(head)?;
         let path = format!("/repos/{r}/compare/{base}...{head}?per_page=100");
@@ -401,11 +454,17 @@ impl Api for HttpApi {
         url: Option<&str>,
     ) -> Result<(), ApiError> {
         check_sha(sha)?;
-        let mut body = serde_json::json!({"state": state, "context": context, "description": description});
+        let mut body =
+            serde_json::json!({"state": state, "context": context, "description": description});
         if let Some(u) = url {
             body["target_url"] = u.into();
         }
-        self.send("POST", &format!("/repos/{r}/statuses/{sha}"), Some(&body.to_string())).map(|_| ())
+        self.send(
+            "POST",
+            &format!("/repos/{r}/statuses/{sha}"),
+            Some(&body.to_string()),
+        )
+        .map(|_| ())
     }
 }
 

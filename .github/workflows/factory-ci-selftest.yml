@@ -27,7 +27,7 @@ jobs:
         run: rustup toolchain install
       - name: type-check every target
         working-directory: rust-ci-runner
-        run: cargo check --all-targets
+        run: cargo check --locked --all-targets
 
   pipeline:
     runs-on: ubuntu-24.04
@@ -44,13 +44,13 @@ jobs:
         run: cargo fmt --check
       - name: clippy
         working-directory: rust-ci-runner
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --locked -- -D warnings
       - name: tests, engine tests included
         working-directory: rust-ci-runner
-        run: cargo test -- --include-ignored
+        run: cargo test --locked -- --include-ignored
       - name: build the runner from source
         working-directory: rust-ci-runner
-        run: cargo build --release
+        run: cargo build --locked --release
       - name: run the fixture pipeline
         shell: bash
         run: |
@@ -79,7 +79,7 @@ jobs:
           - target: aarch64-unknown-linux-musl
             arch: arm64
             cc: aarch64-linux-gnu-gcc
-            packages: gcc-aarch64-linux-gnu musl-tools
+            packages: gcc-aarch64-linux-gnu libc6-dev-arm64-cross musl-tools
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -131,7 +131,7 @@ jobs:
         run: rustup toolchain install
       - name: build the runner from source
         working-directory: rust-ci-runner
-        run: cargo build --release
+        run: cargo build --locked --release
       - name: check the watch list
         run: rust-ci-runner/target/release/rust-ci-runner plan --repos .github/factory-ci-repos.toml --check
 

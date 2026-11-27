@@ -40,5 +40,8 @@ fn run_completes_with_no_store_variable_set() {
     let o = sb.cmd(&["run", "--dir", dir_str(&d)]).output().unwrap();
     assert!(o.status.success(), "{}", out_text(&o));
     let envs = sb.client_envs();
-    assert!(!envs.contains("BWS_") && !envs.contains("FACTORY_CI_BWS_"), "{envs}");
+    assert!(
+        !envs.contains("BWS_") && !envs.contains("FACTORY_CI_BWS_"),
+        "{envs}"
+    );
 }

@@ -6,7 +6,15 @@ use crate::plan_tests::{add_repo, entries, fake, opts, plan_all, rows, sha};
 
 fn tips_of(n: usize, prefix: &str, base: u32, oldest_age: i64) -> Vec<(String, u32, i64)> {
     // b00 is the oldest; ages shrink by 10 s per branch
-    (0..n).map(|i| (format!("{prefix}{i:02}"), base + i as u32, oldest_age - 10 * i as i64)).collect()
+    (0..n)
+        .map(|i| {
+            (
+                format!("{prefix}{i:02}"),
+                base + i as u32,
+                oldest_age - 10 * i as i64,
+            )
+        })
+        .collect()
 }
 
 fn add(api: &crate::fake::FakeApi, repo: &str, tips: &[(String, u32, i64)]) {
@@ -21,13 +29,28 @@ fn rows_come_from_every_repo_with_news_and_an_idle_repo_costs_only_reads() {
     add_repo(&api, "o/a", &[("main", 1, 100)], &["."]);
     add_repo(&api, "o/b", &[("main", 2, 100)], &["."]);
     add_repo(&api, "o/c", &[("main", 3, 100)], &["."]);
-    api.set_status("o/c", &sha(3), "factory-ci", "success", 50, "all steps passed");
-    let (_, fin) = plan_all(&api, &entries(&[("o/a", ""), ("o/b", ""), ("o/c", "")]), &opts());
+    api.set_status(
+        "o/c",
+        &sha(3),
+        "factory-ci",
+        "success",
+        50,
+        "all steps passed",
+    );
+    let (_, fin) = plan_all(
+        &api,
+        &entries(&[("o/a", ""), ("o/b", ""), ("o/c", "")]),
+        &opts(),
+    );
     let mut repos: Vec<_> = rows(&fin).iter().map(|r| r.repo.clone()).collect();
     repos.sort();
     assert_eq!(repos, ["o/a", "o/b"]);
     assert!(api.posts().iter().all(|p| p.repo != "o/c"));
-    assert!(api.calls().iter().filter(|c| c.contains("o/c")).all(|c| !c.starts_with("post")));
+    assert!(api
+        .calls()
+        .iter()
+        .filter(|c| c.contains("o/c"))
+        .all(|c| !c.starts_with("post")));
 }
 
 #[test]
@@ -48,16 +71,26 @@ fn twenty_five_items_give_twenty_rows_interleaved_oldest_first() {
     }
     // inside each repo, oldest commit first
     for repo in ["o/a", "o/b"] {
-        let names: Vec<&str> = rows.iter().filter(|r| r.repo == repo).map(|r| r.branch.as_str()).collect();
+        let names: Vec<&str> = rows
+            .iter()
+            .filter(|r| r.repo == repo)
+            .map(|r| r.branch.as_str())
+            .collect();
         let mut sorted = names.clone();
         sorted.sort();
         assert_eq!(names, sorted, "{repo}");
     }
     // pending went to exactly the 20 planned
-    let pending: Vec<_> = api.posts().into_iter().filter(|p| p.state == "pending").collect();
+    let pending: Vec<_> = api
+        .posts()
+        .into_iter()
+        .filter(|p| p.state == "pending")
+        .collect();
     assert_eq!(pending.len(), 20);
     for r in &rows {
-        assert!(pending.iter().any(|p| p.repo == r.repo && p.sha == r.sha && p.context == r.context));
+        assert!(pending
+            .iter()
+            .any(|p| p.repo == r.repo && p.sha == r.sha && p.context == r.context));
     }
 }
 
@@ -70,7 +103,11 @@ fn one_repo_with_25_items_cannot_take_the_whole_cap() {
     let (_, fin) = plan_all(&api, &entries(&[("o/big", ""), ("o/small", "")]), &opts());
     let rows = rows(&fin);
     assert_eq!(rows.len(), 20);
-    assert!(rows.iter().take(2).any(|r| r.repo == "o/small"), "{:?}", rows.iter().map(|r| &r.repo).collect::<Vec<_>>());
+    assert!(
+        rows.iter().take(2).any(|r| r.repo == "o/small"),
+        "{:?}",
+        rows.iter().map(|r| &r.repo).collect::<Vec<_>>()
+    );
     assert_eq!(fin.waiting, 6);
 }
 
@@ -90,11 +127,22 @@ fn a_single_repo_with_25_items_is_capped_at_20_oldest_first() {
 fn ties_are_broken_by_branch_then_project() {
     // data-model.md Item: order (date, branch, project)
     let api = fake();
-    add_repo(&api, "o/a", &[("zeta", 1, 100), ("alpha", 2, 100)], &[".", "a"]);
+    add_repo(
+        &api,
+        "o/a",
+        &[("zeta", 1, 100), ("alpha", 2, 100)],
+        &[".", "a"],
+    );
     let (_, fin) = plan_all(&api, &entries(&[("o/a", "")]), &opts());
-    let got: Vec<(String, String)> = rows(&fin).iter().map(|r| (r.branch.clone(), r.project.clone())).collect();
+    let got: Vec<(String, String)> = rows(&fin)
+        .iter()
+        .map(|r| (r.branch.clone(), r.project.clone()))
+        .collect();
     let want: Vec<(String, String)> =
-        [("alpha", "."), ("alpha", "a"), ("zeta", "."), ("zeta", "a")].iter().map(|(b, p)| (b.to_string(), p.to_string())).collect();
+        [("alpha", "."), ("alpha", "a"), ("zeta", "."), ("zeta", "a")]
+            .iter()
+            .map(|(b, p)| (b.to_string(), p.to_string()))
+            .collect();
     assert_eq!(got, want);
 }
 
@@ -115,7 +163,11 @@ fn an_unlisted_repo_gets_no_call_and_a_removed_entry_is_never_touched() {
     add_repo(&api, "o/listed", &[("main", 1, 10)], &["."]);
     add_repo(&api, "o/removed", &[("main", 2, 10)], &["."]);
     plan_all(&api, &entries(&[("o/listed", "")]), &opts());
-    assert!(api.calls().iter().all(|c| !c.contains("o/removed")), "{:?}", api.calls());
+    assert!(
+        api.calls().iter().all(|c| !c.contains("o/removed")),
+        "{:?}",
+        api.calls()
+    );
 }
 
 #[test]
@@ -134,7 +186,9 @@ fn the_cap_and_interleave_hold_for_random_fleets() {
     // I3: count <= cap, the first k rows come from k different repos, writes <= 60
     let mut x: u64 = 41;
     let mut next = |m: u64| {
-        x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        x = x
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (x >> 33) % m
     };
     for round in 0..25u32 {
@@ -148,7 +202,11 @@ fn the_cap_and_interleave_hold_for_random_fleets() {
             if k > 0 {
                 with_items += 1;
             }
-            add(&api, name, &tips_of(k, "b", 1000 * round + 100 * i as u32 + 1, 3000));
+            add(
+                &api,
+                name,
+                &tips_of(k, "b", 1000 * round + 100 * i as u32 + 1, 3000),
+            );
             list.push((name.as_str(), ""));
         }
         let cap = 1 + next(25) as usize;

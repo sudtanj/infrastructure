@@ -4,17 +4,17 @@ TARGET ?= x86_64-unknown-linux-musl
 .PHONY: setup dev test lint build
 
 setup:
-	cargo fetch
+	cargo fetch --locked
 
 dev:
 	cargo run -- help
 
 test:
-	cargo test
+	cargo test --locked
 
 lint:
 	cargo fmt --check
-	cargo clippy -- -D warnings
+	cargo clippy --locked -- -D warnings
 
 build:
-	cargo build --release --target $(TARGET)
+	cargo build --locked --release --target $(TARGET)
