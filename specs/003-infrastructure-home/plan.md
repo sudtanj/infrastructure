@@ -97,7 +97,7 @@ specs/003-infrastructure-home/
 | `rust-ci-runner/src/**`, `rust-ci-runner/tests/**` | compile and format fixes; `#[ignore]` on engine tests; one `LOG_VARS` case if missing; round 2: `engine.rs` `capture()` loses its `container` parameter | T005, T008, T010, T043 |
 | `README.md` | Setup rewrite; round 2: heartbeat step 11 text, ruleset without CODEOWNERS and with the owner-only rationale | T024, T037, T038 |
 | `rust-ci-runner/README.md` | "Set up B" becomes a pointer; log and secrets sections say Actions secrets; wording | T025 |
-| `.specify/memory/constitution.md` | v1.0.1 | T026 |
+| `.specify/memory/constitution.md` | v1.0.2 | T026, T045 |
 | `specs/002-ci-runner/{tasks,spec}.md` | pointers to 003 | T027 |
 
 ### Structure Decision

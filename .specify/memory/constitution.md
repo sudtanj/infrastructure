@@ -1,8 +1,9 @@
 # Infrastructure Constitution
 
-This repository is public. It holds the factory CI runner (`rust-ci-runner`) and every GitHub
-Actions workflow for sudtanj's repositories. Other repositories keep no workflows of their own;
-their checks run through the runner from here.
+This repository is public and open source. It holds sudtanj's infrastructure and DevOps tools:
+today the factory CI runner (`rust-ci-runner`) and every GitHub Actions workflow for sudtanj's
+repositories. Other repositories keep no workflows of their own; their checks run through the
+runner from here.
 
 ## Core Principles
 
@@ -111,4 +112,4 @@ and stops agents from building what nobody specified.
 - Reviewers check pull requests against these principles; violations need either a fix or a
   justified exception recorded in the feature's `plan.md`.
 
-**Version**: 1.0.1 | **Ratified**: 2026-11-27 | **Last Amended**: 2026-11-27
+**Version**: 1.0.2 | **Ratified**: 2026-11-27 | **Last Amended**: 2026-11-27

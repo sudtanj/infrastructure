@@ -45,6 +45,7 @@ Answers come from the lead's brief. Nothing blocked on the user; open questions 
 - R2-7: `capture()` in `engine.rs` loses its dead `container` parameter (FR-008, T043).
 - R2-8: `rust-ci-runner/.factory-ci.toml` runs `cargo test` in three processes because of the pids limit; the contract and T020 say so (FR-019, T044). The compile-loop budget of D9 was extended to 8 runs; T005 records it.
 - R2-9: Deferred and recorded in `plan.md` Open risks, no task: the token split and the `alpine/git` clone container (security M3), the secret-name charset and reserved shell names (L3), the release verify job's dependence on the tag ruleset (L4), the concurrency slot shared with non-main dispatch (L6), `stop_and_remove` not strictly bounded at 30 s (reviewer m3), YAML escape sequences in triggers (covered only by the owner-only merge rule).
+- R2-10: The owner asked that the repository present itself as the open-source home of their infrastructure and DevOps tools, not only of the CI runner. The README intro, the constitution preamble (PATCH 1.0.2, wording only) and the GitHub repository description say so (FR-039).
 
 ### What this feature changes in 002
 
@@ -275,6 +276,7 @@ After the owner finishes Setup, the live checks that 002 could not run (T046, T0
 - **FR-036**: Every guard on `FACTORY_CI_BLOB_KEY` and `FACTORY_CI_BLOB_KEY_DOCKER` (the tick guard steps, `fci_blob_encrypt` and `fci_blob_decrypt`, and the scripts that call them) MUST require `^[0-9a-f]{64}$`, not only a length of 32 or more. The README already says the keys come from `openssl rand -hex 32`. Shell tests MUST cover a short key, a 64-character non-hex key, an upper-case hex key and a valid key.
 - **FR-037**: The plan script MUST call the plan binary for phase A with `FACTORY_CI_LOG_URL`, `FACTORY_CI_LOG_USER` and `FACTORY_CI_LOG_TOKEN` removed from its environment. Phase A (`plan::candidates`) only reads and never ships logs (checked in `rust-ci-runner/src/plan.rs`); the log line is sent from phase C (`plan::finish`), so the credentials are removed for phase A only. A test MUST prove phase A sees none of the three names and phase C sees all three.
 - **FR-038**: The plan MUST check the Bitwarden store (`fci_list`) only when at least one candidate row can use a secret: its `secrets_ok` is true and it has shared secret names (`secrets` not empty) or an owner id (`repo_id` not empty). A Bitwarden outage then does not fail a tick whose rows list no secret. The purpose of the check stays (D1): a revoked or wrong token fails one tick early instead of one `error` status per item.
+- **FR-039**: The first paragraph of the root `README.md`, the preamble of `.specify/memory/constitution.md` and the GitHub repository description MUST say that this repository is the open-source (MIT) home of sudtanj's infrastructure and DevOps tools, and that it holds the factory CI runner and every GitHub Actions workflow today.
 
 ### Key Entities
 
