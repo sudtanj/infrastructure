@@ -23,6 +23,10 @@ Rationale: one place owns all automation, so checks do not depend on whose machi
   from GitHub Actions secrets and variables of this repository, and from nowhere else.
 - Pipeline secrets, the ones the watched repositories' steps use, come from Bitwarden, read at
   run time with the Bitwarden access token.
+- A manually started pipeline workflow (`factory-monorepo-ci`) may hold only the Bitwarden
+  access token in GitHub (and the optional Bitwarden server URL). It reads every other value it
+  needs, the Grafana and Loki credentials and the clone token included, from Bitwarden, inside
+  the runner. Owner decision of 2026-11-27, `specs/008-runner-owned-ci/`.
 - A secret MUST NOT be committed in any file, including examples, fixtures and specs. Docs name
   a secret by key, never by value.
 
@@ -111,4 +115,4 @@ and stops agents from building what nobody specified.
 - Reviewers check pull requests against these principles; violations need either a fix or a
   justified exception recorded in the feature's `plan.md`.
 
-**Version**: 1.0.0 | **Ratified**: 2026-11-27 | **Last Amended**: 2026-11-27
+**Version**: 1.1.0 | **Ratified**: 2026-11-27 | **Last Amended**: 2026-11-27
