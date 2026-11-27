@@ -473,5 +473,34 @@ jr="$here/../../rust-ci-runner/tests/job_rules.rs"
 eq "LOG_VARS test exists: the_runner_environment_never_becomes_a_container_environment" 1 "$(grep -c 'fn the_runner_environment_never_becomes_a_container_environment' "$jr")"
 eq "LOG_VARS test checks FACTORY_CI_LOG in -e names" 1 "$([ "$(grep -c 'starts_with("FACTORY_CI_LOG")' "$jr")" -ge 1 ] && echo 1 || echo 0)"
 
+
+# Heartbeat step (verdict job): run its real `run:` block with a fake curl and read the ping URL.
+hb=$(mktemp -d)
+awk '/^      - name: heartbeat$/ { s = 1 } s && /^        run: \|$/ { r = 1; next } r && /^          / { sub(/^          /, ""); print; next } r { exit }' "$tick" > "$hb/step.sh"
+eq "heartbeat: the step body was extracted" 1 "$([ -s "$hb/step.sh" ] && echo 1 || echo 0)"
+mkdir -p "$hb/bin"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s/curl.log"\nexit "${FAKE_CURL_RC:-0}"\n' "$hb" > "$hb/bin/curl"
+chmod +x "$hb/bin/curl"
+# ping PLAN FAIL_TICK RUN_RESULTS REF URL [CURL_RC]: "URL curl got (empty when curl never ran)|exit status|output"
+ping() {
+  rm -f "$hb/curl.log"
+  local out rc
+  out=$(env -i PATH="$hb/bin:/usr/bin:/bin" PLAN_RESULT="$1" FAIL_TICK="$2" RUN_RESULTS="$3" GITHUB_REF="$4" FACTORY_CI_HEARTBEAT_URL="$5" FAKE_CURL_RC="${6:-0}" bash "$hb/step.sh" 2>&1); rc=$?
+  printf '%s|%s|%s' "$(awk '{ print $NF }' "$hb/curl.log" 2> /dev/null || true)" "$rc" "$out"
+}
+U=https://hc.example.test/ping-uuid-0000
+eq "heartbeat: green tick pings the plain URL" "$U|0|" "$(ping success 0 'success success' refs/heads/main $U)"
+eq "heartbeat: skipped run jobs (idle tick) still ping ok" "$U|0|" "$(ping success 0 'skipped skipped' refs/heads/main $U)"
+eq "heartbeat: failed run job pings /fail" "$U/fail|0|" "$(ping success 0 'failure success' refs/heads/main $U)"
+eq "heartbeat: failed docker job pings /fail" "$U/fail|0|" "$(ping success 0 'success failure' refs/heads/main $U)"
+eq "heartbeat: cancelled job pings /fail" "$U/fail|0|" "$(ping success 0 'success cancelled' refs/heads/main $U)"
+eq "heartbeat: plan failure pings /fail" "$U/fail|0|" "$(ping failure '' 'skipped skipped' refs/heads/main $U)"
+eq "heartbeat: plan cancelled pings /fail" "$U/fail|0|" "$(ping cancelled '' 'skipped skipped' refs/heads/main $U)"
+eq "heartbeat: fail_tick=1 pings /fail" "$U/fail|0|" "$(ping success 1 'success success' refs/heads/main $U)"
+eq "heartbeat: a trailing slash in the secret does not double" "$U/fail|0|" "$(ping success 1 'success success' refs/heads/main $U/)"
+eq "heartbeat: no URL set, no curl, step passes" "|0|" "$(ping success 0 'success success' refs/heads/main '')"
+eq "heartbeat: not on main, no curl, step passes" "|0|" "$(ping success 0 'success success' refs/heads/feature $U)"
+eq "heartbeat: a failing curl does not fail the step and prints nothing" "$U|0|" "$(ping success 0 'success success' refs/heads/main $U 22)"
+rm -rf "$hb"
 printf '%s checks, %s failed\n' "$total" "$failed"
 [ "$failed" -eq 0 ]
