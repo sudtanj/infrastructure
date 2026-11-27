@@ -120,11 +120,8 @@ fn go(toml: &str, o: Opts) -> Run {
 fn leftovers(id: &str) -> Vec<String> {
     let label = format!("label=factory-ci.run={id}");
     let mut found = Vec::new();
-    for kind in [
-        ["ps", "-aq"],
-        ["network", "ls", "-q"],
-        ["volume", "ls", "-q"],
-    ] {
+    let kinds: [&[&str]; 3] = [&["ps", "-aq"], &["network", "ls", "-q"], &["volume", "ls", "-q"]];
+    for kind in kinds {
         let mut a: Vec<&str> = kind.to_vec();
         a.push("--filter");
         a.push(&label);
