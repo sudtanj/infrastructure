@@ -130,25 +130,26 @@ impl Engine {
         let _ = self.quick(&["rm", "-f", name]);
     }
 
-    /// Kills the `docker run` client, then removes `name` until the daemon reports it gone twice
-    /// in a row: a daemon still handling the create when the client dies would otherwise leave
-    /// the container in `Created` state.
-    /// shortcut: gives up after 5 s; a create slower than that leaks until the run-label cleanup.
+    /// Removes `name` again and again while the `docker run` client is still alive. The client
+    /// returns only after the daemon is done with its create and start, so killing the client
+    /// first would let a slow create finish later and leave a `Created` container behind.
+    /// shortcut: after 30 s the client is killed anyway; a create slower than that leaks until
+    /// the run-label cleanup.
     fn stop_and_remove(&self, child: &mut Child, name: &str) {
-        let _ = child.kill();
-        let _ = child.wait();
-        self.kill(name);
-        let stop = Instant::now() + Duration::from_secs(5);
-        let mut gone = 0;
-        while gone < 2 && Instant::now() < stop {
-            std::thread::sleep(Duration::from_millis(500));
-            if self.quick(&["container", "inspect", name]).is_err() {
-                gone += 1;
-            } else {
-                gone = 0;
-                let _ = self.quick(&["rm", "-f", "-v", name]);
+        let stop = Instant::now() + Duration::from_secs(30);
+        loop {
+            self.kill(name);
+            if matches!(child.try_wait(), Ok(Some(_))) {
+                break;
             }
+            if Instant::now() >= stop {
+                let _ = child.kill();
+                let _ = child.wait();
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(250));
         }
+        self.kill(name);
     }
 
     /// Removes the containers, networks and volumes that carry `label` (`key=value`).
