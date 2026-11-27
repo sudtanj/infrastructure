@@ -48,13 +48,13 @@ To run it, open Actions, pick `factory-monorepo-ci`, choose `main` as the workfl
 
 To run the unit tests of `rust-ci-runner` itself, open Actions, pick `factory-monorepo-ci`, choose Run workflow on `main` and set `pipeline` to `rust-ci-runner`. The runner then reads `rust-ci-runner/.factory-ci.toml` from this repo's `main` checkout and runs that pipeline in a `rust:1.90` container. `ref` is ignored and factory-monorepo is not cloned. Only the `--lib` unit tests run: the integration tests in `rust-ci-runner/tests/` call the real `docker` binary, which a step container does not have. The tests of `ship` and `job` run in their own processes because a step container allows 512 processes. Spec: `specs/006-runner-unit-tests/`.
 
-The log is public, so it shows only each step's name, result and duration, plus `<pipeline> <ref>: passed` or `failed` (`rust-ci-runner main: passed` for the runner's tests). The full step output goes to Grafana Loki: in Explore query `{repo="sudtanj/infrastructure"}`; each line starts with `run=<id> sha=<short> branch=<name>`. It is never uploaded as an artifact. The job exits with the runner's exit code and posts no commit status.
+The log is public, so it shows only each step's name, result and duration, plus `<pipeline> <ref>: passed` or `failed` (`rust-ci-runner main: passed` for the runner's tests). The full step output goes to Grafana Loki: in Grafana Explore query `{service_name="factory-ci", repo="sudtanj/infrastructure"}` (Logs Drilldown lists it as service `factory-ci`); the summary prints this query; each line starts with `run=<id> sha=<short> branch=<name>`. It is never uploaded as an artifact. The job exits with the runner's exit code and posts no commit status.
 
 Rules for this workflow:
 
 - Logs are minimal on purpose. The repo is public, factory-monorepo is private. If the runner fails before any step, you see one fixed line and nothing else.
 - Docker steps are refused. The job fails if the root `.factory-ci.toml` has `docker = true`, because a docker-in-docker step would give root on the VM and access to the job's secrets. Use the factory CI runner with `allow_docker` for such repos.
-- Before the runner starts, the job posts one probe line to Grafana Loki and prints `log store answered HTTP <code>`. A non-2xx answer fails the job with a hint to check `FACTORY_CI_LOG_URL` (host only; a trailing `/loki/api/v1/push` is stripped), `FACTORY_CI_LOG_USER` and `FACTORY_CI_LOG_TOKEN`. The runner itself drops failed pushes silently.
+- Before the runner starts, the job posts one probe line (`project="probe"`) to Grafana Loki and prints `log store answered HTTP <code>`. A non-2xx answer fails the job with a hint to check `FACTORY_CI_LOG_URL` (host only; a trailing `/loki/api/v1/push` is stripped), `FACTORY_CI_LOG_USER` and `FACTORY_CI_LOG_TOKEN`. The runner itself drops failed pushes silently.
 - Keep `FACTORY_CI_BWS_SERVER_URL` unset unless you run your own Bitwarden server.
 - Give the Bitwarden machine account behind `factory-ci` read access only to a project that holds `FACTORY_CI_TOKEN` and the three `FACTORY_CI_LOG_*` keys. The workflow lists every secret that account can read.
 

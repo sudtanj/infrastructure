@@ -91,6 +91,9 @@ pub fn send_heartbeat(cfg: &LogConfig, run_id: &str, text: &str) -> Result<(), S
     }
 }
 
+/// Sent on every stream: Grafana Logs Drilldown groups logs by `service_name`.
+pub const SERVICE_NAME: &str = "factory-ci";
+
 /// The two labels that do not change during a run.
 pub struct Labels {
     pub repo: String,
@@ -263,7 +266,7 @@ impl Shipper {
             .into_iter()
             .map(|((step, stream), values)| {
                 serde_json::json!({
-                    "stream": {"repo": self.labels.repo, "project": self.labels.project, "step": step, "stream": stream},
+                    "stream": {"service_name": SERVICE_NAME, "repo": self.labels.repo, "project": self.labels.project, "step": step, "stream": stream},
                     "values": values,
                 })
             })

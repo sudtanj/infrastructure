@@ -213,7 +213,8 @@ fn the_payload_has_four_labels_a_prefix_nanosecond_timestamps_and_basic_auth() {
     for (labels, ts, line) in &vals {
         let mut keys: Vec<_> = labels.as_object().unwrap().keys().cloned().collect();
         keys.sort();
-        assert_eq!(keys, ["project", "repo", "step", "stream"]);
+        assert_eq!(keys, ["project", "repo", "service_name", "step", "stream"]);
+        assert_eq!(labels["service_name"].as_str(), Some("factory-ci"));
         assert_eq!((labels["repo"].as_str(), labels["project"].as_str()), (Some("o/r"), Some("svc")));
         assert!(ts.len() >= 18 && ts.bytes().all(|b| b.is_ascii_digit()), "{ts}");
         assert!(line.starts_with("run=0123456789abcdef sha=aaaaaaaa branch=feature/x "), "{line}");

@@ -175,7 +175,7 @@ jobs:
           export FACTORY_CI_LOG_URL
           # The runner's local mode drops failed pushes silently, so prove the store accepts one line now.
           body=$(jq -nc --arg repo "$GITHUB_REPOSITORY" --arg ts "$(date +%s%N)" --arg line "probe run=$GITHUB_RUN_ID" \
-            '{streams: [{stream: {repo: $repo, project: "probe", step: "probe", stream: "stdout"}, values: [[$ts, $line]]}]}')
+            '{streams: [{stream: {service_name: "factory-ci", repo: $repo, project: "probe", step: "probe", stream: "stdout"}, values: [[$ts, $line]]}]}')
           # Credentials go to curl on stdin: not in argv.
           code=$(printf 'user = "%s:%s"\n' "$FACTORY_CI_LOG_USER" "$FACTORY_CI_LOG_TOKEN" \
             | curl -sS -o /dev/null -w '%{http_code}' --max-time 15 --proto '=https' -K - \
@@ -202,5 +202,6 @@ jobs:
             if [ "$rc" -ne 0 ] && [ -z "$lines" ]; then
               echo "runner failed before running any step (details in Grafana Loki)"
             fi
+            echo "Grafana Explore: {service_name=\"factory-ci\", repo=\"$GITHUB_REPOSITORY\"}"
           } | tee -a "$GITHUB_STEP_SUMMARY"
           exit "$rc"
