@@ -24,7 +24,7 @@ permissions: {}
 
 env:
   # Pinned by digest; bump this line after each release.
-  RUNNER_IMAGE: ghcr.io/sudtanj/rust-ci-runner:0.1.0@sha256:DIGEST_PLACEHOLDER
+  RUNNER_IMAGE: ghcr.io/sudtanj/rust-ci-runner:0.1.0@sha256:0382941d78c93b0742e142d74a09e708ea2a161c46227ef34d8c7a24010b5b26
 
 jobs:
   ci:
