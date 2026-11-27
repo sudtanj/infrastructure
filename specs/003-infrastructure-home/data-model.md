@@ -30,13 +30,13 @@ One project; one machine account with Can read. Keys are plain, with no prefix. 
 | `FACTORY_CI_TOKEN` | yes | fine-grained PAT (FR-016) | yes | yes | no |
 | `FACTORY_CI_BLOB_KEY` | yes | 64 lower-case hex, `openssl rand -hex 32` | yes | yes | no |
 | `RUNNER_IMAGE_DIGEST` | yes | `sha256:<64 hex>` | yes | yes | no |
-| `FACTORY_CI_CLONE_IMAGE` | yes | `...@sha256:<64 hex>` | no | yes | no |
-| `FACTORY_CI_DIND_IMAGE` | yes | `...@sha256:<64 hex>` | no | yes | no |
+| `FACTORY_CI_CLONE_IMAGE` | yes | `ghcr.io/<owner>/...@sha256:<64 hex>` | no | yes | no |
+| `FACTORY_CI_DIND_IMAGE` | yes | `ghcr.io/<owner>/...@sha256:<64 hex>` | no | yes | no |
 | `FACTORY_CI_LOG_URL` | all three or none; required for a private watched repo | Loki base URL | yes | yes | no |
 | `FACTORY_CI_LOG_USER` | same | Loki instance user ID | yes | yes | no |
 | `FACTORY_CI_LOG_TOKEN` | same | `logs:write` token | yes | yes | no |
 | `FACTORY_CI_LOG_LINK` | optional | Explore URL with `{run_id}` | yes | yes | no |
-| `FACTORY_CI_HEARTBEAT_URL` | optional | healthchecks.io ping URL | no | no | yes |
+| `FACTORY_CI_HEARTBEAT_URL` | optional; leave unset for manual runs | healthchecks.io ping URL | no | no | yes |
 | pipeline secrets | per pipeline | names in `.factory-ci.toml` steps; shared names or `<owner>/<repo>/<NAME>` keys | no | second list call, only with names | no |
 
 Every key above starts with `FACTORY_CI` or `RUNNER_`, which the runner reserves, so no pipeline can ask for one (FR-053).

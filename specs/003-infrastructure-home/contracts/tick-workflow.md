@@ -1,10 +1,10 @@
 # Contract: tick workflow and plan script rules added in review round 2
 
-Covers FR-034 to FR-037 and, from round 4, FR-051 to FR-059 (FR-038 is withdrawn). The load step and the new job layout are in `bootstrap-secrets.md`. The base contract is `specs/002-ci-runner/contracts/` (tick, plan output); this file lists only what 003 adds or changes. Files: `.github/workflows/factory-ci-tick.yml`, `.github/scripts/factory-ci-plan.sh`, `factory-ci-job.sh`, `factory-ci-status.sh`, `factory-ci-blob.sh`, `factory-ci-lint-workflow.sh`.
+Covers FR-034 to FR-037 and, from round 4, FR-051 to FR-069 (FR-038 is withdrawn). The load step and the new job layout are in `bootstrap-secrets.md`. The base contract is `specs/002-ci-runner/contracts/` (tick, plan output); this file lists only what 003 adds or changes. Files: `.github/workflows/factory-ci-tick.yml`, `.github/scripts/factory-ci-plan.sh`, `factory-ci-job.sh`, `factory-ci-status.sh`, `factory-ci-blob.sh`, `factory-ci-lint-workflow.sh`.
 
-## Heartbeat (`verdict` job, step `heartbeat`; FR-034)
+## Heartbeat (`verdict` job, step `heartbeat`; FR-034; optional since R2-38)
 
-Inputs: `FACTORY_CI_HEARTBEAT_URL` (a Bitwarden key, loaded by the `verdict` job, FR-057), `PLAN_RESULT` (`needs.plan.result`), `FAIL_TICK` (`needs.plan.outputs.fail_tick`), `RUN_RESULTS` (`needs.run.result`).
+Inputs: `FACTORY_CI_HEARTBEAT_URL` (a Bitwarden key, loaded by `verdict`, FR-057; leave it unset for manual runs), `PLAN_RESULT` (`needs.plan.result`), `FAIL_TICK` (`needs.plan.outputs.fail_tick`), `RUN_RESULTS` (`needs.run.result`).
 
 | Condition | Ping |
 | --- | --- |
@@ -64,5 +64,8 @@ Each has a mutation row in `--self-test`. Rules that existed only for the docker
 | `bws-token-scope` | `secrets.BWS_ACCESS_TOKEN` is mapped in a step that is neither `load secrets` nor the `run` job's `job` step, or the `verdict` job maps it outside `load secrets` |
 | `load-order` | a tick job lacks `install bws` then `load secrets` before its repo scripts, or has a `uses:` after `load secrets` |
 | `load-list` | a job's `load secrets` arguments differ from the table in `bootstrap-secrets.md` |
-| `verdict-soft` | `verdict`'s `install bws` or `load secrets` lacks `continue-on-error: true`, or comes after the verdict step |
+| `verdict-soft` | `verdict`'s `install bws` or `load secrets` lacks `continue-on-error: true` or `timeout-minutes: 2`, the load step lacks `FACTORY_CI_FETCH_WINDOW: 20`, the job lacks `timeout-minutes: 10`, or a soft step comes after the verdict step |
 | `single-run` | the workflow has a `run-docker` job, `matrix_docker`, or `max-parallel: 4` other than once |
+| `verdict-main` | any tick job, `verdict` included, lacks an end-anchored main-only `if:` (`verdict`: `... && always()`) |
+| `install-identical` | the three `install bws` `run:` bodies differ byte for byte, or one lacks the `$GITHUB_PATH` append, `--proto '=https' --tlsv1.2` or the `BWS_SHA256` comparison, or downloads a checksum file |
+| `image-owner` | the `run` guard step does not refuse a clone or dind reference outside `ghcr.io/$owner/` |

@@ -162,7 +162,9 @@ Recorded in `plan.md` Open risks (round 2 adds M3 wording, L3, L4, L6, m3 and YA
 - **Decision**: `.github/scripts/factory-ci-load.sh NAME...` runs one `bws secret list -o json`, looks up each requested name by exact key, masks each value, checks it (4 characters per line, one line), and appends `NAME=value` to `$GITHUB_ENV`. The allowlist of names sits in the script. Later steps read plain environment variables, so `factory-ci-plan.sh`, `factory-ci-job.sh`, `factory-ci-status.sh` and the guard steps change little.
 - **Why `$GITHUB_ENV`**: the guard and `fetch runner` steps need the digest before the plan or job script runs, and `status fallback` needs the blob key and token after `job` fails. A file in `$RUNNER_TEMP` would hold every secret in cleartext, and a step output cannot carry a masked value. `$GITHUB_ENV` carries only the requested names, and a step cannot read a value it was not given.
 - **Cost of the hand-off**: every later step of the job inherits the values, so no `uses:` step may follow the load step (lint, FR-052). Values must be one line, or a newline could write a second variable into `$GITHUB_ENV` (FR-050). `bws` itself is the only code that sees the whole list, and it runs inside the script.
-- **`RUNNER_` prefix**: GitHub documents `RUNNER_*` as reserved. I cannot test whether `$GITHUB_ENV` refuses a write named `RUNNER_IMAGE_DIGEST`, so the script writes it as `FCI_RUNNER_IMAGE_DIGEST`. The Bitwarden key keeps the owner's name. The live check (T066) confirms nothing else is needed.
+- **`RUNNER_` prefix**: GitHub documents `RUNNER_*` as reserved. I could not test whether `$GITHUB_ENV` refuses a write named `RUNNER_IMAGE_DIGEST`, so the script writes it as `FCI_RUNNER_IMAGE_DIGEST`. A selftest step now probes this with a stub `bws` and a `RUNNER_` probe variable and prints the answer (FR-065, T068); the rename stays either way.
+- **Checkout post step**: `actions/checkout` runs a post step at job end that inherits `$GITHUB_ENV`. It is pinned to a commit and runs with `persist-credentials: false`; accepted (R-22).
+- **`bws` on `PATH`**: `install bws` appends `$RUNNER_TEMP/bin` to `$GITHUB_PATH`; without it `load secrets` cannot find `bws` (critic B-1, FR-063).
 - **Per-job lists** (FR-051): `plan` needs no clone or dind image because only the job clones; it drops the old early check of those two variables, and the `run` guard still checks them before any container starts. `verdict` needs the heartbeat URL only.
 - **Second call in `run`**: the pipeline's secret names are known only after `prepare`, which needs the clone token. Folding both lists into one needs the `prepare` step before the load step, and `prepare` needs the token from the load. So `run` calls `bws` twice when the pipeline lists a secret, once otherwise.
 - **Rejected**: (a) One load step that writes a JSON file for later steps: cleartext copy of every secret on disk. (b) Mapping each value into each step's `env:` from a step output: GitHub drops a masked output. (c) A composite action: it needs a `uses:` and a pin for no gain.
@@ -171,7 +173,7 @@ Recorded in `plan.md` Open risks (round 2 adds M3 wording, L3, L4, L6, m3 and YA
 
 - **Decision**: FR-038 and D19 are withdrawn. `factory-ci-plan.sh` makes no `bws` call. The plan's load step proves the token works: a revoked token fails the tick at `plan` with the store message.
 - **Why**: The plan cannot run without the blob key and the GitHub token, so it must call Bitwarden anyway. A second call to prove what the first proved adds a failure path. The old predicate (`secrets_ok`, `secrets`, `repo_id`) goes with it.
-- **Cost**: an idle tick now calls Bitwarden. Round 3 promised none. Two calls per idle tick (plan, verdict) is about 576 a day. Bitwarden's limits on `bws` calls are not documented to me; `fci_list` retries a 429 inside its 60-second window, and live check T066 measures it. Open risk R-14.
+- **Cost**: every tick now calls Bitwarden in `plan` and in `verdict`. Ticks start by hand (D33), so that is a handful of calls a day. Bitwarden's limits on `bws` calls are not known to me; `fci_list` retries a 429 with jittered backoff inside its window, and live check T066 records any retry. Open risk R-14.
 
 ## D29. One `run` job (review round 4)
 
@@ -180,11 +182,21 @@ Recorded in `plan.md` Open risks (round 2 adds M3 wording, L3, L4, L6, m3 and YA
 - **Accepted risk (owner)**: a docker-enabled step runs in a job that can read every Bitwarden secret. Neither watch entry sets `allow_docker` today (FR-002).
 - **Runner change**: `main.rs` drops `docker_api()` and the partition in `plan_a` and `plan_c`, the `FACTORY_CI_TOKEN_DOCKER` redaction entry and the "is not set" problem text. `plan.rs` drops `matrix_docker`; `Apis` keeps one client (`Apis::same` is already how most tests build it). Tests that checked the docker routing go (`grep -rn "_DOCKER\|matrix_docker" rust-ci-runner`).
 
-## D30. `plan` and `verdict` in `factory-ci`; the heartbeat from Bitwarden (review round 4)
+## D30. `plan` and `verdict` in `factory-ci`; the heartbeat stays in `verdict` (review round 4, after the reviews and R2-38)
 
 - **Decision**: `plan`, `run` and `verdict` all use `factory-ci`. I searched for a reason to keep `factory-ci-plan` and found none: it held the heartbeat URL and tokens that now sit in Bitwarden, and its branch rule equals `factory-ci`'s.
-- **Heartbeat**: `verdict` installs `bws` and loads `FACTORY_CI_HEARTBEAT_URL`, both steps `continue-on-error: true`, before the verdict step, so a Bitwarden fault there never turns a green tick red. With Bitwarden down in the whole tick, `plan` is red, `verdict` is red from the plan result, no ping goes out, and the healthchecks.io check goes late. The owner accepted it.
-- **`verdict` needs a checkout and `contents: read`**: the load script is in the repo.
+- **Heartbeat**: the existing step stays in `verdict` exactly as it is. I had moved an idle-tick ping into `plan` (critic M-6); the owner then decided ticks run by hand (D33), which makes the heartbeat meaningless, so the rework is withdrawn (R2-35). `verdict` loads `FACTORY_CI_HEARTBEAT_URL` and pings only when it is set; the README says to leave it unset for manual runs.
+- **Why a soft `verdict`**: the critic found that `bws` was not on `PATH` there, and `continue-on-error` hid it (B-1, FR-063).
+- **`verdict` soft steps**: `install bws` and `load secrets` carry `continue-on-error: true`, `timeout-minutes: 2`, and the load step `FACTORY_CI_FETCH_WINDOW=20`; the job has `timeout-minutes: 10`. A Bitwarden fault there cannot turn a green tick red or hold the concurrency slot.
+- **`verdict` guard**: `if: github.ref == 'refs/heads/main' && always()`, so a branch dispatch skips every job, reads no secret and enters no Environment (security F1).
+- **`verdict` needs a checkout and `contents: read`**: the scripts are in the repo.
+
+## D33. Ticks start by hand (owner decision after the round 4 reviews)
+
+- **Decision**: the owner starts `factory-ci-tick` from the Actions tab. No scheduler, no interval (R2-38). The trigger is already `workflow_dispatch` only.
+- **Consequences**: the scheduler token, the cron-job.org setup and its renewal reminder become optional. I kept the README procedure under the heading "Optional: run on a schedule" instead of deleting it: that is one heading change, and the docs test keeps its scheduler rows with no edit. The heartbeat is optional for the same reason. The Bitwarden call volume falls to a handful of manual runs, so R-14 is small; the retry jitter stays because it is one line.
+- **Migration order** (R2-31) loses its pause and resume steps.
+- **Rejected**: deleting the scheduler procedure and its test rows (a larger diff for no gain); dropping the heartbeat code (it works and costs nothing unset).
 
 ## D31. Constitution 1.2.0 (review round 4)
 
@@ -192,6 +204,12 @@ Recorded in `plan.md` Open risks (round 2 adds M3 wording, L3, L4, L6, m3 and YA
 - **Why not PATCH**: a rule changes. Before, Grafana credentials, tokens and keys had to come from GitHub; now they must not.
 - **Why not MAJOR**: Principle II keeps its purpose (secrets have defined sources, none committed). The change narrows what GitHub may hold. MAJOR is for removing or redefining a principle.
 - **Components that must change to comply** (Governance): the tick workflow, the plan, job and load scripts, the runner's `main.rs` and `plan.rs`, the lint, the docs test and the README. Each has a task (T054 to T062).
+
+## D32. Where the runner digest and image references live (decision pending the owner; security F3)
+
+- **Current plan**: the three values stay in Bitwarden (`RUNNER_IMAGE_DIGEST`, `FACTORY_CI_CLONE_IMAGE`, `FACTORY_CI_DIND_IMAGE`), as the owner chose. Bitwarden has no pull request review and no history for them, so anyone with the token can swap an image. The `run` guard requires the clone and dind references to start with `ghcr.io/<owner>/` and carry `@sha256:` (FR-068, lint `image-owner`). The runner image already has a fixed `ghcr.io/<owner>/rust-ci-runner@` prefix in `fetch runner`, so only its digest is a Bitwarden value.
+- **Alternative**: a committed file, for example `.github/factory-ci-images.toml`, holding the three values. Merges to `main` are reviewed by the owner's ruleset and git keeps the history; the load script would drop those three names and the guard would read the file. Cost: the release and mirror summaries would say "edit the file in a pull request" and a digest change needs a merge before the next tick; the README tables lose three rows.
+- **Status**: the owner is deciding. If the file wins, a new round changes FR-048, FR-051, FR-064, FR-068 and the briefs; nothing in round 4 blocks it, because the guard stays valid for either source.
 
 ## Test classification
 
