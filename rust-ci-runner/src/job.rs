@@ -14,9 +14,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Answers the variables a command reads; `main` passes the process environment.
+pub type Env<'a> = &'a dyn Fn(&str) -> Option<String>;
 
 type Setup = (Opts, HttpApi, Vec<String>, Option<LogConfig>, String);
-pub type Env<'a> = &'a dyn Fn(&str) -> Option<String>;
 
 const RETRY: &str = " (retry)";
 const LOG_VARS: [&str; 3] = [
