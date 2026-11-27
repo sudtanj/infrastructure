@@ -71,6 +71,33 @@ pub(crate) fn read_capped(r: impl Read, cap: u64) -> String {
     out
 }
 
+/// Runs `c` to the end with a time limit: `(success, stdout, stderr)`. The caller sets the
+/// environment; stdin is null and both output streams are piped and capped. `None` when the
+/// child cannot start or the limit passes (it is killed).
+pub(crate) fn run_capped(mut c: Command, limit: Duration) -> Option<(bool, String, String)> {
+    c.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = c.spawn().ok()?;
+    let (out, err) = (child.stdout.take(), child.stderr.take());
+    let end = Instant::now() + limit;
+    std::thread::scope(|sc| {
+        let o = sc.spawn(move || out.map(|r| read_capped(r, 16 << 20)).unwrap_or_default());
+        let e = sc.spawn(move || err.map(|r| read_capped(r, 64 << 10)).unwrap_or_default());
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(st)) => break Some(st),
+                Ok(None) if Instant::now() < end => std::thread::sleep(Duration::from_millis(25)),
+                _ => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break None;
+                }
+            }
+        };
+        let (o, e) = (o.join().unwrap_or_default(), e.join().unwrap_or_default());
+        status.map(|st| (st.success(), o, e))
+    })
+}
+
 impl Engine {
     pub fn new(bin: &str) -> Engine {
         Engine { bin: s(bin) }

@@ -1,10 +1,10 @@
 //! Reads the four CI settings from Bitwarden with the pinned `bws` binary (FR-009 to FR-011).
 //! Errors name keys and counts, never a value and never the output of `bws`.
 
-use crate::engine::read_capped;
+use crate::engine::run_capped;
 use std::fmt;
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::process::Command;
+use std::time::Duration;
 
 const KEYS: [&str; 4] = ["FACTORY_CI_TOKEN", "FACTORY_CI_LOG_URL", "FACTORY_CI_LOG_USER", "FACTORY_CI_LOG_TOKEN"];
 
@@ -75,14 +75,15 @@ fn allowed_server(url: &str) -> bool {
 
 fn rejected(stderr: &str) -> bool {
     let e = stderr.to_lowercase();
-    ["400", "401", "403", "invalid_client", "unauthorized", "forbidden", "invalid access token"].iter().any(|m| e.contains(m))
+    // Status codes match as whole words, so a port such as 40123 does not.
+    e.split(|c: char| !c.is_ascii_alphanumeric()).any(|t| matches!(t, "400" | "401" | "403"))
+        || ["invalid_client", "unauthorized", "forbidden", "invalid access token"].iter().any(|m| e.contains(m))
 }
 
 /// One call. The child gets an empty environment plus `PATH`, `HOME`, the token and the server URL.
 fn attempt(bws_bin: &str, token: &str, server_url: Option<&str>, limit: Duration) -> Result<String, StoreError> {
     let mut c = Command::new(bws_bin);
     c.args(["secret", "list", "-o", "json"]).env_clear();
-    c.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     for k in ["PATH", "HOME"] {
         if let Ok(v) = std::env::var(k) {
             c.env(k, v);
@@ -92,30 +93,11 @@ fn attempt(bws_bin: &str, token: &str, server_url: Option<&str>, limit: Duration
     if let Some(u) = server_url {
         c.env("BWS_SERVER_URL", u);
     }
-    let mut child = c.spawn().map_err(|_| StoreError::Unreachable)?;
-    let (out, err) = (child.stdout.take(), child.stderr.take());
-    let end = Instant::now() + limit;
-    std::thread::scope(|sc| {
-        let o = sc.spawn(move || out.map(|r| read_capped(r, 16 << 20)).unwrap_or_default());
-        let e = sc.spawn(move || err.map(|r| read_capped(r, 64 << 10)).unwrap_or_default());
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(st)) => break Some(st),
-                Ok(None) if Instant::now() < end => std::thread::sleep(Duration::from_millis(25)),
-                _ => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    break None;
-                }
-            }
-        };
-        let (o, e) = (o.join().unwrap_or_default(), e.join().unwrap_or_default());
-        match status {
-            Some(st) if st.success() => Ok(o),
-            Some(_) if rejected(&e) => Err(StoreError::Rejected),
-            _ => Err(StoreError::Unreachable),
-        }
-    })
+    match run_capped(c, limit) {
+        Some((true, out, _)) => Ok(out),
+        Some((false, _, err)) if rejected(&err) => Err(StoreError::Rejected),
+        _ => Err(StoreError::Unreachable),
+    }
 }
 
 /// Runs `bws secret list -o json` (no project argument: one project per machine account). `limit` is

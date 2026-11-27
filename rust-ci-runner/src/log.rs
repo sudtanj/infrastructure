@@ -13,7 +13,7 @@ pub const FAULTS: &[&str] = &[
     "BWS_ACCESS_TOKEN is not set",
     "secret store unreachable",
     "secret store rejected the access token",
-    "log store check failed: check FACTORY_CI_LOG_URL (host only, e.g. https://logs-prod-xxx.grafana.net), FACTORY_CI_LOG_USER (numeric user id) and FACTORY_CI_LOG_TOKEN (needs logs:write)",
+    LOG_STORE_HINT,
     "log store check failed",
     "cannot reach the container engine",
     "repository identity check failed",
@@ -23,6 +23,9 @@ pub const FAULTS: &[&str] = &[
     "runner fault",
     "internal error",
 ];
+
+/// Printed when the log store answers 401 or 403 to the probe.
+pub const LOG_STORE_HINT: &str = "log store check failed: check FACTORY_CI_LOG_URL (host only, e.g. https://logs-prod-xxx.grafana.net), FACTORY_CI_LOG_USER (numeric user id) and FACTORY_CI_LOG_TOKEN (needs logs:write)";
 
 const SECRET_KEYS: [&str; 4] = ["FACTORY_CI_TOKEN", "FACTORY_CI_LOG_URL", "FACTORY_CI_LOG_USER", "FACTORY_CI_LOG_TOKEN"];
 

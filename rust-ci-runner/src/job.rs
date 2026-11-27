@@ -431,7 +431,7 @@ fn remove_ws(engine: &Engine, image: &str, ws: &Path) {
 }
 
 /// The docker-in-docker image, only when a step needs it.
-fn dind_image(env: Env, p: &Pipeline) -> Result<String, String> {
+pub(crate) fn dind_image(env: Env, p: &Pipeline) -> Result<String, String> {
     if p.needs_docker() {
         require_pinned(env, "FACTORY_CI_DIND_IMAGE")
     } else {
