@@ -1,8 +1,9 @@
 # rust-ci-runner
 
 A small CI runner in Rust. A repository describes its pipeline in `.factory-ci.toml`: steps, each in its own
-container image, forming a dependency graph. Central mode runs on GitHub Actions in one repo ("B") that watches your
-other repos and posts a `factory-ci` commit status on each. The same binary runs a pipeline on your machine.
+container image, forming a dependency graph. Central mode runs on GitHub Actions in this repo (`sudtanj/infrastructure`),
+which watches your other repos and posts a `factory-ci` commit status on each. The same binary runs a pipeline on your
+machine.
 
 - Toolchain pinned in `rust-toolchain.toml`. One static binary for Linux, x86_64 and aarch64.
 - Local use needs Docker or Podman and nothing else.
@@ -11,8 +12,9 @@ other repos and posts a `factory-ci` commit status on each. The same binary runs
 
 ## How a tick works
 
-An outside scheduler dispatches `.github/workflows/factory-ci-tick.yml` in B every 5 minutes. B is public, so its
-Actions minutes are free. A private B is unsupported: an idle tick would bill about 17,000 minutes a month (A25).
+An outside scheduler (cron-job.org, see the root README) dispatches `.github/workflows/factory-ci-tick.yml` in this repo
+every 5 minutes. This repo is public, so its Actions minutes are free. A private copy of this repo is unsupported: an
+idle tick would bill about 17,000 minutes a month.
 
 1. `plan` reads `.github/factory-ci-repos.toml`, lists each repo's branch tips and posts nothing for commits that
    already have a status. It writes the work as a matrix with an encrypted blob per item.
@@ -31,30 +33,11 @@ idle tick leaves no trace there.
 An idle tick makes no Bitwarden call. A tick plans at most 20 items. The API budget (150 calls for an idle tick)
 holds for about 13 repos with 5 branches each; more repos still work with more calls.
 
-## Set up B
+## Setup
 
-1. Make a separate public copy of this repo. Do not use the monorepo.
-2. Enable Actions, set run retention to 7 to 14 days, and protect `main` (pull request required, no force push).
-3. Create the Environments `factory-ci-plan`, `factory-ci` and `factory-ci-docker`, limited to the `main` branch.
-   Each job reads its bootstrap secrets from its own Environment, so a workflow run from another branch gets none.
-4. Tokens, all fine-grained, 90-day expiry:
-   - `FACTORY_CI_TOKEN`: Contents read, Commit statuses read and write, Metadata read. `FACTORY_CI_TOKEN_DOCKER`: the
-     same, for `allow_docker` repos only.
-   - A scheduler token for B only, with Actions write.
-5. Environment secrets, bootstrap only: the two repo tokens, `BWS_ACCESS_TOKEN`, `BWS_ACCESS_TOKEN_DOCKER` and
-   `FACTORY_CI_BLOB_KEY` (`openssl rand -base64 33`, at least 32 characters), and optionally `FACTORY_CI_HEARTBEAT_URL`.
-   `FACTORY_CI_BLOB_KEY_DOCKER` is optional: needed only when `allow_docker` rows exist, at least 32 characters when
-   set, and a different value from the plain key.
-   `factory-ci-plan` holds all of these.
-   `factory-ci` holds `FACTORY_CI_TOKEN`, `BWS_ACCESS_TOKEN` and `FACTORY_CI_BLOB_KEY`; `factory-ci-docker` holds the
-   docker equivalents with `FACTORY_CI_BLOB_KEY_DOCKER` (never the plain key). Pipeline secrets never go into GitHub.
-6. Release the runner (next section), then set the repository variables `RUNNER_IMAGE_DIGEST`,
-   `FACTORY_CI_CLONE_IMAGE` and `FACTORY_CI_DIND_IMAGE`.
-7. Set up Bitwarden and the log store (below), then list repos in `.github/factory-ci-repos.toml`.
-8. Dispatch one tick by hand and check the result.
-
-The full setup and its checks are in `specs/002-ci-runner/quickstart.md`. Rotate every token before day 80: replace the secret,
-dispatch one tick, delete the old token.
+The setup steps, every secret and variable with its Environment, and the checks are in the root `README.md`, section
+Setup. Follow it once, in order, before the first tick. `FACTORY_CI_BLOB_KEY_DOCKER` is optional: it is needed only
+when `allow_docker` rows exist, it must be at least 32 characters, and it must differ from `FACTORY_CI_BLOB_KEY`.
 
 ## Release the runner
 
@@ -85,9 +68,11 @@ Check a file with `rust-ci-runner plan --repos .github/factory-ci-repos.toml --c
 needs no token or network. The selftest workflow runs it on pull requests. Removing an entry stops all contact with
 that repo; its old statuses stay.
 
+A watched repo without `.factory-ci.toml` is skipped: no status, no job and no error.
+
 ## Secrets
 
-Bitwarden Secrets Manager is the only secret store. There is no GitHub-secret fallback. With `BWS_ACCESS_TOKEN`
+Bitwarden Secrets Manager is the only store for pipeline secrets. There is no GitHub-secret fallback. With `BWS_ACCESS_TOKEN`
 unset, a pipeline that lists a secret ends in `error` ("no secret store configured"); a pipeline with none still runs.
 
 A step gets only the names it lists in `secrets`. A job looks them up in the default project, or in the docker
@@ -97,31 +82,31 @@ project for `allow_docker` repos:
   the default of `FCI_KEY_SEP` in `.github/scripts/factory-ci-secrets.sh` to `:` and name the keys `owner/name:NAME`.
   The separator is `/` or `:`, never `__`.
 - `NAME`: a shared key. A repo can read it only when its entry lists the name in `secrets`.
-- `FACTORY_CI_LOG_URL`, `FACTORY_CI_LOG_USER`, `FACTORY_CI_LOG_TOKEN`: the log store (below). The docker project
-  needs a copy of the three.
 
 The free plan allows 3 projects and 3 machine accounts. This setup uses 2 of each: a default project and a docker
 project, each with its own account. Give each account "Can read" on its project only. A key under another repo's
 prefix is never read, but the account can read the whole project, so anyone who can push a pipeline to a listed repo
 can read that repo's keys and the shared names its entry lists.
 
-Set `FACTORY_CI_BWS_PROJECT` and `FACTORY_CI_BWS_PROJECT_DOCKER` to the project IDs (plus
-`FACTORY_CI_BWS_SERVER_URL` outside the US). Secrets reach only branches that match `secret_branches`. On another
-branch a step that lists a secret ends in `error` ("secrets not allowed on this branch"); steps with none run.
+The Bitwarden project IDs go in the variables `FACTORY_CI_BWS_PROJECT` and `FACTORY_CI_BWS_PROJECT_DOCKER`, and the
+server URL in `FACTORY_CI_BWS_SERVER_URL` outside the US cloud. Secrets reach only branches that match `secret_branches`.
+On another branch a step that lists a secret ends in `error` ("secrets not allowed on this branch"); steps with none run.
 
 A value with a line shorter than 4 characters is refused: masking so short a line would hide ordinary text. Change the
 secret.
 
 Rollback: remove `BWS_ACCESS_TOKEN` (and the docker token) from the Environments. Pipelines that list no secret keep
-running; the others end in `error` until you restore it. Log shipping stops too, because its credentials live in the
-store, and a private repo on a public B is refused.
+running; the others end in `error` until you restore it. Log shipping keeps running, because its credentials do not
+come from Bitwarden. Removing the `FACTORY_CI_LOG_*` secrets stops log shipping, and a private watched repo is then refused.
 
 ## Log shipping
 
-B is public, so step output must not appear in its Actions log. Set `FACTORY_CI_LOG_URL`, `FACTORY_CI_LOG_USER` and
-`FACTORY_CI_LOG_TOKEN` (Grafana Cloud Loki: the base URL, the instance user ID and a `logs:write` token) in
-Bitwarden. Jobs ship every output line to Loki, labelled by repo, project, step and stream, with secrets replaced.
-The Actions log shows only `item N`.
+This repo is public, so step output must not appear in its Actions log. The three log credentials, `FACTORY_CI_LOG_URL`,
+`FACTORY_CI_LOG_USER` and `FACTORY_CI_LOG_TOKEN` (Grafana Cloud Loki: the base URL, the instance user ID and a
+`logs:write` token), are Environment secrets of `factory-ci-plan`, `factory-ci` and `factory-ci-docker`. The runner reads
+them from its environment; no Bitwarden call fetches them. `factory-ci-docker` holds its own token, so you can cut it
+off alone. The root README, step 4, has the table. Jobs ship every output line to Loki, labelled by repo, project, step
+and stream, with secrets replaced. The Actions log shows only `item N`.
 
 Set the variable `FACTORY_CI_LOG_LINK` to an Explore URL containing `{run_id}`; it becomes the status link. Without it
 the link is the Actions run. If Loki rejects the credentials or stays down, the result is unchanged and the status
@@ -225,16 +210,16 @@ nothing). Steps run as root in most images, so files they create in the checkout
 
 ## Risks you accept
 
-- Repo names are public. B is public, so the watch list and the tick summary show repo names. Job names, matrix
+- Repo names are public. This repo is public, so the watch list and the tick summary show repo names. Job names, matrix
   values and logs show no branch, SHA, project path, secret name or run ID.
-- `allow_docker` gives a repo's committers root on the runner and B's docker secrets. Turn it on only for repos whose
-  committers you trust. Anyone who can push to a watched branch runs code on B's runners and can read the secrets
-  their pipeline lists on `secret_branches`.
+- `allow_docker` gives a repo's committers root on the runner and the docker secrets of this repo. Turn it on only for
+  repos whose committers you trust. Anyone who can push to a watched branch runs code on this repo's runners and can read
+  the secrets their pipeline lists on `secret_branches`.
 - Docker Hub pull limits apply to anonymous pulls from shared runners. A limit hit ends the item in `error`, which
   gets one retry; a second one stays red until a new commit.
 - A secret is hidden in a log line only when its whole value appears in it. A step that transforms it (base64, URL
   encoding) or prints it across two lines reaches Loki unmasked. Loki holds the encoded output as printed, so
-restrict who can read the store.
+  restrict who can read the store.
 - Status links to Grafana stop working after its 14-day retention.
 
 ## Limits

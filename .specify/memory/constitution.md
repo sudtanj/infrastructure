@@ -20,7 +20,7 @@ Rationale: one place owns all automation, so checks do not depend on whose machi
 
 - Bootstrap secrets are the minimum the runner needs before it can read anything else: the
   Bitwarden access token, Grafana and Loki credentials, runner tokens and blob keys. They come
-  from GitHub Actions secrets and variables of this repository, and from nowhere else.
+  from GitHub Actions secrets and variables of this repository, repository-level or in its Environments, and from nowhere else.
 - Pipeline secrets, the ones the watched repositories' steps use, come from Bitwarden, read at
   run time with the Bitwarden access token.
 - A secret MUST NOT be committed in any file, including examples, fixtures and specs. Docs name
@@ -88,7 +88,7 @@ and stops agents from building what nobody specified.
 - Top-level layout: `rust-ci-runner/` (the runner), `.github/` (workflows, scripts and the
   watched-repo list), `specs/` (Spec Kit feature specs), `.specify/` and `.claude/` (Spec Kit
   tooling and agent skills).
-- Repository secrets and variables are the only bootstrap channel (Principle II). The README
+- GitHub Actions secrets and variables of this repository, repository-level or in its Environments, are the only bootstrap channel (Principle II). The README
   lists every one the workflows read, and a workflow change that reads a new one updates that
   list in the same pull request.
 - Third-party actions MUST be pinned and workflow `permissions` MUST be the minimum the job needs.
@@ -111,4 +111,4 @@ and stops agents from building what nobody specified.
 - Reviewers check pull requests against these principles; violations need either a fix or a
   justified exception recorded in the feature's `plan.md`.
 
-**Version**: 1.0.0 | **Ratified**: 2026-11-27 | **Last Amended**: 2026-11-27
+**Version**: 1.0.1 | **Ratified**: 2026-11-27 | **Last Amended**: 2026-11-27
