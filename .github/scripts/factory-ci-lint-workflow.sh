@@ -65,7 +65,7 @@ matrix-ref|wf|s/^( *)B_PRIVATE: .*/&\n\1X: ${{ matrix.blob }}/
 item-name|wf|s/run: bash .github\/scripts\/factory-ci-status.sh/run: echo "$ITEM_BLOB"/
 run-docker-name|wf|s/fromJSON\(needs.plan.outputs.matrix_docker\)/fromJSON(needs.plan.outputs.matrix)/
 bws-scope|wf|s/secrets.FACTORY_CI_TOKEN_DOCKER/secrets.FACTORY_CI_TOKEN/
-blob-key-length|wf|s/\{64\} \]\]/{8} ]]/
+blob-key-length|wf|s/\{64\}\$ \]\]/{8}$ ]]/
 no-packages|wf|s/^( *)contents: read/&\n\1packages: read/
 blob-key-scope|wf|s/secrets.FACTORY_CI_BLOB_KEY_DOCKER \}\}$/secrets.FACTORY_CI_BLOB_KEY }}/
 blob-key-scope|wf|s/^( *)FACTORY_CI_TOKEN: \$\{\{ secrets.FACTORY_CI_TOKEN \}\}$/&\n\1FACTORY_CI_BLOB_KEY_DOCKER: ${{ secrets.FACTORY_CI_BLOB_KEY_DOCKER }}/
