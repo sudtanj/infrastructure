@@ -2890,4 +2890,79 @@ echo "$SITE_API_KEY" | base64 -w 0
         assert_eq!(w.go(&w.args()), 1);
         refused(&w, "repository or ref not in the watch list");
     }
+
+    // ---- QA, after T017a: masking proven through a step that does ship ----
+    // H1 makes a step with secrets ship nothing, so the tests above pass without any masking in Loki. Here step
+    // `b` lists no secret and prints the value of step `a`, so its lines ship and the shared redactor must mask
+    // them.
+
+    /// Step `a` holds the secret, step `b` holds none; both containers run `body`.
+    fn plain_step_world(body: &str) -> W {
+        let pl = [one_step("a", &[KEY]), one_step("b", &[])].concat();
+        let mut w = world(&pl, &entry(MAIN, &[KEY]), &[(KEY, VAL)]);
+        w.docker_body = format!("case \"$1\" in run)\n{body}\n;; esac");
+        w
+    }
+
+    #[test]
+    fn a_plain_step_printing_a_value_across_the_64k_cut_is_masked_in_loki() {
+        for fill in [" ", "a"] {
+            let body = format!(
+                r#"head -c 65530 /dev/zero | tr '\0' '{fill}'
+printf '%s\n' '{VAL}'
+head -c 65520 /dev/zero | tr '\0' '{fill}'
+printf '%s' '{VAL}' | base64"#
+            );
+            let w = plain_step_world(&body);
+            assert_eq!(w.ok(), 0, "{fill:?}: {}", w.stderr());
+            let b64 = base64(VAL.as_bytes());
+            let bodies = w.hub.bodies();
+            for n in [VAL, b64.as_str(), &VAL[..6], &b64[..6]] {
+                assert!(!bodies.contains(n), "{fill:?}: {n} reached Loki");
+            }
+            let b = lines(&w, "b", "stdout");
+            assert!(
+                b.iter().filter(|l| l.contains("***")).count() >= 2,
+                "{fill:?}: no masked line, so nothing proves the cut: {:?}",
+                b.iter().map(String::len).collect::<Vec<_>>()
+            );
+            no_step_output_shipped(&w, "a");
+            assert_public(&w);
+        }
+    }
+
+    #[test]
+    fn a_plain_step_printing_the_review_forms_ships_only_masked_lines() {
+        let body = format!(
+            r#"printf '%s\n' '{VAL}'
+printf 'prefix-%s-suffix\n' '{VAL}'
+echo '{VAL}' | base64
+printf '%s' '{VAL}' | od -An -tx1 | tr -d ' \n' | tr a-f A-F; echo"#
+        );
+        let w = plain_step_world(&body);
+        assert_eq!(w.ok(), 0, "{}", w.stderr());
+        assert_eq!(lines(&w, "b", "stdout"), ["***", "prefix-***-suffix", "***", "***"]);
+        assert!(!w.hub.bodies().contains(VAL));
+        no_step_output_shipped(&w, "a");
+        assert_public(&w);
+    }
+
+    /// L6 through the binary: a step named like a secret value prints as `step`, never as its name.
+    #[test]
+    fn a_step_named_like_a_secret_value_prints_as_step() {
+        let name = "deploy-prod";
+        let w = world(&one_step(name, &[KEY]), &entry(MAIN, &[KEY]), &[(KEY, name)]);
+        assert_eq!(w.ok(), 0, "{}", w.stderr());
+        assert_eq!(
+            norm(&w.stdout()),
+            [
+                "[runner] log store answered HTTP 204",
+                "[step] started",
+                "[step] success in Ns",
+                "[runner] pipeline passed"
+            ]
+        );
+        assert!(!format!("{}{}", w.stdout(), w.stderr()).contains(name));
+        assert_public(&w);
+    }
 }
