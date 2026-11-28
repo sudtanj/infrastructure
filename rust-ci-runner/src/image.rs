@@ -25,6 +25,15 @@ pub const CRANE_BIN: &str = "/ko-app/crane";
 pub const JOB_DEADLINE: std::time::Duration = std::time::Duration::from_secs(40 * 60);
 
 const DOCKERFILE_MAX: usize = 256 * 1024;
+/// `libc::O_NONBLOCK` on Linux; the crate has no libc dependency.
+const O_NONBLOCK: i32 = 0o4000;
+const PLATFORM_VARS: [&str; 5] = [
+    "BUILDPLATFORM",
+    "TARGETPLATFORM",
+    "TARGETARCH",
+    "TARGETOS",
+    "BUILDARCH",
+];
 const CHAIN_MAX: usize = 20;
 const ALLOWED: [&str; 11] = [
     "FROM",
@@ -92,9 +101,19 @@ pub fn check(dir: &Path) -> Vec<&'static str> {
 
 /// `None` when over 256 KiB (exactly 256 KiB passes), not UTF-8, holding a NUL, or unreadable.
 fn read_dockerfile(path: &Path) -> Option<String> {
+    use std::os::unix::fs::OpenOptionsExt;
     let mut buf = Vec::new();
-    std::fs::File::open(path)
-        .and_then(|f| f.take(DOCKERFILE_MAX as u64 + 1).read_to_end(&mut buf))
+    // O_NONBLOCK: a FIFO swapped in after the `symlink_metadata` check must not block the open.
+    let f = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(O_NONBLOCK)
+        .open(path)
+        .ok()?;
+    if !f.metadata().ok()?.is_file() {
+        return None;
+    }
+    f.take(DOCKERFILE_MAX as u64 + 1)
+        .read_to_end(&mut buf)
         .ok()?;
     if buf.len() > DOCKERFILE_MAX || buf.contains(&0) {
         return None;
@@ -107,6 +126,11 @@ fn pinned(reference: &str) -> bool {
     reference.rsplit_once("@sha256:").is_some_and(|(name, d)| {
         !name.is_empty() && d.len() == 64 && d.bytes().all(|c| c.is_ascii_hexdigit())
     })
+}
+
+/// A JSON array of strings, the only form BuildKit runs without a shell.
+fn exec_form(args: &str) -> bool {
+    serde_json::from_str::<Vec<String>>(args).is_ok()
 }
 
 fn secret_name(name: &str) -> bool {
@@ -182,6 +206,8 @@ fn secret_value(text: &str, bad: &mut BTreeSet<&'static str>) {
 struct Ins {
     kw: String,
     args: String,
+    /// Continuations glued with no separator, so a token split across lines shows up.
+    raw: String,
 }
 
 struct Stage {
@@ -193,35 +219,37 @@ struct Stage {
     shell: bool,
 }
 
-/// `<<WORD`, `<<-WORD`, `<<"WORD"` openers of a line: the terminator and whether tabs are stripped.
-fn heredocs(args: &str) -> Vec<(String, bool)> {
+/// Heredoc openers of a `RUN` or `COPY`: the terminator and whether tabs are stripped. `None` when a
+/// `<<` is not part of a whole word `\d*<<-?WORD` or `\d*<<-?"WORD"` (BuildKit reads only those as
+/// openers; fail closed otherwise), so the body skip can never hide an instruction BuildKit runs.
+fn heredocs(args: &str) -> Option<Vec<(String, bool)>> {
     let mut out = Vec::new();
-    let mut rest = args;
-    while let Some(i) = rest.find("<<") {
-        rest = &rest[i + 2..];
-        if rest.starts_with('<') {
-            continue;
+    for w in args.split_whitespace().filter(|w| w.contains("<<")) {
+        let r = w
+            .trim_start_matches(|c: char| c.is_ascii_digit())
+            .strip_prefix("<<")?;
+        let dash = r.starts_with('-');
+        let r = r.strip_prefix('-').unwrap_or(r);
+        let q = r.chars().next().filter(|c| matches!(c, '"' | '\''));
+        let word = match q {
+            Some(q) => r.strip_prefix(q)?.strip_suffix(q)?,
+            None => r,
+        };
+        if word.is_empty() || !word.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+            return None;
         }
-        let dash = rest.starts_with('-');
-        let r = rest.strip_prefix('-').unwrap_or(rest);
-        let r = r.strip_prefix(['"', '\'']).unwrap_or(r);
-        let w: String = r
-            .chars()
-            .take_while(|c| !c.is_whitespace() && !matches!(c, '"' | '\''))
-            .collect();
-        if !w.is_empty() {
-            out.push((w, dash));
-        }
+        out.push((word.to_string(), dash));
     }
-    out
+    Some(out)
 }
 
 /// Instructions in order; comments, blank lines and heredoc bodies (`RUN`, `COPY`) are skipped.
-/// The bool is true when a heredoc was opened and never closed.
+/// The bool is true when a heredoc opener is malformed or never closed.
 fn instructions(text: &str) -> (Vec<Ins>, bool) {
     let mut lines = text.split('\n').map(|l| l.trim_end_matches('\r'));
     let mut out = Vec::new();
     let mut open: Vec<(String, bool)> = Vec::new();
+    let mut bad_open = false;
     while let Some(line) = lines.next() {
         if !open.is_empty() {
             let (word, dash) = &open[0];
@@ -239,8 +267,10 @@ fn instructions(text: &str) -> (Vec<Ins>, bool) {
         if cur.is_empty() || cur.starts_with('#') {
             continue;
         }
+        let mut raw = cur.clone();
         while cur.ends_with('\\') {
             cur.pop();
+            raw.pop();
             let Some(next) = lines
                 .by_ref()
                 .map(str::trim)
@@ -250,6 +280,7 @@ fn instructions(text: &str) -> (Vec<Ins>, bool) {
             };
             cur.push(' ');
             cur.push_str(next);
+            raw.push_str(next);
         }
         let cur = cur.trim();
         let (kw, args) = cur.split_once(char::is_whitespace).unwrap_or((cur, ""));
@@ -258,18 +289,23 @@ fn instructions(text: &str) -> (Vec<Ins>, bool) {
         }
         let kw = kw.to_ascii_uppercase();
         if kw == "RUN" || kw == "COPY" {
-            open = heredocs(args);
+            match heredocs(args) {
+                Some(h) => open = h,
+                None => bad_open = true,
+            }
         }
         out.push(Ins {
             kw,
             args: args.trim().to_string(),
+            raw,
         });
     }
-    (out, !open.is_empty())
+    (out, bad_open || !open.is_empty())
 }
 
-/// Names declared by `ARG`/`ENV`: `A=1 B="x y"` pairs, or the old `ENV KEY value` form.
-fn var_names(args: &str, env: bool) -> Vec<&str> {
+/// Names declared by `ARG`/`ENV` and whether each is given a value: `A=1 B="x y"` pairs, or the old
+/// `ENV KEY value` form.
+fn var_names(args: &str, env: bool) -> Vec<(&str, bool)> {
     let b = args.as_bytes();
     let (mut i, mut out) = (0, Vec::new());
     while i < b.len() {
@@ -280,10 +316,11 @@ fn var_names(args: &str, env: bool) -> Vec<&str> {
         while i < b.len() && b[i] != b'=' && !b[i].is_ascii_whitespace() {
             i += 1;
         }
-        if i > s {
-            out.push(&args[s..i]);
-        }
+        let name = &args[s..i];
         if i < b.len() && b[i] == b'=' {
+            if !name.is_empty() {
+                out.push((name, true));
+            }
             i += 1;
             if i < b.len() && (b[i] == b'"' || b[i] == b'\'') {
                 let q = b[i];
@@ -296,8 +333,13 @@ fn var_names(args: &str, env: bool) -> Vec<&str> {
             while i < b.len() && !b[i].is_ascii_whitespace() {
                 i += 1;
             }
-        } else if env {
-            break;
+        } else {
+            if !name.is_empty() {
+                out.push((name, env && !args[i..].trim().is_empty()));
+            }
+            if env {
+                break;
+            }
         }
     }
     out
@@ -353,11 +395,18 @@ fn dockerfile_rules(text: &str, bad: &mut BTreeSet<&'static str>) {
         if kw != "RUN" && kw != "COPY" && i.args.contains("<<") {
             bad.insert("heredoc");
         }
+        secret_value(&i.raw, bad);
         match kw {
             "FROM" => add_stage(i, &mut stages, &mut base, bad),
             "ARG" | "ENV" => {
-                if var_names(&i.args, kw == "ENV").into_iter().any(secret_name) {
-                    bad.insert("secret-name");
+                for (n, assigned) in var_names(&i.args, kw == "ENV") {
+                    if secret_name(n) {
+                        bad.insert("secret-name");
+                    }
+                    // A forced platform value would turn the cross build into an emulated one.
+                    if assigned && PLATFORM_VARS.iter().any(|p| p.eq_ignore_ascii_case(n)) {
+                        bad.insert("emulation");
+                    }
                 }
             }
             "USER" => {
@@ -367,7 +416,7 @@ fn dockerfile_rules(text: &str, bad: &mut BTreeSet<&'static str>) {
             }
             "CMD" | "ENTRYPOINT" => {
                 if let Some(s) = stages.last_mut() {
-                    s.shell |= !i.args.starts_with('[');
+                    s.shell |= !exec_form(&i.args);
                 }
             }
             "RUN" | "COPY" => run_copy(i, &mut stages, bad),
@@ -428,6 +477,11 @@ fn run_copy(i: &Ins, stages: &mut [Stage], bad: &mut BTreeSet<&'static str>) {
     let (fl, rest) = flags(&i.args);
     let run = i.kw == "RUN";
     for f in &fl {
+        // A quoted CSV field hides `from=` or `type=` from the split below: refuse, fail closed.
+        if (f.starts_with("--mount=") || f.starts_with("--from=")) && f.contains(['"', '\'']) {
+            bad.insert("external-source");
+            bad.insert("secret-flag");
+        }
         if let Some(v) = f.strip_prefix("--from=") {
             if !earlier(stages, v) {
                 bad.insert("external-source");
