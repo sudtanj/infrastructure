@@ -6,7 +6,7 @@ The frozen script `.github/scripts/factory-ci-job.sh` reads `F` (lines 60-66). E
 
 | Condition | Content of `F` |
 |---|---|
-| project is `docker/<image>`, branch is `main`, `image::check` returns no id | `DOCKERHUB_USERNAME\nDOCKERHUB_TOKEN\n` |
+| project is `docker/<image>`, branch is `main`, `--allow-docker` is set, `image::check` returns no id | `DOCKERHUB_USERNAME\nDOCKERHUB_TOKEN\n` |
 | anything else, including a failing check | empty |
 
 The prepare run never fails on a check; the real run reports it as `failure`. A pipeline that lists any secret still ends prepare with `NO_JOB_SECRETS` (`job.rs:615-617`) before this table applies.
@@ -27,16 +27,16 @@ The real run's environment then holds `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` an
 
 Steps, in this order, each failure a fixed line (data-model.md "Status texts"). Before every step that starts a container or makes a request, and before the next one, `publish` checks the shared `JOB_DEADLINE` (data-model.md Constants.JOB_DEADLINE); with less than 10 seconds left it ends `publish refused: time ran out`. Each container and Hub call gets `min(its own limit, time left)`.
 
-1. The caller (`attempt`) calls `publish` only for a passing pipeline of a row where `publishes(project, branch)` holds; any other row never reaches `publish`, so no env read, engine call, API call or Hub call happens for it.
-2. `image::check` again on the files now on disk; a failing id gives `failure` `check failed: ...`.
-3. `var(env, "DOCKERHUB_TOKEN")` present and non-empty, and `var(env, "DOCKERHUB_USERNAME")` present (`publish refused: no login name`) and equal to `NAMESPACE` (`publish refused: login is not the namespace`; no value printed). Both are kept in memory; the username is used only for this comparison and the login and is never registered with a redactor. The image name (the project path after `docker/`) must pass `image::name_ok`; it goes into URLs and a registry path, and `hub::ensure_public` is called only after this and the namespace comparison.
-4. Teardown: `engine.cleanup_run(run_id)` stops and removes the sidecar, every container of the run, the run's networks and its volumes (`engine.rs:240-266`). Then `engine.run_left(run_id)` must be false, else `publish refused: sidecar still running`. `run_left` fails closed: a failed `ps`, `network ls` or `volume ls` counts as "left". Until this succeeds the privileged sidecar may still write to the project directory, so nothing reads the archives before it.
+1. The caller (`attempt`) calls `publish` only for a passing pipeline of a row where `publishes(project, branch)` holds and `--allow-docker` is set (`job.rs` decides the check, the names file and the publish step on that pair); any other row never reaches `publish`, so no env read, engine call, API call or Hub call happens for it.
+2. `var(env, "DOCKERHUB_TOKEN")` present and non-empty, and `var(env, "DOCKERHUB_USERNAME")` present (`publish refused: no login name`) and equal to `NAMESPACE` (`publish refused: login is not the namespace`; no value printed). Both are kept in memory; the username is used only for this comparison and the login and is never registered with a redactor. The image name (the project path after `docker/`) must pass `image::name_ok`; it goes into URLs and a registry path, and `hub::ensure_public` is called only after this and the namespace comparison.
+3. Teardown: `engine.cleanup_run(run_id)` stops and removes the sidecar, every container of the run, the run's networks and its volumes (`engine.rs:240-266`). Then `engine.run_left(run_id)` must be false, else `publish refused: sidecar still running`. `run_left` fails closed: a failed `ps`, `network ls` or `volume ls` counts as "left". Until this succeeds the privileged sidecar may still write to the project directory, so nothing reads the archives before it.
+4. `image::check` again on the files now on disk, after the teardown because until then the sidecar could still change them; a failing id gives `failure` `check failed: ...`.
 5. Fresh directory under `RUNNER_TEMP`, mode 0700, new name. Its path must not contain `:` (the check of `mount_arg`, `engine.rs:388-393`, applies to `<fresh dir>:/in:ro` too); otherwise `publish refused: archive unreadable`. It holds nothing but the two archives and is removed at the end.
 6. For each archive of `PLATFORMS`, one after the other: `symlink_metadata` of `<dir>/<file>` is a regular file (`publish refused: archive missing` when absent, `archive unreadable` for a link, another type, an empty file or another error), 1 byte to `ARCHIVE_MAX` inclusive (`archive too large`); then `rename` it into the fresh directory at once. No copy when `rename` fails: that ends `archive unreadable`, because a copy would open the path again.
 7. `archive::read_config` of each moved archive (it returns the config and judges nothing); `publish` applies the user, entrypoint and platform policy of data-model.md "Archive config" and sets `image runs as root`, `image has a shell entrypoint`, `image platform mismatch`. It reads only the moved files, never the project directory.
 8. Tip read 1: `api.branches(repo)`, the entry named `main`. Error or no entry gives `tip of main unreadable`, no Hub call and no container.
 9. `hub::ensure_public` (contracts/hub-api.md) with the time left of the job as its `limit`: login, probe, create a missing repository as public, verify. Runs in the runner process; its errors end the item with its fixed lines before any publish container starts.
-10. Container A. Then, only when tip 1 equals the commit, tip read 2; error gives `tip of main unreadable` with the `sha-` tag in place; equal runs container B. Otherwise `published sha-<12>, not latest`.
+10. Container A. Then, only when tip 1 equals the commit, tip read 2; error gives `tip of main unreadable` with the `sha-` tag in place; equal runs container B. Otherwise `published sha-<12> not latest`.
 11. Remove the fresh directory. The caller's final `cleanup_run` removes the publish containers.
 
 ### Containers A and B: the token is on standard input

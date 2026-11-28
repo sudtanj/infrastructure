@@ -16,13 +16,13 @@ A folder with `.factory-ci.toml` or `Dockerfile` is a project. A folder with nei
 
 ## Check rules (`rust-ci-runner/src/image.rs`)
 
-`check(dir) -> Vec<&'static str>` returns the ids that fail, sorted, once each. The public status shows `check failed: ` plus at most three ids joined by `, `. It never shows file content.
+`check(dir) -> Vec<&'static str>` returns the ids that fail, sorted, once each. The public status shows `check failed: ` plus at most three ids joined by a space. It never shows file content.
 
 The parser works on instructions. It joins `\` continuations, strips `\r` and a BOM, skips comment lines and empty lines, and skips a heredoc body (`<<WORD`, `<<-WORD`, `<<"WORD"`) up to the terminator line, only for `RUN` and `COPY`. Instruction keywords are case-insensitive. Stage index counts `FROM` lines from 0.
 
 | Id | Fails when | Edge answers |
 |---|---|---|
-| `layout` | a required file is missing, a symlink or not a file; the Dockerfile is over 256 KiB (exactly 256 KiB passes) or not UTF-8 | CRLF and BOM are not a layout problem |
+| `layout` | a required file is missing, a symlink or not a file; the Dockerfile is over 256 KiB (exactly 256 KiB passes) or not UTF-8; the folder walk finds more than 500 entries, an entry that is neither a regular file nor a directory (a link, a FIFO), a directory deeper than 8 levels, a file over 1 MiB (exactly 1 MiB passes) or more than 16 MiB in all | CRLF and BOM are not a layout problem. The two archives `image-amd64.tar` and `image-arm64.tar` at the top are not walked: the build writes them, and `publish` checks the folder again after the build |
 | `directive` | any line matches `^\s*#\s*(syntax|escape)\s*=`, case-insensitive, anywhere in the file | `# syntax=x`, `#syntax = x`, `# SYNTAX=x`, `# Escape=\``, `#   syntax=x` all fail |
 | `instruction` | an instruction is not in `FROM ARG ENV WORKDIR COPY RUN USER ENTRYPOINT CMD LABEL EXPOSE` | `ADD`, `ONBUILD`, `SHELL`, `HEALTHCHECK`, `VOLUME`, `STOPSIGNAL`, `MAINTAINER` fail |
 | `heredoc` | `<<` appears in an instruction other than `RUN` or `COPY` | `ENV A=<<X`, `LABEL`, `ARG`, `FROM` fail; a `FROM` text inside a `RUN` heredoc body is not an instruction |
@@ -35,10 +35,12 @@ The parser works on instructions. It joins `\` continuations, strips `\r` and a 
 | `final-shell` | the final stage has a shell-form `CMD` or `ENTRYPOINT` (not starting with `[`), or a `COPY` whose source or destination basename is `sh bash dash ash busybox apk apt apt-get dpkg yum dnf microdnf zypper pip npm` | name heuristic, R5 |
 | `final-user` | the last `USER` of the final chain is absent, not `^[0-9]+(:[0-9]+)?$`, or its uid is 0 | `USER 1000:0` passes; `USER $X` fails as non-numeric |
 | `secret-name` | an `ARG` or `ENV` name, any stage, contains (case-insensitive) `TOKEN`, `PASSWORD`, `PASSWD`, `SECRET`, `CREDENTIAL` or `KEY`; or a `.factory-ci.toml` `env` key does | `ENV A=1 B=2` and `ENV KEY value` forms both parsed; `ARG TARGETARCH` passes |
-| `secret-value` | the Dockerfile or `.factory-ci.toml` text matches `dckr_pat_` plus 20 or more of `[A-Za-z0-9_-]`, `gh[pousr]_` plus 30 or more alphanumerics, `github_pat_` plus 30 or more of `[A-Za-z0-9_]`, `AKIA` plus 16 of `[0-9A-Z]`, `AIza` plus 30 or more of `[0-9A-Za-z_-]`, or `-----BEGIN ... PRIVATE KEY-----` | scans comments too |
+| `secret-value` | the Dockerfile or `.factory-ci.toml` text matches `dckr_pat_` plus 20 or more of `[A-Za-z0-9_-]`, `gh[pousr]_` plus 30 or more alphanumerics, `github_pat_` plus 30 or more of `[A-Za-z0-9_]`, `AKIA` plus 16 of `[0-9A-Z]`, `AIza` plus 30 or more of `[0-9A-Za-z_-]`, `sk_live_` plus 20 or more alphanumerics, `npm_` plus 30 or more alphanumerics, `glpat-` plus 20 or more of `[A-Za-z0-9_-]`, `xox[baprs]-` plus 10 or more of `[A-Za-z0-9_-]`, a JSON web token (`eyJ` and three dot-joined base64url segments of 10 or more characters), or `-----BEGIN ... PRIVATE KEY-----` | scans comments too, and every file of the folder walk, not only the Dockerfile and the pipeline |
 | `secret-flag` | a `RUN` has `--mount=type=secret` or `--mount=type=ssh`; or any `.factory-ci.toml` command contains `--secret`, `--ssh` or `--build-arg` | `--build-arg` has no safe use here |
 | `pipeline-secrets` | any step of `.factory-ci.toml` lists `secrets`, or `.factory-ci.toml` does not parse as a pipeline | |
 | `step-image` | any step of `.factory-ci.toml` has an `image` that does not end in `@sha256:` plus 64 hex digits | FR-029 |
+| `step-template` | `.factory-ci.toml` does not hold exactly one step, named `build`, with `docker = true` and exactly the five commands of `contracts/image-project.md` in that order | free shell could build another Dockerfile or `docker save` any image; `image`, `timeout` and `env` are judged by their own ids |
+| `secret-file` | a file of the folder walk is named `.env`, `id_rsa`, `id_ed25519`, `id_ecdsa`, or ends in `.pem` or `.key` (case-insensitive) | `Sub/Dir/TLS.PEM` fails; the name alone is enough |
 
 ## Archive config (`rust-ci-runner/src/archive.rs`)
 
@@ -125,7 +127,7 @@ clone -> check ok -> pipeline (two builds, two archives; a failed step or a time
                                        (401 -> error "registry refused the token"; other -> error "push failed")
       verify_index           -- bad -> error "image index incomplete" (an existing list is never overwritten)
    tip == sha (read before A and again before B)?
-                             -- no  -> success "published sha-<12>, not latest"
+                             -- no  -> success "published sha-<12> not latest"
                              -- 2nd read fails -> error "tip of main unreadable" (sha tag stays)
                              -- yes -> container B (token on stdin): crane tag latest (fail -> error "push failed")
                                        -> success "published latest and sha-<12>"
@@ -142,7 +144,7 @@ All fixed, at most 140 characters, no content from the repo.
 | `failure` | `check failed: <ids>` |
 | `failure` | `step <n> failed: <reason>` for a project that is not an image project (existing); for an image row the same fixed line is posted as `error` (FR-007) |
 | `success` | `published latest and sha-<12>` |
-| `success` | `published sha-<12>, not latest` |
+| `success` | `published sha-<12> not latest` |
 | `error` | `publish refused: no token`, `publish refused: no login name`, `publish refused: login is not the namespace` |
 | `error` | `publish refused: repository is private` |
 | `error` | `docker hub api refused repository access`, `docker hub api refused repository creation`, `docker hub api error` |

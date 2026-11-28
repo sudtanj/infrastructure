@@ -361,6 +361,7 @@ fn post(
 
 /// `rust-ci-runner status`: one status, nothing run.
 pub fn status(args: &[String], env: Env) -> i32 {
+    std::panic::set_hook(Box::new(|_| {}));
     let go = || -> Result<(Target, String, String, HttpApi), String> {
         let f = flags(
             args,
@@ -525,7 +526,8 @@ fn checkout(
     project_dir(ws, &o.t.project).map_err(|e| done("error", e))
 }
 
-/// The time one job has for clone, pipeline and publish. Debug builds can shorten it for a test.
+/// How long after the job starts the publish step may run. Debug builds can shorten it for a test; the
+/// clone and the pipeline keep the whole `JOB_DEADLINE`, so a short value cannot cut them.
 fn job_len(env: Env) -> Duration {
     let secs = if cfg!(debug_assertions) {
         var(env, "FACTORY_CI_JOB_DEADLINE_SECS")
@@ -559,7 +561,8 @@ fn attempt(
     image: &str,
     api: &HttpApi,
 ) -> Done {
-    let deadline = Instant::now() + job_len(env);
+    let start = Instant::now();
+    let deadline = start + image::JOB_DEADLINE;
     let mk_log = |vals: Vec<String>| {
         let out: Box<dyn std::io::Write + Send> = if o.private {
             Box::new(std::io::sink())
@@ -577,7 +580,7 @@ fn attempt(
         Ok(d) => d,
         Err(d) => return d,
     };
-    let publishes = image::publishes(&o.t.project, &o.branch);
+    let publishes = image::publishes(&o.t.project, &o.branch) && o.allow_docker;
     if let Some(d) = publishes.then(|| publish::check_failed(&dir)).flatten() {
         return d;
     }
@@ -637,7 +640,7 @@ fn attempt(
         let hub = hub_base(env);
         return Done {
             secrets: finished.secrets,
-            ..publish::publish(engine, env, api, &o.t, &dir, deadline, &hub)
+            ..publish::publish(engine, env, api, &o.t, &dir, start + job_len(env), &hub)
         };
     }
     finished
@@ -701,7 +704,8 @@ fn secret_names(
         return Err(bad.join(". "));
     }
     dind_image(env, &p)?;
-    let clean = image::publishes(&o.t.project, &o.branch) && image::check(&dir).is_empty();
+    let publishes = image::publishes(&o.t.project, &o.branch) && o.allow_docker;
+    let clean = publishes && image::check(&dir).is_empty();
     Ok(if clean {
         format!("{}\n{}\n", image::USERNAME_NAME, image::TOKEN_NAME)
     } else {
@@ -750,6 +754,8 @@ fn prepare_job(
 /// `rust-ci-runner job`: clone, run, post the final status. 0 when the status was delivered,
 /// whatever its state; 1 when it was not or the flags are wrong.
 pub fn job(args: &[String], env: Env) -> i32 {
+    // A panic message could carry a value read from the environment.
+    std::panic::set_hook(Box::new(|_| {}));
     let o = match opts(args) {
         Ok(o) => o,
         Err(e) => {

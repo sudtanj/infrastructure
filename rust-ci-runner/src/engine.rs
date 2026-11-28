@@ -29,6 +29,11 @@ const ENGINE_ENV: [&str; 7] = [
     "XDG_RUNTIME_DIR",
 ];
 
+/// Run in the sidecar once the daemon is up: drops port 2375 from every interface but `eth0`, the run network.
+const DAEMON_GUARD: [&str; 12] = [
+    "iptables", "-I", "INPUT", "-p", "tcp", "--dport", "2375", "!", "-i", "eth0", "-j", "DROP",
+];
+
 /// Memory limit of a step container; swap is capped at the same value so it cannot grow past it.
 const MEMORY: &str = "5g";
 
@@ -510,6 +515,11 @@ impl Sidecar {
         let ready = Instant::now() + Duration::from_secs(90);
         loop {
             if e.quick(&["exec", &name, "docker", "info"]).is_ok() {
+                // The nested build containers sit on the daemon's own bridge and reach port 2375 on the
+                // sidecar itself, with no authentication. Only the step network (eth0) may connect.
+                let mut guard: Vec<&str> = vec!["exec", &name];
+                guard.extend(DAEMON_GUARD);
+                e.quick(&guard).map_err(fail)?;
                 return Ok(Sidecar {
                     network: net,
                     host: format!("tcp://{name}:2375"),

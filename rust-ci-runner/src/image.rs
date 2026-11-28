@@ -55,6 +55,21 @@ const SHELLS: [&str; 15] = [
     "microdnf", "zypper", "pip", "npm",
 ];
 
+/// The only commands an image folder may run (contracts/image-project.md): free shell could build
+/// another Dockerfile or save any image.
+const BUILD_COMMANDS: [&str; 5] = [
+    "docker build --platform linux/amd64 -t image-amd64 .",
+    "docker save -o image-amd64.tar image-amd64",
+    "docker build --platform linux/arm64 -t image-arm64 .",
+    "docker save -o image-arm64.tar image-arm64",
+    "chmod 0644 image-amd64.tar image-arm64.tar",
+];
+/// Limits of the folder walk: entries, bytes of one file and of all files, directory depth.
+const MAX_ENTRIES: usize = 500;
+const MAX_FILE: u64 = 1 << 20;
+const MAX_TOTAL: u64 = 16 << 20;
+const MAX_DEPTH: usize = 8;
+
 pub fn image_project(project: &str) -> bool {
     project.starts_with("docker/")
 }
@@ -97,6 +112,7 @@ pub fn check(dir: &Path) -> Vec<&'static str> {
     if toml {
         toml_rules(dir, &mut bad);
     }
+    folder_rules(dir, &mut bad);
     bad.into_iter().collect()
 }
 
@@ -150,6 +166,10 @@ fn toml_rules(dir: &Path, bad: &mut BTreeSet<&'static str>) {
         bad.insert("pipeline-secrets");
         return;
     };
+    let ok = |s: &pipeline::Step| s.docker && s.commands == BUILD_COMMANDS;
+    if p.steps.len() != 1 || !p.steps.get("build").is_some_and(ok) {
+        bad.insert("step-template");
+    }
     for s in p.steps.values() {
         if !s.secrets.is_empty() {
             bad.insert("pipeline-secrets");
@@ -196,12 +216,92 @@ fn secret_value(text: &str, bad: &mut BTreeSet<&'static str>) {
             b.is_ascii_digit() || b.is_ascii_uppercase()
         })
         || token(text, "AIza", 30, word)
+        || token(text, "sk_live_", 20, alnum)
+        || token(text, "npm_", 30, alnum)
+        || token(text, "glpat-", 20, word)
+        || ["xoxb-", "xoxa-", "xoxp-", "xoxr-", "xoxs-"]
+            .iter()
+            .any(|p| token(text, p, 10, word))
+        || jwt(text)
         || text.lines().any(|l| {
             l.find("-----BEGIN ")
                 .is_some_and(|i| l[i..].contains("PRIVATE KEY-----"))
         });
     if hit {
         bad.insert("secret-value");
+    }
+}
+
+/// `eyJ` and then three base64url segments of at least 10 characters, joined by dots: a JSON web token.
+fn jwt(text: &str) -> bool {
+    let b64 = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'-';
+    let run = |s: &[u8]| s.iter().take_while(|b| b64(**b)).count();
+    text.match_indices("eyJ").any(|(i, _)| {
+        let mut rest = &text.as_bytes()[i..];
+        (0..3).all(|n| {
+            let len = run(rest);
+            let ok = len >= 10 && (n == 2 || rest.get(len) == Some(&b'.'));
+            rest = rest.get(len + 1..).unwrap_or_default();
+            ok
+        })
+    })
+}
+
+/// File names that hold credentials.
+fn secret_file(name: &str) -> bool {
+    let named = [".env", "id_rsa", "id_ed25519", "id_ecdsa"].contains(&name);
+    named || name.ends_with(".pem") || name.ends_with(".key")
+}
+
+/// Every file of the folder, not only the three the check names: capped in entries, bytes and depth, no
+/// entry that is not a regular file or a directory, no credential file name, no credential in a file.
+/// The two archives the build writes at the top are skipped; `publish` reads them with `archive`.
+fn folder_rules(dir: &Path, bad: &mut BTreeSet<&'static str>) {
+    let (mut seen, mut total) = (0, 0);
+    let mut todo = vec![(dir.to_path_buf(), 0)];
+    while let Some((d, depth)) = todo.pop() {
+        let Ok(entries) = std::fs::read_dir(&d) else {
+            bad.insert("layout");
+            continue;
+        };
+        for e in entries {
+            seen += 1;
+            if seen > MAX_ENTRIES {
+                bad.insert("layout");
+                return;
+            }
+            let Ok(e) = e else {
+                bad.insert("layout");
+                continue;
+            };
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            if depth == 0 && PLATFORMS.iter().any(|(_, f)| *f == name) {
+                continue;
+            }
+            let meta = std::fs::symlink_metadata(e.path());
+            let Ok(m) = meta else {
+                bad.insert("layout");
+                continue;
+            };
+            if m.is_dir() && depth < MAX_DEPTH {
+                todo.push((e.path(), depth + 1));
+                continue;
+            }
+            total += m.len();
+            if !m.is_file() || m.len() > MAX_FILE || total > MAX_TOTAL {
+                bad.insert("layout");
+                continue;
+            }
+            if secret_file(&name) {
+                bad.insert("secret-file");
+            }
+            match std::fs::read(e.path()) {
+                Ok(bytes) => secret_value(&String::from_utf8_lossy(&bytes), bad),
+                Err(_) => {
+                    bad.insert("layout");
+                }
+            }
+        }
     }
 }
 

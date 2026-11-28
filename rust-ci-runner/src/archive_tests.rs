@@ -191,21 +191,31 @@ fn a_large_layer_member_is_seeked_past() {
 }
 
 #[test]
-fn gnu_long_name_and_pax_headers_are_skipped() {
-    // 012 T010; S5 "GNU long-name and PAX headers skipped"
-    let long = format!("blobs/sha256/{}/{}", "d".repeat(80), "layer.tar");
-    let mut v = typed("././@LongLink", b'L', format!("{long}\0").as_bytes());
-    v.extend(member(&long[..99], &[3u8; 700]));
-    let pax = "32 path=ignored/ignored/ignored\n".to_string();
-    v.extend(typed("PaxHeader/x", b'x', pax.as_bytes()));
-    v.extend(member("pax-target", b"zzz"));
-    v.extend(typed("pax-global", b'g', b"20 comment=hi there\n"));
-    v.extend(member(&blob_path(), good_config().as_bytes()));
-    v.extend(member(
-        "manifest.json",
-        manifest_json(&blob_path()).as_bytes(),
-    ));
-    assert_eq!(read(&end(v)).unwrap().user, "65532:65532");
+fn extended_headers_are_unreadable() {
+    // 012 T041, security S6: GNU long-name, long-link and PAX headers can rename a member, so the
+    // archive is refused; this replaces the S5 test that skipped them
+    for kind in [b'L', b'K', b'x', b'g'] {
+        let mut v = typed("extended", kind, b"20 comment=hi there\n");
+        v.extend(member(&blob_path(), good_config().as_bytes()));
+        v.extend(member(
+            "manifest.json",
+            manifest_json(&blob_path()).as_bytes(),
+        ));
+        assert_eq!(read(&end(v)).unwrap_err(), BAD, "typeflag {kind}");
+    }
+}
+
+#[test]
+fn a_second_manifest_json_is_unreadable() {
+    // 012 T041, security S6: the tool that pushes the archive might read the other one
+    let mut v = member(&blob_path(), good_config().as_bytes());
+    for _ in 0..2 {
+        v.extend(member(
+            "manifest.json",
+            manifest_json(&blob_path()).as_bytes(),
+        ));
+    }
+    assert_eq!(read(&end(v)).unwrap_err(), BAD);
 }
 
 #[test]

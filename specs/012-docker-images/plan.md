@@ -322,7 +322,7 @@ Parallel groups: **A** = S1, S2, S4, S5, S5a (disjoint files). **B** = S6 after 
 | Registry | network, rate limit | exit 42, 43, timeout | `error` `push failed`, one retry after 30 minutes | publish tests |
 | Index | list malformed or missing a platform | `verify_index` | `error` `image index incomplete`, `latest` untouched | `single_arch_or_bad_index_never_tags` |
 | Tip | `branches` fails or no `main` | `publish` | first read: nothing pushed; second read: `sha-` stays | tip tests |
-| Tip | newer commit exists | `sha != tip` | `success` `published sha-<12>, not latest` | `older_commit_pushes_sha_only` |
+| Tip | newer commit exists | `sha != tip` | `success` `published sha-<12> not latest` | `older_commit_pushes_sha_only` |
 | Status post | GitHub down | existing `post` | exit 1, script fallback | existing |
 | Crash mid-publish | VM dies | stale `pending` after 2 h | existing retry rule; the retry reuses a written list | `repeat_publish_only_tags_latest` |
 
@@ -413,6 +413,18 @@ Findings from the security review and where this plan answers each.
 | High: parser bypasses (`ADD`, `ONBUILD`, heredocs, external `--from`, directive spellings, unpinned step image) | Allowlist and rules with one test per bypass (S1) |
 | Tag squatting and retries | `sha-<12 hex>`; a valid existing list is reused and never overwritten, no digest comparison (decision 12) |
 | Supply chain | Digest pins for every image (builder from a mirror, distroless, `docker:cli`, `crane`); refresh routine in `docker/README.md` |
+
+Review and security fixes of S6 (tasks T032 to T042):
+
+| Finding | Answer |
+|---|---|
+| High (S1): the sidecar's `dockerd` listens on `tcp://0.0.0.0:2375` with no authentication, and a nested build container reaches it at the bridge gateway | After `docker info` succeeds, `Sidecar::start` runs `docker exec <sidecar> iptables -I INPUT -p tcp --dport 2375 ! -i eth0 -j DROP` and fails closed on an error. Chosen over a unix socket in a per-run volume because a socket would need a shared volume and a socket mode that every step image's user can use, and `DOCKER_HOST` and the mounts would change for every `allow_docker` pipeline; the rule changes one place, keeps `DOCKER_HOST=tcp://...` and reaches only what is in the sidecar's namespace: the nested bridge and `lo`. The step reaches the daemon through `eth0`, the run network. Applies to every `allow_docker` run. Pinned by `tests/job_rules.rs` |
+| Medium (S2): free shell in the step can build another Dockerfile or `docker save` any image | `image::check` requires exactly one step `build` with `docker = true` and the contract commands (`step-template`) |
+| Medium (S3): only three files are scanned | `image::check` walks the folder with caps, refuses non-regular entries and credential file names, and scans every file (`layout`, `secret-file`, `secret-value`) |
+| Medium (S4): a later `secret_branches` would hand the Docker Hub names to the manual `ci` | `ci.rs` strips both names from the allowed list |
+| Low (S6, S7) | `archive.rs` refuses extended tar headers and a second `manifest.json`; `job` and `status` silence the panic hook |
+| Low (S8) | A frozen script: not fixed |
+| R3: prepare's time is not counted against `JOB_DEADLINE` | Accepted. A frozen script runs prepare and the job as two processes, so no instant passes between them. Prepare's only slow step is the clone, capped at 10 minutes; in the worst case the 45-minute job limit stops the run and the next tick retries it. No credential is exposed by that |
 
 **Residual risk, stated plainly.** Whoever controls a `main` build step can tamper with the host through the privileged docker sidecar before the runner removes it, and so is effectively a token holder. `main` is owner-merged. The check is review help, not a barrier. Rootless BuildKit is the future fix and is out of scope. The token is scoped Read & Write with an expiry (A14). One Docker Hub token covers the whole `sudtanj` namespace (R2).
 

@@ -307,3 +307,49 @@ fn a_failed_final_status_prints_the_code_and_never_the_request_path() {
         assert!(!err.contains("o/r") && !err.contains(SHA), "{err}");
     }
 }
+
+// ---- 012 T037: the sidecar daemon is not open to the build containers ----
+
+const GUARD: [&str; 10] = [
+    "-I", "INPUT", "-p", "tcp", "--dport", "2375", "!", "-i", "eth0", "-j",
+];
+
+#[test]
+fn the_sidecar_daemon_port_is_closed_to_every_interface_but_the_run_network() {
+    // 012 S1: the nested build bridge sits in the sidecar's namespace; only `eth0` may reach port 2375
+    let j = Job::new();
+    let toml = pipeline(&[("img", "docker = true")]);
+    j.run(&[(".factory-ci.toml", &toml)], &["--allow-docker"], &[]);
+    let calls = j.sb.calls();
+    let at = |f: &dyn Fn(&Vec<String>) -> bool| calls.iter().position(f);
+    let guard = at(&|c| {
+        c.first().map(String::as_str) == Some("exec")
+            && c.get(2).map(String::as_str) == Some("iptables")
+            && c[3..].starts_with(&GUARD.map(String::from))
+            && c.last().map(String::as_str) == Some("DROP")
+    });
+    let info = at(&|c| c.first().map(String::as_str) == Some("exec") && c.contains(&"info".into()));
+    let step = at(&|c| c.iter().any(|a| a.starts_with("DOCKER_HOST=")));
+    let (guard, info, step) = (guard.expect("no iptables rule"), info.unwrap(), step.unwrap());
+    assert!(info < guard && guard < step, "{calls:?}");
+}
+
+#[test]
+fn a_sidecar_whose_guard_fails_starts_no_step() {
+    // 012 S1: fail closed
+    let j = Job::new();
+    let toml = pipeline(&[("img", "docker = true")]);
+    j.run(
+        &[(".factory-ci.toml", &toml)],
+        &["--allow-docker"],
+        &[("STUB_FAIL", "iptables")],
+    );
+    let runs = j.sb.calls();
+    assert!(
+        !runs
+            .iter()
+            .any(|c| c.iter().any(|a| a.starts_with("DOCKER_HOST="))),
+        "a step started: {runs:?}"
+    );
+    assert_ne!(j.last_status()["state"], "success");
+}

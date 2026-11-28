@@ -4,6 +4,7 @@
 //! of lines (`Log` in public mode); every detail goes to the log store only.
 
 use crate::engine::{run_capped, Engine};
+use crate::image;
 use crate::job::{
     dind_image, load_pipeline, pipeline_deadline, project_dir, remove_ws, run_env, run_pipeline,
     with_shipper, MAX_LOG_BYTES,
@@ -222,7 +223,13 @@ fn job(
     };
     a.id = entry.id.unwrap_or_default(); // `listed` only holds entries with an id
     a.ref_may_hold_secrets = entry.secrets_allowed_on(&a.git_ref);
-    a.allowed = entry.secrets;
+    // The Docker Hub names are for the tick's publish step only: a manual run never hands them out.
+    let hub = [image::TOKEN_NAME, image::USERNAME_NAME];
+    a.allowed = entry
+        .secrets
+        .into_iter()
+        .filter(|n| !hub.contains(&n.as_str()))
+        .collect();
     if token.is_empty() {
         return fail("BWS_ACCESS_TOKEN is not set");
     }

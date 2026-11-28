@@ -48,16 +48,19 @@ fn octal(field: &[u8]) -> Option<u64> {
     u64::from_str_radix(text.trim_matches(|c| c == '\0' || c == ' '), 8).ok()
 }
 
-/// Reads the data of the first regular member called `name`, scanning from the start of the file.
+/// Reads the data of the one regular member called `name`. A name that comes twice, or an extended header
+/// (typeflag `x`, `g`, `L`, `K`) that could rename a member, is unreadable: the tool that pushes the
+/// archive might read another member than this one.
 fn member(path: &Path, name: &[u8]) -> Result<Vec<u8>, &'static str> {
     let mut f = File::open(path).map_err(|_| BAD)?;
     let len = f.metadata().map_err(|_| BAD)?.len();
     let mut pos = 0u64;
+    let mut found = None;
     loop {
         let mut h = [0u8; 512];
         // A short read or a zero block ends the archive; the caller then sees a missing member.
         if f.read_exact(&mut h).is_err() || h.iter().all(|b| *b == 0) {
-            return Err(BAD);
+            return found.ok_or(BAD);
         }
         let mut sum = 0u64;
         for (i, b) in h.iter().enumerate() {
@@ -67,7 +70,7 @@ fn member(path: &Path, name: &[u8]) -> Result<Vec<u8>, &'static str> {
                 *b as u64
             };
         }
-        if octal(&h[148..156]) != Some(sum) {
+        if octal(&h[148..156]) != Some(sum) || matches!(h[156], b'x' | b'g' | b'L' | b'K') {
             return Err(BAD);
         }
         let size = octal(&h[124..136]).ok_or(BAD)?;
@@ -77,12 +80,12 @@ fn member(path: &Path, name: &[u8]) -> Result<Vec<u8>, &'static str> {
         }
         let end = h[..100].iter().position(|b| *b == 0).unwrap_or(100);
         if matches!(h[156], b'0' | 0) && &h[..end] == name {
-            if size > MEMBER_MAX {
+            if found.is_some() || size > MEMBER_MAX {
                 return Err(BAD);
             }
             let mut buf = vec![0u8; size as usize];
             f.read_exact(&mut buf).map_err(|_| BAD)?;
-            return Ok(buf);
+            found = Some(buf);
         }
         pos = data + size.div_ceil(512) * 512;
         f.seek(SeekFrom::Start(pos)).map_err(|_| BAD)?;

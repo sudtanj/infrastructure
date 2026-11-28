@@ -2927,6 +2927,17 @@ echo "$SITE_API_KEY" | base64 -w 0
         }
     }
 
+    /// 012 T040, security S4: even with `secret_branches`, the manual run never hands out the Docker Hub names.
+    #[test]
+    fn the_docker_hub_names_are_never_handed_to_a_manual_run() {
+        for name in ["DOCKERHUB_TOKEN", "DOCKERHUB_USERNAME"] {
+            let w = world(&req(&[name]), &entry(MAIN, &[name]), &[(name, VAL)]);
+            assert_eq!(w.go(&w.args()), 1, "{name}");
+            refused(&w, "step secret not allowed");
+            assert!(!w.hub.bodies().contains(VAL), "{name}");
+        }
+    }
+
     // ---- QA, after T017a: masking proven through a step that does ship ----
     // H1 makes a step with secrets ship nothing, so the tests above pass without any masking in Loki. Here step
     // `b` lists no secret and prints the value of step `a`, so its lines ship and the shared redactor must mask

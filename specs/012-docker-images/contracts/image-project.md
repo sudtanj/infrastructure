@@ -30,6 +30,7 @@ timeout = 1800
 
 - The step writes `image-amd64.tar` and `image-arm64.tar` in the project directory (`/workspace` inside the step). The runner moves those two files into a fresh directory and pushes them; no other file.
 - `docker = true` needs `allow_docker` on the watch entry and `FACTORY_CI_DIND_IMAGE`; only a `docker/<image>` row on `main` gets it.
+- The check refuses any other step, command or order (`step-template`): free shell could build another Dockerfile or `docker save` any image. It also walks the whole folder (`layout`, `secret-file`, `secret-value`), so a credential in a source file, a `.env` or a `*.pem` fails; the two archives at the top are the only files it skips.
 - No emulation: BuildKit sets `BUILDPLATFORM` to the VM's `linux/amd64`; the `--platform linux/arm64` build only changes `TARGETARCH` and the platform of the final stage.
 
 ## `Dockerfile` for `hello-static` (cross-compiled Go, no emulation)

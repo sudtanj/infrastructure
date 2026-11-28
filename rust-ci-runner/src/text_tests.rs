@@ -12,7 +12,7 @@ use crate::util::base64;
 use crate::watch::parse;
 
 fn allowed(c: char) -> bool {
-    c.is_ascii_alphanumeric() || " ,_.:/-".contains(c)
+    c.is_ascii_alphanumeric() || " _.:/-".contains(c)
 }
 
 #[test]
@@ -188,10 +188,4 @@ fn values_their_base64_and_their_lines_vanish_from_any_text() {
             assert!(!out.contains(f.as_str()), "{f:?} survived in {out:?}");
         }
     }
-}
-
-#[test]
-fn the_sanitizer_keeps_a_comma() {
-    // 012: the fixed status `published sha-<12>, not latest` and `check failed: a, b` hold one
-    assert_eq!(sanitize("check failed: a, b", 140), "check failed: a, b");
 }

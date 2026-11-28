@@ -40,15 +40,37 @@ const OCI: &str = "application/vnd.oci.image.index.v1+json";
 const DOCKER_LIST: &str = "application/vnd.docker.distribution.manifest.list.v2+json";
 const DOCKERFILE: &str = include_str!("fixtures/image/pass/Dockerfile");
 
+/// The step of an image folder: the contract template (`image::check` accepts no other commands).
 const TOML: &str = "[steps.build]\n\
+    image = \"alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
+    docker = true\n\
+    commands = [\n\
+      \"docker build --platform linux/amd64 -t image-amd64 .\",\n\
+      \"docker save -o image-amd64.tar image-amd64\",\n\
+      \"docker build --platform linux/arm64 -t image-arm64 .\",\n\
+      \"docker save -o image-arm64.tar image-arm64\",\n\
+      \"chmod 0644 image-amd64.tar image-arm64.tar\",\n\
+    ]\n\
+    timeout = 1800\n";
+
+/// The same template with a one-second step timeout.
+const SLOW_TOML: &str = "[steps.build]\n\
+    image = \"alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
+    docker = true\n\
+    commands = [\n\
+      \"docker build --platform linux/amd64 -t image-amd64 .\",\n\
+      \"docker save -o image-amd64.tar image-amd64\",\n\
+      \"docker build --platform linux/arm64 -t image-arm64 .\",\n\
+      \"docker save -o image-arm64.tar image-arm64\",\n\
+      \"chmod 0644 image-amd64.tar image-arm64.tar\",\n\
+    ]\n\
+    timeout = 1\n";
+
+/// A plain project (not an image folder) with one step.
+const PLAIN_TOML: &str = "[steps.build]\n\
     image = \"alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
     commands = [\"echo build\"]\n\
     timeout = 1800\n";
-
-const SLOW_TOML: &str = "[steps.build]\n\
-    image = \"alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
-    commands = [\"echo build\"]\n\
-    timeout = 1\n";
 
 /// The docker stand-in. Settings come from the runner's own environment (the parent), which the runner
 /// clears for its children.
@@ -463,6 +485,9 @@ impl Hub {
 
 // ---- the world of one test ----
 
+/// The names file (None when absent), the reason and the exit code of a prepare run.
+type Prepared = (Option<String>, String, Option<i32>);
+
 struct W {
     sb: Sandbox,
     gh: Gh,
@@ -517,7 +542,12 @@ impl W {
     }
 
     fn command(&self, project: &str, branch: &str) -> Command {
-        let args = [
+        self.command_flag(project, branch, true)
+    }
+
+    /// `allow` false leaves `--allow-docker` out.
+    fn command_flag(&self, project: &str, branch: &str, allow: bool) -> Command {
+        let mut args = vec![
             "job",
             "--repo",
             "o/r",
@@ -529,8 +559,10 @@ impl W {
             branch,
             "--run-id",
             RUN_ID,
-            "--allow-docker",
         ];
+        if allow {
+            args.push("--allow-docker");
+        }
         let mut c = self.sb.cmd(&args);
         job_env(&mut c, &self.gh.url);
         c.env("STUB_FIXTURE", &self.fixture)
@@ -724,7 +756,7 @@ impl W {
     }
 
     /// Prepare mode: the names file (None when absent), the reason and the exit code.
-    fn prepare(&self, project: &str, branch: &str) -> (Option<String>, String, Option<i32>) {
+    fn prepare(&self, project: &str, branch: &str) -> Prepared {
         let names = self.sb.dir.join("names.txt");
         let reason = self.sb.dir.join("reason.txt");
         let _ = std::fs::remove_file(&names);
@@ -913,7 +945,7 @@ fn image_step_failure_is_error_and_retried() {
 fn a_step_of_a_plain_project_still_ends_failure() {
     // 012 T019; FR-007 last sentence: only image rows change
     let w = W::new();
-    w.put(".factory-ci.toml", TOML.as_bytes());
+    w.put(".factory-ci.toml", PLAIN_TOML.as_bytes());
     let o = w.run_for(".", "main", |c| {
         c.env("STUB_FAIL", "-build");
     });
@@ -989,7 +1021,7 @@ fn failed_check_pushes_nothing() {
     refuses("secret-flag", |w| {
         w.put(
             "docker/img/.factory-ci.toml",
-            toml_edit("echo build", "echo build --build-arg X=1").as_bytes(),
+            toml_edit("-t image-amd64 .", "-t image-amd64 . --build-arg X=1").as_bytes(),
         )
     });
     refuses("layout", |w| w.rm("docker/img/README.md"));
@@ -1225,7 +1257,7 @@ fn older_commit_pushes_sha_only() {
     for tips in [vec![tip(OTHER)], vec![tip(SHA), tip(OTHER)]] {
         let w = W::with(HubCfg::ok(), &tips);
         let o = w.run(|_| {});
-        w.ended(&o, "success", &format!("published {TAG}, not latest"));
+        w.ended(&o, "success", &format!("published {TAG} not latest"));
         assert_eq!(w.container('A').len(), 1);
         assert!(w.container('B').is_empty(), "latest moved");
     }
@@ -1286,7 +1318,7 @@ fn repeat_publish_only_tags_latest() {
     // 012 T025; FR-020: a first run for an older tip leaves the `sha-` list; the retry only tags `latest`
     let w = W::with(HubCfg::ok(), &[tip(OTHER)]);
     let o = w.run(W::emulate);
-    w.ended(&o, "success", &format!("published {TAG}, not latest"));
+    w.ended(&o, "success", &format!("published {TAG} not latest"));
     assert_eq!(w.crane("push").len(), 2);
     assert_eq!(w.crane("index").len(), 1);
     assert!(w.crane("tag").is_empty());
@@ -2001,7 +2033,7 @@ fn a_missing_or_empty_token_is_refused() {
 fn non_image_project_exports_no_credential() {
     // 012 T023; FR-013, SC-003; I1: a plain project and an image project on another branch use no credential
     let w = W::new();
-    w.put(".factory-ci.toml", TOML.as_bytes());
+    w.put(".factory-ci.toml", PLAIN_TOML.as_bytes());
     let o = w.run_for(".", "main", |_| {});
     w.ended(&o, "success", "all steps passed");
     w.nothing_published();
@@ -2059,7 +2091,7 @@ fn prepare_names_stay_empty_for_every_other_case() {
     );
 
     let w = W::new();
-    w.put(".factory-ci.toml", TOML.as_bytes());
+    w.put(".factory-ci.toml", PLAIN_TOML.as_bytes());
     let (names, reason, code) = w.prepare(".", "main");
     assert_eq!((names.as_deref(), code), (Some(""), Some(0)), "{reason}");
 }
@@ -2123,4 +2155,56 @@ fn dockerhub_names_are_valid_secret_names() {
     assert!(list[0].allow_docker && list[0].secret_branches.is_none());
     // the manual `ci` path unlocks nothing without `secret_branches`
     assert!(!list[0].secrets_allowed_on("main"));
+}
+
+// ---- review and security fixes (S6b) ----
+
+#[test]
+fn a_failed_check_joins_its_ids_with_a_space() {
+    // 012 T032, R1: the status alphabet has no comma
+    let w = W::new();
+    w.put(
+        "docker/img/Dockerfile",
+        format!("# syntax=docker/dockerfile:1\n{DOCKERFILE}\nADD . /x\n").as_bytes(),
+    );
+    let o = w.run(|_| {});
+    w.ended(&o, "failure", "check failed: directive instruction");
+}
+
+#[test]
+fn the_deadline_seam_cuts_only_the_publish_step() {
+    // 012 T033, R2: a slow pipeline still finishes; only publish sees the one-second deadline
+    let w = W::new();
+    let o = w.run(|c| {
+        c.env("FACTORY_CI_JOB_DEADLINE_SECS", "1")
+            .env("STUB_STEP_SLEEP", "2");
+    });
+    w.ended(&o, "error", "publish refused: time ran out");
+    w.nothing_published();
+}
+
+#[test]
+fn publish_checks_the_folder_after_the_teardown() {
+    // 012 T035, R4: a rewritten Dockerfile and a sidecar that is still there end in the sidecar line,
+    // because the check reads files only once nothing can change them
+    let w = W::new();
+    let o = w.run(|c| {
+        c.env("STUB_REWRITE", "Dockerfile").env("STUB_LEFT", "1");
+    });
+    w.ended(&o, "error", "publish refused: sidecar still running");
+    w.nothing_published();
+}
+
+#[test]
+fn an_image_row_without_allow_docker_is_a_plain_row() {
+    // 012 T036, R5 and security 5: no check, no names, no publish without the opt-in
+    let w = W::new();
+    w.put("docker/img/.factory-ci.toml", PLAIN_TOML.as_bytes());
+    let o = w
+        .command_flag("docker/img", "main", false)
+        .output()
+        .unwrap();
+    w.ended(&o, "success", "all steps passed");
+    w.nothing_published();
+    assert_eq!(w.gh.branch_reads(), 0);
 }

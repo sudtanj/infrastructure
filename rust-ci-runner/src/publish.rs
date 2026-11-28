@@ -75,7 +75,7 @@ pub(crate) fn check_failed(dir: &Path) -> Option<Done> {
     if bad.is_empty() {
         return None;
     }
-    let shown = bad[..bad.len().min(3)].join(", ");
+    let shown = bad[..bad.len().min(3)].join(" ");
     Some(done("failure", format!("check failed: {shown}")))
 }
 
@@ -252,9 +252,6 @@ fn go(
     deadline: Instant,
     hub_base: &str,
 ) -> Result<String, Done> {
-    if let Some(d) = check_failed(dir) {
-        return Err(d);
-    }
     let token = var(env, image::TOKEN_NAME).ok_or_else(|| err(NO_TOKEN))?;
     let login = var(env, image::USERNAME_NAME).ok_or_else(|| err(NO_LOGIN))?;
     if login != NAMESPACE {
@@ -271,7 +268,11 @@ fn go(
     if engine.run_left(&t.run_id) {
         return Err(err(LEFT_OVER));
     }
-    // The sidecar is gone, so nothing else can touch the archives: check each, move it, then read it.
+    // The sidecar is gone, so the check reads files nothing can change any more.
+    if let Some(d) = check_failed(dir) {
+        return Err(d);
+    }
+    // Nothing else can touch the archives now: check each, move it, then read it.
     let scratch = Scratch::new(env, &t.run_id)?;
     move_archives(dir, &scratch.0)?;
     for (arch, file) in PLATFORMS {
@@ -301,7 +302,7 @@ fn go(
         .unwrap_or(Err(INCOMPLETE))
         .map_err(err)?;
 
-    let not_latest = format!("published {tag}, not latest");
+    let not_latest = format!("published {tag} not latest");
     if first != t.sha {
         return Ok(not_latest);
     }
