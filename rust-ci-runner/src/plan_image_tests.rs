@@ -145,7 +145,6 @@ fn secrets_ok_true_only_for_main_image_rows() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn secrets_ok_needs_the_entry_flag_too() {
     // 012 T013 against I7. CONFLICT in the plan, reported to the lead: I7 says "only when the entry has
     // `allow_docker`", the T013 formula (`secrets_ok = publishes(path, branch)`) does not look at the flag.
@@ -161,7 +160,6 @@ fn secrets_ok_needs_the_entry_flag_too() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn an_invalid_image_name_gets_an_error_status_and_no_row() {
     // 012 T013; FR-002: `docker/Hello` is flagged like a bad folder name, no job
     let api = fake();
@@ -180,7 +178,6 @@ fn an_invalid_image_name_gets_an_error_status_and_no_row() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn an_error_on_an_image_row_is_retried_and_a_failure_is_final() {
     // 012 T025; FR-007: the walk retries `error` once, after 30 minutes, and never a `failure`. An image row
     // now ends `error` for a failed step, so the next tick plans it again.
@@ -214,7 +211,6 @@ fn an_error_on_an_image_row_is_retried_and_a_failure_is_final() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn deleted_folder_makes_no_call() {
     // 012 T025; FR-019: the folder was published at the parent and is gone at the tip. Nothing is planned or
     // posted for it. (Passes before S2 for a trivial reason; it bites once `docker/x` is discovered.)
@@ -258,7 +254,6 @@ fn deleted_folder_makes_no_call() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn unchanged_commit_builds_nothing() {
     // 012 T025; FR-005: an own status on the tip means no row and no new `pending`
     let api = fake();

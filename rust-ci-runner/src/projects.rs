@@ -37,8 +37,18 @@ pub fn folder_name_ok(name: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
-/// Projects in a recursive tree listing: the root file, and `<folder>/.factory-ci.toml` for a
-/// top-level tree entry. Submodules, files and deeper paths never count.
+/// The shapes a job may name: `.`, a top-level folder, or `docker/<name>` with a valid image name.
+pub fn project_path_ok(path: &str) -> bool {
+    path == "."
+        || folder_name_ok(path)
+        || path
+            .strip_prefix("docker/")
+            .is_some_and(crate::image::name_ok)
+}
+
+/// Projects in a recursive tree listing: the root file, `<folder>/.factory-ci.toml` for a
+/// top-level tree entry, and `docker/<name>` holding `.factory-ci.toml` or `Dockerfile`.
+/// Submodules, files and deeper paths never count.
 pub fn find(tree: &[TreeEntry]) -> Vec<Found> {
     let is_blob = |p: &str| tree.iter().any(|e| e.kind == "blob" && e.path == p);
     let mut out = Vec::new();
@@ -59,11 +69,28 @@ pub fn find(tree: &[TreeEntry]) -> Vec<Found> {
             });
         }
     }
+    if tree.iter().any(|e| e.kind == "tree" && e.path == "docker") {
+        for e in tree.iter().filter(|e| {
+            e.kind == "tree"
+                && e.path
+                    .strip_prefix("docker/")
+                    .is_some_and(|n| !n.contains('/'))
+        }) {
+            if is_blob(&format!("{}/{TOML}", e.path)) || is_blob(&format!("{}/Dockerfile", e.path))
+            {
+                out.push(Found {
+                    path: e.path.clone(),
+                    valid: crate::image::name_ok(&e.path["docker/".len()..]),
+                });
+            }
+        }
+    }
     out
 }
 
 /// `find` on the tree of `sha`. When the recursive answer is truncated, reads the root tree and
-/// each top-level folder with one non-recursive call (a submodule has no entry to follow).
+/// each top-level folder with one non-recursive call (a submodule has no entry to follow), and
+/// one more level under `docker`.
 pub fn discover(api: &dyn Api, repo: &str, sha: &str) -> Result<Vec<Found>, ApiError> {
     let t = api.tree(repo, sha, true)?;
     if !t.truncated {
@@ -75,11 +102,24 @@ pub fn discover(api: &dyn Api, repo: &str, sha: &str) -> Result<Vec<Found>, ApiE
         let Some(obj) = root.shas.get(&e.path) else {
             continue;
         };
-        for s in api.tree(repo, obj, false)?.entries {
+        let sub = api.tree(repo, obj, false)?;
+        for s in &sub.entries {
             entries.push(TreeEntry {
                 path: format!("{}/{}", e.path, s.path),
-                kind: s.kind,
+                kind: s.kind.clone(),
             });
+            // `docker/<name>` files sit one level further down.
+            if e.path == "docker" && s.kind == "tree" {
+                let Some(o) = sub.shas.get(&s.path) else {
+                    continue;
+                };
+                for f in api.tree(repo, o, false)?.entries {
+                    entries.push(TreeEntry {
+                        path: format!("docker/{}/{}", s.path, f.path),
+                        kind: f.kind,
+                    });
+                }
+            }
         }
     }
     Ok(find(&entries))

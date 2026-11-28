@@ -37,7 +37,6 @@ fn set(v: &[&str]) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn find_docker_projects() {
     // 012 T008; S2; FR-001: a folder under `docker/` with `.factory-ci.toml`
     let t = [
@@ -50,7 +49,6 @@ fn find_docker_projects() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_folder_with_a_dockerfile_only_is_a_project() {
     // 012 T008; data-model.md "A folder with `.factory-ci.toml` or `Dockerfile` is a project"
     let t = [
@@ -62,7 +60,6 @@ fn a_folder_with_a_dockerfile_only_is_a_project() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_folder_with_neither_file_is_ignored() {
     // 012 T008; spec A12
     let t = [
@@ -75,7 +72,6 @@ fn a_folder_with_neither_file_is_ignored() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn deeper_paths_a_docker_file_and_a_submodule_are_ignored() {
     // 012 T008; I9: only `docker/<name>` counts, never `docker/<a>/<b>`
     let deeper = [
@@ -97,7 +93,6 @@ fn deeper_paths_a_docker_file_and_a_submodule_are_ignored() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn docker_names_follow_the_image_name_rule() {
     // 012 T008; FR-002: `^[a-z0-9]+(-[a-z0-9]+)*$`, length 2 to 64, flagged not dropped
     let long64 = "a".repeat(64);
@@ -130,7 +125,6 @@ fn docker_names_follow_the_image_name_rule() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn root_a_folder_and_docker_projects_live_together() {
     // 012 T008; I9: the shapes `.`, `<folder>` and `docker/<name>` and nothing else
     let t = [
@@ -166,7 +160,6 @@ impl Lcg {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn find_never_returns_a_path_of_another_shape() {
     // 012 T008; I9 over generated trees
     let tops = ["docker", "svc", "a", "docker2"];
@@ -218,7 +211,6 @@ fn find_never_returns_a_path_of_another_shape() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn owns_prefix_boundary() {
     // 012 T008; S2: `docker/x` owns `docker/x/...`, not `docker/xy/...`
     let s = set(&[".", "docker/x", "docker/xy"]);
@@ -245,7 +237,6 @@ fn owns_prefix_boundary() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_removed_image_folder_falls_to_the_root() {
     // 012 T008; FR-019 at the ownership level
     let gone = set(&["."]);
@@ -324,7 +315,6 @@ impl Api for Trees {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn discover_truncated_tree_reads_docker() {
     // 012 T008; plan failure-mode table "Discovery": a truncated tree reads one more level under `docker`
     let mut by_sha = HashMap::new();
@@ -375,7 +365,6 @@ fn discover_truncated_tree_reads_docker() {
 // ---- the job boundary ----
 
 #[test]
-#[ignore = "test-first"]
 fn project_path_ok_accepts_the_three_shapes_and_nothing_else() {
     // 012 T014; S2: `target()` accepts `docker/hello-static` and still rejects `a/b`, `docker/Hello`, `../x`
     for ok in [

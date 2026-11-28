@@ -307,7 +307,7 @@ fn read_repo(
                     allow_docker: e.allow_docker,
                     fail_closed: repo.private && !o.b_private,
                     retry: *retry,
-                    secrets_ok: false,
+                    secrets_ok: e.allow_docker && crate::image::publishes(&p.path, &b.name),
                     secrets: e.secrets.join(" "),
                     run_id: String::new(),
                     n: 0,

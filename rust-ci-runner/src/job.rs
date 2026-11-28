@@ -281,8 +281,8 @@ fn target(f: &HashMap<String, String>) -> Result<Target, String> {
     if !crate::github::is_sha(&t.sha) {
         return Err("--sha must be 40 lowercase hex characters".to_string());
     }
-    if t.project != "." && !projects::folder_name_ok(&t.project) {
-        return Err("--project must be . or a top-level folder name".to_string());
+    if !projects::project_path_ok(&t.project) {
+        return Err("--project must be ., a top-level folder name or docker/<name>".to_string());
     }
     if !pipeline::valid_name(&t.run_id) {
         return Err("--run-id must be 1 to 64 letters, digits, '-' or '_'".to_string());

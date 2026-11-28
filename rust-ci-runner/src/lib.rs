@@ -32,9 +32,13 @@ mod plan_error_tests;
 #[cfg(test)]
 mod plan_hardening_tests;
 #[cfg(test)]
+mod plan_image_tests;
+#[cfg(test)]
 mod plan_race_tests;
 #[cfg(test)]
 mod plan_tests;
+#[cfg(test)]
+mod projects_image_tests;
 #[cfg(test)]
 mod projects_tests;
 #[cfg(test)]
