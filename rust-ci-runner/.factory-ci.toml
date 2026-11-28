@@ -25,6 +25,6 @@ timeout = 1800
 image = "rust:1.90"
 depends_on = ["unit"]
 commands = [
-  "cargo test --locked --test argv --test cli --test cli_logs --test job_prepare --test job_rules --test no_vendor --test ship_job",
+  "cargo test --locked --test argv --test cli --test cli_logs --test job_prepare --test job_publish --test job_rules --test no_vendor --test ship_job",
 ]
 timeout = 1800

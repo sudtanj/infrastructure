@@ -361,7 +361,6 @@ fn post(
 
 /// `rust-ci-runner status`: one status, nothing run.
 pub fn status(args: &[String], env: Env) -> i32 {
-    std::panic::set_hook(Box::new(|_| {}));
     let go = || -> Result<(Target, String, String, HttpApi), String> {
         let f = flags(
             args,
@@ -754,8 +753,6 @@ fn prepare_job(
 /// `rust-ci-runner job`: clone, run, post the final status. 0 when the status was delivered,
 /// whatever its state; 1 when it was not or the flags are wrong.
 pub fn job(args: &[String], env: Env) -> i32 {
-    // A panic message could carry a value read from the environment.
-    std::panic::set_hook(Box::new(|_| {}));
     let o = match opts(args) {
         Ok(o) => o,
         Err(e) => {

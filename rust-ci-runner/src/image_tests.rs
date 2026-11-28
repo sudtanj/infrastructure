@@ -9,7 +9,7 @@
 
 use crate::image::{
     check, image_project, name_ok, publishes, ARCHIVE_MAX, CRANE_IMAGE, HUB_BASE, NAMESPACE,
-    PLATFORMS, PUBLISH_BRANCH, REGISTRY, TAG_HEX, TOKEN_NAME, USERNAME_NAME,
+    PLATFORMS, PUBLISH_BRANCH, REGISTRY, STEP_IMAGE, TAG_HEX, TOKEN_NAME, USERNAME_NAME,
 };
 use std::path::{Path, PathBuf};
 
@@ -101,7 +101,6 @@ fn the_fixture_dir_on_disk_passes_too() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn the_real_hello_static_passes() {
     // 012 T006 (needs T018): the shipped first image passes its own check; FR-006
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../docker/hello-static");
@@ -893,13 +892,18 @@ fn secret_name_fails_for_a_toml_env_key() {
             "timeout = 1800\n",
             &format!("timeout = 1800\nenv = {{ {k} = \"x\" }}\n"),
         );
-        expect_only(ids_toml(&t), "secret-name", k);
+        // the template allows no `env`, so `step-template` fires with it (012 T044)
+        assert_eq!(ids_toml(&t), ["secret-name", "step-template"], "{k}");
     }
-    let ok = toml_with(
+    let mode = toml_with(
         "timeout = 1800\n",
         "timeout = 1800\nenv = { MODE = \"x\" }\n",
     );
-    assert_eq!(ids_toml(&ok), Vec::<&str>::new());
+    assert_eq!(
+        ids_toml(&mode),
+        ["step-template"],
+        "a harmless env is still not the template"
+    );
 }
 
 // ---- secret-value ----
@@ -1054,7 +1058,7 @@ fn pipeline_secrets_fails_for_a_step_with_secrets_or_a_broken_file() {
 #[test]
 fn step_image_fails_for_unpinned_images_on_any_step() {
     // 012 T006; S1 `image = "alpine"`, `image = "alpine:3.23"`; FR-029
-    let pinned = format!("image = \"docker:27.5.1-cli@sha256:{}\"", hex('c'));
+    let pinned = format!("image = \"{STEP_IMAGE}\"");
     for r in [
         "image = \"alpine\"".to_string(),
         "image = \"alpine:3.23\"".to_string(),
@@ -1063,7 +1067,12 @@ fn step_image_fails_for_unpinned_images_on_any_step() {
         format!("image = \"docker:27.5.1-cli@sha256:{}\"", &hex('c')[..63]),
         format!("image = \"docker:27.5.1-cli@sha256:{}c\"", hex('c')),
     ] {
-        expect_only(ids_toml(&toml_with(&pinned, &r)), "step-image", &r);
+        // an unpinned build image is not the template image either (012 T044)
+        assert_eq!(
+            ids_toml(&toml_with(&pinned, &r)),
+            ["step-image", "step-template"],
+            "{r}"
+        );
     }
     // an empty image may also fail the pipeline parse; step-image must still be named or the parse id
     let empty = ids_toml(&toml_with(&pinned, "image = \"\""));
@@ -1227,7 +1236,14 @@ fn step_template_fails_for_any_other_step_command_or_flag() {
         "{TOML}\n[steps.extra]\nimage = \"docker:27.5.1-cli@sha256:{}\"\ncommands = [\"true\"]\n",
         hex('c')
     );
+    // 012 T044: a pinned image that is not the contract digest, and any `env`
+    let other_digest = toml_with(STEP_IMAGE, &STEP_IMAGE.replace('8', "7"));
     let cases = [
+        ("other pinned digest", other_digest),
+        (
+            "env set",
+            toml_with("timeout = 1800\n", "timeout = 1800\nenv = { MODE = \"x\" }\n"),
+        ),
         ("changed", toml_with(first, "docker build -t other .")),
         ("added", toml_with(chmod, &format!("{chmod}\",\n  \"id"))),
         ("docker off", toml_with("docker = true\n", "")),
@@ -1257,6 +1273,15 @@ fn credential_file_names_fail() {
         "server.pem",
         "deploy.key",
         "Sub/Dir/TLS.PEM",
+        // 012 T045
+        ".env.production",
+        ".env.local",
+        ".npmrc",
+        ".netrc",
+        "id_dsa",
+        "cert.p12",
+        "cert.pfx",
+        "Bundle.PFX",
     ] {
         expect_only(with_files(&[(name, "x\n")]), "secret-file", name);
     }

@@ -153,6 +153,14 @@ fn matches_branch_uses_any_of_the_globs() {
 }
 
 #[test]
+fn an_entry_listing_both_dockerhub_names_parses() {
+    // 012 T024; I7, I8
+    let body = "secrets = [\"DOCKERHUB_USERNAME\", \"DOCKERHUB_TOKEN\"]\nallow_docker = true";
+    let v = parse(&one(body)).unwrap_or_else(|p| panic!("{p:?}"));
+    assert_eq!(v[0].secrets, ["DOCKERHUB_USERNAME", "DOCKERHUB_TOKEN"]);
+}
+
+#[test]
 fn reserved_secret_names_are_refused() {
     // FR-005 / FR-019, T048: BWS_ACCESS_TOKEN
     for n in [

@@ -190,10 +190,9 @@ fn the_frozen_path_rule_matches_the_two_directories_only() {
     }
 }
 
-// ---- docker/hello-static (S3, T018): test-first until the folder lands ----
+// ---- docker/hello-static (S3, T018) ----
 
 #[test]
-#[ignore = "test-first"]
 fn hello_static_pipeline_builds_and_saves_both_platforms() {
     // 012 T018; S3, FR-003, FR-012: the last command is the `chmod 0644` of both archives
     let t: toml::Table = read("docker/hello-static/.factory-ci.toml")
@@ -240,7 +239,6 @@ fn hello_static_pipeline_builds_and_saves_both_platforms() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn hello_static_dockerfile_is_pinned_and_keeps_the_toolchain_local() {
     // 012 T018; S3, FR-028, A13: builder from the mirror by index digest, base by digest, no toolchain download
     let df = read("docker/hello-static/Dockerfile");
@@ -268,7 +266,6 @@ fn hello_static_dockerfile_is_pinned_and_keeps_the_toolchain_local() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn docker_readme_names_the_digest_refresh_routine() {
     // 012 T018; S3
     let t = read("docker/README.md").to_lowercase();
@@ -335,9 +332,8 @@ fn the_version_check_reads_the_right_entry() {
     );
 }
 
-// T027 (FR-017) adds the README text. Until then the sentence is still there: test-first.
+// FR-017: the README no longer says steps get no pipeline secrets (T031).
 #[test]
-#[ignore = "test-first"]
 fn readme_has_no_stale_secrets_sentence() {
     let text = read("README.md");
     assert!(
@@ -359,7 +355,6 @@ fn commands(step: &str) -> Vec<String> {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn runner_pipeline_gives_hub_and_publish_tests_their_own_commands() {
     // 012 T011, T019; MINOR-1, QA-9: the step container has `--pids-limit 512`, and the fake Hub and the fake
     // GitHub of these tests start threads, so each group runs in its own process
@@ -384,7 +379,6 @@ fn runner_pipeline_gives_hub_and_publish_tests_their_own_commands() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn runner_pipeline_integration_names_job_publish_and_not_the_repo_file_tests() {
     // 012 T019; S8: `job_publish` joins the integration command; `repo_files*` stay out (their own comment)
     let all = commands("integration").join(" ");

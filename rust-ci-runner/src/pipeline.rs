@@ -374,6 +374,14 @@ secrets = ["PATH"]
     }
 
     #[test]
+    fn dockerhub_names_are_valid_secret_names() {
+        // 012 T024: the two names the image publish step reads
+        for name in ["DOCKERHUB_USERNAME", "DOCKERHUB_TOKEN"] {
+            assert!(valid_secret_name(name), "{name}");
+        }
+    }
+
+    #[test]
     fn reserved_step_and_secret_names_are_refused() {
         let t = "[steps.clone]\nimage = \"x\"\ncommands = [\"y\"]\n[steps.dind]\nimage = \"x\"\ncommands = [\"y\"]\n";
         let v = bad(t);

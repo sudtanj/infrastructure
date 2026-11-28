@@ -546,15 +546,20 @@ fn project_dir_refuses_a_symlinked_intermediate_directory() {
 }
 
 #[test]
-fn job_and_status_silence_the_panic_hook() {
-    // 012 T042, security S7: a panic message could carry a value read from the environment
-    let src = include_str!("job.rs");
-    for f in ["pub fn job(", "pub fn status("] {
-        let at = src.find(f).unwrap();
-        let head: String = src[at..].chars().take(300).collect();
-        assert!(
-            head.contains("std::panic::set_hook(Box::new(|_| {}))"),
-            "{f}"
-        );
+fn only_the_job_and_status_arms_of_main_silence_the_panic_hook() {
+    // 012 T043, security S7: a panic message could carry a value read from the environment. The hook is
+    // process-wide, so `job::job` must not set it: the unit tests call it in-process.
+    let main = include_str!("main.rs");
+    let arm = |name: &str| {
+        let at = main.find(&format!("Some(\"{name}\") =>")).unwrap() + 1;
+        let end = main[at..].find("Some(").map_or(main.len(), |n| at + n);
+        &main[at..end]
+    };
+    for name in ["job", "status"] {
+        assert!(arm(name).contains("silence_panics();"), "{name}");
     }
+    for name in ["run", "plan"] {
+        assert!(!arm(name).contains("silence_panics"), "{name}");
+    }
+    assert!(!include_str!("job.rs").contains("set_hook"));
 }

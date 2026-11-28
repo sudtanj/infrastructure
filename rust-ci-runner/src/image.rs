@@ -21,6 +21,9 @@ pub const CRANE_IMAGE: &str = "gcr.io/go-containerregistry/crane:debug@sha256:e7
 /// Expected paths inside `CRANE_IMAGE`; T002 confirms them.
 pub const CRANE_SH: &str = "/busybox/sh";
 pub const CRANE_BIN: &str = "/ko-app/crane";
+/// The one step image of an image folder (pins.md): `docker:27.5.1-cli` index digest read on 2026-11-28.
+pub const STEP_IMAGE: &str =
+    "docker:27.5.1-cli@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c";
 /// One deadline for clone, pulls, pipeline and publish; five minutes of the 45-minute job stay for cleanup.
 pub const JOB_DEADLINE: std::time::Duration = std::time::Duration::from_secs(40 * 60);
 
@@ -166,7 +169,9 @@ fn toml_rules(dir: &Path, bad: &mut BTreeSet<&'static str>) {
         bad.insert("pipeline-secrets");
         return;
     };
-    let ok = |s: &pipeline::Step| s.docker && s.commands == BUILD_COMMANDS;
+    let ok = |s: &pipeline::Step| {
+        s.docker && s.image == STEP_IMAGE && s.env.is_empty() && s.commands == BUILD_COMMANDS
+    };
     if p.steps.len() != 1 || !p.steps.get("build").is_some_and(ok) {
         bad.insert("step-template");
     }
@@ -249,8 +254,10 @@ fn jwt(text: &str) -> bool {
 
 /// File names that hold credentials.
 fn secret_file(name: &str) -> bool {
-    let named = [".env", "id_rsa", "id_ed25519", "id_ecdsa"].contains(&name);
-    named || name.ends_with(".pem") || name.ends_with(".key")
+    let named = [".env", ".npmrc", ".netrc", "id_rsa", "id_dsa", "id_ed25519", "id_ecdsa"];
+    named.contains(&name)
+        || name.starts_with(".env.")
+        || [".pem", ".key", ".p12", ".pfx"].iter().any(|e| name.ends_with(e))
 }
 
 /// Every file of the folder, not only the three the check names: capped in entries, bytes and depth, no

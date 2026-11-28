@@ -42,7 +42,7 @@ const DOCKERFILE: &str = include_str!("fixtures/image/pass/Dockerfile");
 
 /// The step of an image folder: the contract template (`image::check` accepts no other commands).
 const TOML: &str = "[steps.build]\n\
-    image = \"alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
+    image = \"docker:27.5.1-cli@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c\"\n\
     docker = true\n\
     commands = [\n\
       \"docker build --platform linux/amd64 -t image-amd64 .\",\n\
@@ -55,7 +55,7 @@ const TOML: &str = "[steps.build]\n\
 
 /// The same template with a one-second step timeout.
 const SLOW_TOML: &str = "[steps.build]\n\
-    image = \"alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n\
+    image = \"docker:27.5.1-cli@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c\"\n\
     docker = true\n\
     commands = [\n\
       \"docker build --platform linux/amd64 -t image-amd64 .\",\n\
@@ -802,6 +802,9 @@ fn latest_text() -> String {
 
 const A64: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
+/// The digest of the one step image the template allows (`image::STEP_IMAGE`).
+const STEP_DIGEST: &str = "851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c";
+
 /// `DOCKERFILE` with `from` replaced by `to`; fails when `from` is not there, so a stale edit cannot pass.
 fn df_edit(from: &str, to: &str) -> String {
     assert!(DOCKERFILE.contains(from), "{from:?} is not in the fixture");
@@ -1018,12 +1021,15 @@ fn failed_check_pushes_nothing() {
             format!("{DOCKERFILE}\nENV API_TOKEN=1\n").as_bytes(),
         )
     });
-    refuses("secret-flag", |w| {
-        w.put(
-            "docker/img/.factory-ci.toml",
-            toml_edit("-t image-amd64 .", "-t image-amd64 . --build-arg X=1").as_bytes(),
-        )
-    });
+    // The template pins every command, so a flag cannot trip `secret-flag` alone: `step-template` fires too.
+    for id in ["secret-flag", "step-template"] {
+        refuses(id, |w| {
+            w.put(
+                "docker/img/.factory-ci.toml",
+                toml_edit("-t image-amd64 .", "-t image-amd64 . --build-arg X=1").as_bytes(),
+            )
+        });
+    }
     refuses("layout", |w| w.rm("docker/img/README.md"));
 }
 
@@ -1056,7 +1062,7 @@ fn step_image_unpinned_fails_check() {
         refuses("step-image", |w| {
             w.put(
                 "docker/img/.factory-ci.toml",
-                toml_edit(&format!("alpine@sha256:{A64}"), image).as_bytes(),
+                toml_edit(&format!("docker:27.5.1-cli@sha256:{STEP_DIGEST}"), image).as_bytes(),
             )
         });
     }

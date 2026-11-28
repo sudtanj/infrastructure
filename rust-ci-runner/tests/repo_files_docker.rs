@@ -1,14 +1,11 @@
-//! 012 T022 (test-first), plan step S10: the static check over every folder under `docker/` (FR-006).
+//! 012 T022, plan step S10: the static check over every folder under `docker/` (FR-006).
 //!
-//! NOT COMPILED YET. The whole file is switched off by the `#![cfg(any())]` line below, because
-//! `rust_ci_runner::image` does not exist until T005 and a missing module would break every `--test '*'` run.
-//! When `pub mod image;` is in `lib.rs`: delete that one line (it is the registration) and then the
-//! `#[ignore = "test-first"]` markers as each test passes. The tests for the content of `docker/hello-static`
-//! that need no `image` module are in `repo_files.rs`.
+//! The selftest paths filter lacks `docker/**` (plan K4): a push that changes only `docker/` does not start it,
+//! so this file runs when `rust-ci-runner/**` changes; the tick on `main` runs the same check before a publish.
+//! The tests for the content of `docker/hello-static` that need no `image` module are in `repo_files.rs`.
 //!
 //! Like `repo_files.rs`, this file reads the whole checkout, so it runs in the selftest (`--test '*'`) and stays
 //! out of the integration command of `rust-ci-runner/.factory-ci.toml`.
-#![cfg(any())]
 
 use rust_ci_runner::image::{check, name_ok};
 use std::path::{Path, PathBuf};
@@ -62,7 +59,6 @@ fn docker_folders_pass_the_static_check() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn hello_static_is_the_first_image() {
     // 012 T018; S3: the folder exists and is one of the folders the test above walks
     let names: Vec<String> = image_folders().into_iter().map(|(n, _)| n).collect();

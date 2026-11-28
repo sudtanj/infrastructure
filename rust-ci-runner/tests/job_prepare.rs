@@ -86,7 +86,8 @@ fn step(name: &str, extra: &str) -> String {
 
 #[test]
 fn a_pipeline_with_secrets_is_refused_with_one_fixed_reason_and_no_name() {
-    // The tick's job passes no secrets (feature 010, T017b): the names file stays empty.
+    // The tick's job passes no secrets (feature 010, T017b): the names file stays empty. Only a `main` image
+    // project with a clean check gets the two Docker Hub names (012 T024, `job_publish.rs`).
     let p = Prep::new();
     let toml = format!(
         "{}{}",

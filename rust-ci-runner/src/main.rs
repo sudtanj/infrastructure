@@ -264,14 +264,26 @@ fn run_ci(args: &[String]) -> ExitCode {
     ) as u8)
 }
 
+/// A panic message could carry a value read from the environment. Set here, not in `job::job`, so the unit
+/// tests that call it in-process keep their panic messages.
+fn silence_panics() {
+    std::panic::set_hook(Box::new(|_| {}));
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("run") => run(&args[1..]),
         Some("plan") => plan(&args[1..]),
         Some("ci") => run_ci(&args[1..]),
-        Some("job") => ExitCode::from(job::job(&args[1..], &env) as u8),
-        Some("status") => ExitCode::from(job::status(&args[1..], &env) as u8),
+        Some("job") => {
+            silence_panics();
+            ExitCode::from(job::job(&args[1..], &env) as u8)
+        }
+        Some("status") => {
+            silence_panics();
+            ExitCode::from(job::status(&args[1..], &env) as u8)
+        }
         Some("help") | Some("--help") | Some("-h") => {
             println!("{USAGE}");
             ExitCode::SUCCESS
