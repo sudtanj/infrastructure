@@ -2247,6 +2247,10 @@ fn a_private_source_repository_is_refused_before_the_hub() {
     let w = W::new();
     w.gh.private.store(true, Ordering::SeqCst);
     let o = w.run(|_| {});
-    w.ended(&o, "failure", "publish refused: source repository is private");
+    w.ended(
+        &o,
+        "failure",
+        "publish refused: source repository is private",
+    );
     w.nothing_published();
 }
