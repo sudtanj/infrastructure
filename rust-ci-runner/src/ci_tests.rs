@@ -2688,4 +2688,117 @@ mod step_secrets {
             assert!(!w.text("docker.calls").contains(VAL), "{label}");
         }
     }
+
+    // ---- QA: parallel steps, chunk boundaries, wrapped base64 ----
+
+    const K1: &str = "SITE_KEY_ONE";
+    const K2: &str = "SITE_KEY_TWO";
+    const V1: &str = "fake-one-value-Q7x1-aaaa";
+    const V2: &str = "fake-two-value-R8y2-bbbb";
+
+    /// Four steps with no `depends_on`, so the engine starts them together: one needs `K1`, one `K2`, one
+    /// both, one nothing. Each container prints both variables.
+    #[test]
+    fn parallel_steps_get_only_their_own_secrets_and_every_output_is_masked() {
+        let pl = [
+            one_step("s1", &[K1]),
+            one_step("s2", &[K2]),
+            one_step("s3", &[K1, K2]),
+            one_step("s4", &[]),
+        ]
+        .concat();
+        // repeated: a race between the steps shows up as a missing or a foreign variable
+        for round in 0..3 {
+            let mut w = world(&pl, &entry(MAIN, &[K1, K2]), &[(K1, V1), (K2, V2)]);
+            w.docker_body =
+                "case \"$1\" in run) printf '%s\\n' \"$SITE_KEY_ONE\" \"$SITE_KEY_TWO\";; esac"
+                    .to_string();
+            assert_eq!(w.ok(), 0, "round {round}: {}", w.stderr());
+            assert_eq!(w.bws_calls(), 1, "round {round}");
+            let want = [
+                ("s1", vec![(K1, V1)]),
+                ("s2", vec![(K2, V2)]),
+                ("s3", vec![(K1, V1), (K2, V2)]),
+                ("s4", vec![]),
+            ];
+            for (step, vars) in want {
+                let (call, env) = (step_call(&w, step), step_env(&w, step));
+                for (k, v) in [(K1, V1), (K2, V2)] {
+                    let listed = vars.contains(&(k, v));
+                    assert_eq!(pair(&call, "-e", k), listed, "{step} {k}: {call:?}");
+                    assert_eq!(
+                        env.contains(&format!("{k}={v}")),
+                        listed,
+                        "{step} {k}: {env:?}"
+                    );
+                    assert!(!call.iter().any(|a| a.contains(v)), "{step}: {call:?}");
+                    let out = lines(&w, step, "stdout");
+                    assert!(!out.iter().any(|l| l.contains(v)), "{step}: {out:?}");
+                }
+            }
+            let (all, bodies) = (format!("{}{}", w.stdout(), w.stderr()), w.hub.bodies());
+            for v in [V1, V2] {
+                assert!(
+                    !all.contains(v) && !bodies.contains(v),
+                    "round {round}: {v}"
+                );
+                assert!(!w.text("docker.calls").contains(v), "round {round}: {v}");
+            }
+            assert_public(&w);
+        }
+    }
+
+    /// The value, and its base64 line, start before the 64 KB read boundary of the output pump and end
+    /// after it, through the real engine and shipper.
+    #[test]
+    fn a_value_across_the_64k_read_boundary_is_masked_in_loki() {
+        let mut w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, VAL)]);
+        w.docker_body = r#"case "$1" in run)
+head -c 65530 /dev/zero | tr '\0' a
+printf '%s\n' "$SITE_API_KEY"
+head -c 65520 /dev/zero | tr '\0' b
+printf '%s' "$SITE_API_KEY" | base64
+;; esac"#
+            .to_string();
+        assert_eq!(w.ok(), 0, "{}", w.stderr());
+        let b64 = base64(VAL.as_bytes());
+        let (all, bodies) = (format!("{}{}", w.stdout(), w.stderr()), w.hub.bodies());
+        for n in [VAL, b64.as_str()] {
+            assert!(!all.contains(n) && !bodies.contains(n), "{n} leaked");
+        }
+        let out = lines(&w, "a", "stdout");
+        assert!(
+            out.iter().filter(|l| *l == "***").count() >= 2,
+            "masked lines missing"
+        );
+        assert_public(&w);
+    }
+
+    /// `echo "$V" | base64` of a value over 57 bytes wraps at 76 columns: each line is masked by itself.
+    #[test]
+    fn wrapped_base64_of_a_long_value_is_masked_line_by_line() {
+        let v = format!("fake-wrap-Zq81-{}", "k9".repeat(43));
+        assert_eq!(v.len(), 101);
+        let mut w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, v.as_str())]);
+        w.docker_body = r#"case "$1" in run)
+echo "$SITE_API_KEY" | base64
+echo "$SITE_API_KEY" | base64 -w 0
+;; esac"#
+            .to_string();
+        assert_eq!(w.ok(), 0, "{}", w.stderr());
+        let enc = base64(v.as_bytes());
+        // the whole groups of the value: 33 groups of 4 characters, then 76 and 56 columns
+        let (first, second) = (&enc[..76], &enc[76..132]);
+        let (all, bodies) = (format!("{}{}", w.stdout(), w.stderr()), w.hub.bodies());
+        for n in [v.as_str(), first, second, &enc[..132]] {
+            assert!(!all.contains(n) && !bodies.contains(n), "{n} leaked");
+        }
+        let out = lines(&w, "a", "stdout");
+        assert!(out.iter().all(|l| !l.contains(first)), "{out:?}");
+        assert!(
+            out.iter().filter(|l| l.contains("***")).count() >= 3,
+            "{out:?}"
+        );
+        assert_public(&w);
+    }
 }

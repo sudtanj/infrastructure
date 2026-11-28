@@ -731,7 +731,6 @@ mod tests {
     }
 
     // `Held::take` refuses a value over 32 KiB (store_tests `held_take_size_cap`), so the pump never sees a
-    // `Held::take` refuses a value over 32 KiB (store_tests `held_take_size_cap`), so the pump never sees a
     // form built from one. This is the pump side: with a value one byte over, the forms stay under the
     // 48 KiB cap, and nothing waits forever or is lost; a form that is longer than a chunk does not stall it
     // either.
@@ -851,5 +850,67 @@ mod tests {
         let got = pieces(line.as_bytes(), &red.forms());
         let want = format!("{}***{}", "a".repeat(start), "b".repeat(500));
         assert_eq!(shown(&red, &got), want);
+    }
+
+    // QA: every string `Redactor::add` makes (plain, base64 at three alignments, URL-safe, wrapped 76-column
+    // lines, percent, hex, clone header), placed before, across and after the 64 KB cut, is masked once the
+    // pieces are redacted one by one. Nothing is lost and no piece is over the cut. Values: ASCII, a wrapped
+    // one, multi-byte, two in one batch.
+    #[test]
+    fn pump_masks_every_form_around_the_cut() {
+        let wrapped = format!("canary-Zq81-{}", "k9".repeat(44));
+        let batches = [
+            vec![V.to_string()],
+            vec![wrapped],
+            vec!["pässwörd-漢字-😀-key-77".to_string()],
+            vec![V.to_string(), "second-Zq82-value-key".to_string()],
+        ];
+        for values in batches {
+            let red = Redactor::new(values.clone());
+            let forms = red.forms();
+            if values[0].len() == 100 {
+                assert!(forms.iter().any(|f| f.len() == 76), "no 76-column form");
+            }
+            for f in forms.iter().filter(|f| !f.contains('\n')) {
+                let len = f.len();
+                for k in [0, 1, 2, len / 2, len - 2, len - 1, len, len + 1] {
+                    let (pad, tail) = (" ".repeat(CUT - k), " ".repeat(100));
+                    let input = format!("{pad}{f}{tail}\n");
+                    let got = pieces(input.as_bytes(), &forms);
+                    assert_eq!(got.concat(), input, "lossless: {f} at {k}");
+                    assert!(got.iter().all(|p| p.len() <= CUT), "{f} at {k}");
+                    assert_eq!(shown(&red, &got), format!("{pad}***{tail}"), "{f} at {k}");
+                }
+            }
+        }
+    }
+
+    // Two occurrences back to back: the cut is inside the second, then inside the first.
+    #[test]
+    fn pump_masks_two_adjacent_values_around_the_cut() {
+        let red = Redactor::new([V.to_string()]);
+        let forms = red.forms();
+        for k in [1, V.len() / 2, V.len() - 1, V.len() + 1, 2 * V.len() - 1] {
+            let (pad, tail) = (" ".repeat(CUT - k), " ".repeat(50));
+            let input = format!("{pad}{V}{V}{tail}\n");
+            let got = pieces(input.as_bytes(), &forms);
+            assert_eq!(got.concat(), input, "k {k}");
+            assert_eq!(shown(&red, &got), format!("{pad}******{tail}"), "k {k}");
+        }
+    }
+
+    // Text made of the value's own prefix, repeated for more than one chunk, with the value at the cut. The
+    // cut moves back, and back again while the text keeps looking like a prefix, and it must still end
+    // before the occurrence. `cut_point` falls back to the plain cut when the walk reaches the start of the
+    // chunk, and that cuts through the value: a defect, reported in test-map.md.
+    #[test]
+    #[ignore = "defect: cut_point falls back to the plain cut on a periodic prefix, see test-map.md"]
+    fn pump_masks_a_value_that_follows_its_own_prefix_repeated() {
+        let v = "abcabcabcabcabcabc-Z9";
+        let red = Redactor::new([v.to_string()]);
+        let input = format!("{}{v}tail\n", "abc".repeat(21845));
+        let got = pieces(input.as_bytes(), &red.forms());
+        assert_eq!(got.concat(), input);
+        assert_eq!(shown(&red, &got), format!("{}***tail", "abc".repeat(21845)));
     }
 }
