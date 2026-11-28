@@ -152,6 +152,8 @@ case "$1" in
     r=$(get STUB_REWRITE)
     [ -n "$r" ] && [ -n "$ws" ] && echo "ADD . /x" >> "$ws/$r"
     big=$(get STUB_BIG)
+    b=$(get STUB_BUILT)
+    [ -d "$b" ] && [ -n "$ws" ] && cp -a "$b/." "$ws/"
     [ -n "$big" ] && [ -n "$ws" ] && truncate -s "$big" "$ws/image-amd64.tar"
     o=$(get STUB_OUT)
     [ -n "$o" ] && echo "$o";;
@@ -493,6 +495,8 @@ struct W {
     gh: Gh,
     hub: Hub,
     fixture: PathBuf,
+    /// What the build step writes into the workspace: the two archives, absent from the clone.
+    built: PathBuf,
     reg: PathBuf,
 }
 
@@ -512,12 +516,14 @@ impl W {
             ("docker/img/README.md", "# img\n"),
             ("docker/img/.factory-ci.toml", TOML),
         ]);
+        let built = sb.dir.join("built");
         let order = sb.stub.join("order");
         let w = W {
             hub: hub(cfg, order),
             gh: gh(tips),
             sb,
             fixture,
+            built,
             reg,
         };
         w.put("docker/img/image-amd64.tar", &good_archive("amd64"));
@@ -531,14 +537,22 @@ impl W {
     }
 
     fn put(&self, rel: &str, bytes: &[u8]) {
-        let p = self.fixture.join(rel);
+        let p = self.base(rel).join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         let _ = std::fs::remove_file(&p);
         std::fs::write(p, bytes).unwrap();
     }
 
+    fn base(&self, rel: &str) -> &PathBuf {
+        if rel.ends_with(".tar") {
+            &self.built
+        } else {
+            &self.fixture
+        }
+    }
+
     fn rm(&self, rel: &str) {
-        std::fs::remove_file(self.fixture.join(rel)).unwrap();
+        std::fs::remove_file(self.base(rel).join(rel)).unwrap();
     }
 
     fn command(&self, project: &str, branch: &str) -> Command {
@@ -566,6 +580,7 @@ impl W {
         let mut c = self.sb.cmd(&args);
         job_env(&mut c, &self.gh.url);
         c.env("STUB_FIXTURE", &self.fixture)
+            .env("STUB_BUILT", &self.built)
             .env("FAKE_REG", &self.reg)
             .env("FAKE_CRANE", self.sb.dir.join("fake-crane"))
             .env("FACTORY_CI_HUB_URL", &self.hub.url)
@@ -1199,7 +1214,7 @@ fn archive_lines_for_missing_empty_symlinked_garbage_and_oversized() {
     let w = W::new();
     w.put("docker/img/real.tar", &good_archive("amd64"));
     w.rm("docker/img/image-amd64.tar");
-    std::os::unix::fs::symlink("real.tar", w.fixture.join("docker/img/image-amd64.tar")).unwrap();
+    std::os::unix::fs::symlink("real.tar", w.built.join("docker/img/image-amd64.tar")).unwrap();
     let o = w.run(|_| {});
     let (state, text) = w.last();
     assert_eq!(state, "error", "{}", out_text(&o));
