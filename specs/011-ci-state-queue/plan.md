@@ -4,6 +4,9 @@
 
 **Input**: Feature specification from `specs/011-ci-state-queue/spec.md`
 
+**Amendment of 2026-11-28 (feature 013, `specs/013-bitwarden-watch-list/`)**: the rows below that say "no cron line", "the tick is not touched", "No file under `.github/scripts/` changes (owner rule)" or edit `.github/factory-ci-repos.toml` (T030, decisions D17, D23, O15, O19, the toml row of "Files to change") describe the state before 013. After 013: the cron `*/5 * * * *` exists in the tick (013 T028), so the doubled cadence with the outside dispatcher doubles ledger reads and blob reads per hour (recheck the 40-blob cap and the 5,000-call budget; the claim dedupes a doubled slot); the list is the Bitwarden key `FACTORY_CI_REPOS`, so T030 is an owner edit there; `ci` reuses its one `bws` call; scheduled and push rows carry `entry` and every message names `entry N`, and every new `format!` must pass the permanent hostile-list test of 013 T008; the parser rules of 013 (owner, `id`, `secret_branches`, zero entries) apply to this feature's fixtures; `B_PRIVATE` is private only when `true`. 011 still edits no file under `.github/workflows/` or `.github/scripts/`.
+
+
 Skill note: `.specify/scripts/bash/setup-plan.sh` ran. `.specify/extensions.yml` does not exist, so no hooks ran. The constitution (Principle VI) also asks for `/speckit-clarify` before this plan and `/speckit-analyze` after `tasks.md`; the owner rule is recorded as a dated clarification in spec.md and `/speckit-analyze` ran on this revision. The constitution stays at 1.2.0; 011 does not use the schedule allowance it grants.
 
 ## Summary
@@ -795,7 +798,7 @@ Amendment of 2026-11-28 (owner rule, its correction and the tick decisions): eve
 - O12: a canary of 200 trials proves read lag is rare, not absent; overlapping runs still cannot corrupt state, because each save checks its fence.
 - O13: a ticket that is broken and registered again goes to the back; accepted residual (FR-011).
 - O14: a duplicated tick runs the Playwright login twice in sequence; accepted ("every run must run").
-- O15: no cron line exists, so no repo, branch or project of a schedule is public.
+- O15 [013: a cron line exists now, but it carries no repo, branch or project; the schedule lives in the toml of each project]: no cron line exists, so no repo, branch or project of a schedule is public.
 - O16: the pinned manual `ci` cannot run a project that uses the new keys (spec R5). The owner accepted the frozen pin; the README says so. The features themselves run on the tick, so they are no longer inert.
 - O17: the queue is seldom needed on the tick (serial ticks, one row per project per tick). It stays by the owner's word.
 - O18: the tick runner has no container, so D19 changed: `GITHUB_RUN_ATTEMPT`, the row's run id and the clone image as helper. A clone image without `chown` or `chmod` ends stateful runs with `runner fault` (checked at T029).
