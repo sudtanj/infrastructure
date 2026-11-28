@@ -8,9 +8,11 @@ docker/<image>/
   <sources the Dockerfile copies>
 ```
 
+The owner creates the public Docker Hub repository `sudtanj/<image>` by hand before the first publish (spec A5).
+
 ## `.factory-ci.toml` (one step, no check step, no secrets)
 
-The runner runs the check itself before and inside publish, so the file only builds and saves, once per platform.
+The runner runs the check itself before and inside publish, so the file only builds and saves, once per platform. The step image must be pinned (`step-image`).
 
 ```toml
 [steps.build]
@@ -21,25 +23,26 @@ commands = [
   "docker save -o image-amd64.tar image-amd64",
   "docker build --platform linux/arm64 -t image-arm64 .",
   "docker save -o image-arm64.tar image-arm64",
+  "chmod 0644 image-amd64.tar image-arm64.tar",
 ]
 timeout = 1800
 ```
 
-- The step writes `image-amd64.tar` and `image-arm64.tar` in the project directory (`/workspace` inside the step). The runner pushes those two files and no others.
-- `docker = true` needs `allow_docker = true` on the watch entry and `FACTORY_CI_DIND_IMAGE`.
-- A step image pin is the convention. The check does not enforce it (risk R-A).
+- The step writes `image-amd64.tar` and `image-arm64.tar` in the project directory (`/workspace` inside the step). The runner moves those two files into a fresh directory and pushes them; no other file.
+- `docker = true` needs `allow_docker` on the watch entry and `FACTORY_CI_DIND_IMAGE`; only a `docker/<image>` row on `main` gets it.
 - No emulation: BuildKit sets `BUILDPLATFORM` to the VM's `linux/amd64`; the `--platform linux/arm64` build only changes `TARGETARCH` and the platform of the final stage.
 
 ## `Dockerfile` for `hello-static` (cross-compiled Go, no emulation)
 
-Shape, not final text. The engineer resolves the digests that are not already in the repo and records the source tag in a comment. Both are index digests (FR-028): `docker buildx imagetools inspect <ref>@<digest>` must list `linux/amd64` and `linux/arm64`.
+Shape, not final text. The engineer resolves the digests and records the source tags in `pins.md` and in a comment. Every `FROM` is an index digest (FR-028): `docker buildx imagetools inspect <ref>@<digest>` must list `linux/amd64` and `linux/arm64`. The builder comes from the Google mirror of the Docker Hub official image, by digest, so the sidecar's pull does not meet the anonymous Docker Hub limit (spec A13). The Go version is one that still gets security fixes on the day the file is written; `go.mod` carries the same version.
 
 ```dockerfile
-FROM --platform=$BUILDPLATFORM golang:1.23@sha256:<index digest> AS build
+FROM --platform=$BUILDPLATFORM mirror.gcr.io/library/golang:<supported>@sha256:<index digest> AS build
 ARG TARGETARCH
+ENV GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux
 WORKDIR /src
 COPY go.mod hello.go ./
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -trimpath -o /hello .
+RUN GOARCH=$TARGETARCH go build -trimpath -o /hello .
 
 FROM gcr.io/distroless/static@sha256:<index digest>
 COPY --from=build /hello /hello
@@ -47,12 +50,16 @@ USER 65532:65532
 ENTRYPOINT ["/hello"]
 ```
 
-It passes every rule of `data-model.md`: every `FROM` pinned, the one `RUN` sits in a `--platform=$BUILDPLATFORM` stage (`emulation`), the final base is distroless `static`, no `RUN` or shell in the final stage, numeric `USER`, exec-form `ENTRYPOINT`, no credential names (`TARGETARCH` is not one). `hello.go` prints one fixed line and `go.mod` names a module with no dependency.
+It passes every rule of `data-model.md`: only allowlisted instructions, every `FROM` pinned, the one `RUN` sits in a `--platform=$BUILDPLATFORM` stage (`emulation`), `COPY --from=build` names an earlier stage, the final base is distroless `static`, no `RUN` in the final stage, numeric `USER`, exec-form `ENTRYPOINT`, no credential names (`TARGETARCH` is not one). `hello.go` prints one fixed line and `go.mod` names a module with no dependency.
 
 ## `README.md`
 
-What the image is, how to pull it (`docker pull sudtanj/<image>:latest`, both architectures), the tags, and the rule that the folder is the only place to change. No secrets.
+What the image is, how to pull it (`docker pull sudtanj/<image>:latest`, both architectures), the tags (`latest`, `sha-<12 hex>`), and the rule that the folder is the only place to change. No secrets.
+
+## `docker/README.md`
+
+How to add an image (three files, the owner creates the repository), and the refresh routine: when a base gets a security fix, the owner resolves the new index digest (`docker buildx imagetools inspect`), edits the `FROM` lines and the step image, and merges; the commit rebuilds and republishes. Pins carry their source tag in a comment.
 
 ## Failure examples (fixtures for tests)
 
-One fixture Dockerfile per check id, each the passing file with one change (`emulation`: drop `--platform=$BUILDPLATFORM` from the builder). The fixture set lives in `rust-ci-runner/tests/fixtures/image/` as plain files. Token fixtures use synthetic strings built for the test (`dckr_pat_` plus 24 `A`), never a live credential; the canary string for leak searches is `canary-Zq81-value-key-0123456789`.
+One fixture Dockerfile per check id and per bypass of S1, each the passing file with one change. The fixture set lives in `rust-ci-runner/tests/fixtures/image/` as plain files. Token fixtures use synthetic strings built for the test (`dckr_pat_` plus 24 `A`), never a live credential; the canary string for leak searches is `canary-Zq81-value-key-0123456789`.
