@@ -2769,7 +2769,14 @@ printf '%s' "$SITE_API_KEY" | base64
         let out = lines(&w, "a", "stdout");
         assert!(
             out.iter().filter(|l| *l == "***").count() >= 2,
-            "masked lines missing"
+            "masked lines missing: {:?}",
+            out.iter()
+                .map(|l| (
+                    l.len(),
+                    l.chars().take(12).collect::<String>(),
+                    l.chars().rev().take(12).collect::<String>()
+                ))
+                .collect::<Vec<_>>()
         );
         assert_public(&w);
     }
