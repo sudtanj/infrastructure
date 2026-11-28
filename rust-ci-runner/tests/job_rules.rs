@@ -110,7 +110,10 @@ fn a_pipeline_with_a_secret_ends_in_error_before_any_container() {
             .contains("steps with secrets are not run by this job"),
         "{s}"
     );
-    assert!(!text.contains("NPM_TOKEN") && !text.contains("npm-value-4242"), "{text}");
+    assert!(
+        !text.contains("NPM_TOKEN") && !text.contains("npm-value-4242"),
+        "{text}"
+    );
     assert!(!j.sb.client_envs().contains("npm-value-4242"));
 }
 
@@ -156,7 +159,10 @@ fn a_missing_secret_gets_the_same_refusal_and_names_nothing() {
     let s = j.last_status();
     assert_eq!(s["state"], "error");
     let d = s["description"].as_str().unwrap();
-    assert!(d.contains("steps with secrets are not run by this job"), "{s}");
+    assert!(
+        d.contains("steps with secrets are not run by this job"),
+        "{s}"
+    );
     assert!(!d.contains("NPM_TOKEN"), "{s}");
 }
 

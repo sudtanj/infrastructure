@@ -400,8 +400,14 @@ fn a_pipeline_with_a_secret_is_refused_and_the_description_holds_neither_name_no
     run_job(&sb, &g, &engine, &[], &[("NPM_TOKEN", "npm-secret-77")]);
     assert_eq!(g.last()["state"], "error");
     let last = g.last().to_string();
-    assert!(last.contains("steps with secrets are not run by this job"), "{last}");
-    assert!(!last.contains("npm-secret-77") && !last.contains("NPM_TOKEN"), "{last}");
+    assert!(
+        last.contains("steps with secrets are not run by this job"),
+        "{last}"
+    );
+    assert!(
+        !last.contains("npm-secret-77") && !last.contains("NPM_TOKEN"),
+        "{last}"
+    );
 }
 
 #[test]

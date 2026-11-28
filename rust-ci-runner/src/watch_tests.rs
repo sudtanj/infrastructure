@@ -376,7 +376,12 @@ fn secrets_allowed_on_secret_branches_star_allows_any_branch_and_an_absent_list_
     for r in ["main", "dev", "release/1", "feat/x/y"] {
         assert!(gate("secret_branches = [\"*\"]", r), "{r}");
         // absent, whatever `branches` says
-        for absent in ["", "branches = [\"*\"]", "branches = [\"?*\"]", "branches = [\"main\"]"] {
+        for absent in [
+            "",
+            "branches = [\"*\"]",
+            "branches = [\"?*\"]",
+            "branches = [\"main\"]",
+        ] {
             assert!(!gate(absent, r), "{absent:?} {r}");
         }
     }
