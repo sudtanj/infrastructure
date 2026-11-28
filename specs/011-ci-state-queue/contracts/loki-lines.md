@@ -1,6 +1,6 @@
 # Contract: Loki lines of step `ci`
 
-Every line is shipped by `log.out("ci", ...)` after redaction. `ci` is a reserved step name, so a pipeline step cannot forge these lines. No line holds a token, key, vault name or value. Each string below has a test in `ci_state_tests.rs`, and the alert rules grep them. `<...>` is a placeholder.
+Every line is shipped by `log.out("ci", ...)` after redaction. `ci` is a reserved step name, so a pipeline step cannot forge these lines. No line holds a token, key, vault name or value. Each string below has a test in `tick_state_tests.rs`, and the alert rules grep them. `<...>` is a placeholder.
 
 | String | When (0.4.0 unless marked 0.4.1) |
 |---|---|

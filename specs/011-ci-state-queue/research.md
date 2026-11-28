@@ -59,7 +59,7 @@ Dropped by the owner rule of 2026-11-28: a `cron` line is a workflow edit. The e
 
 ## R-F Where the tests run
 
-**Evidence**: `rust-ci-runner/.factory-ci.toml` runs `cargo test --locked --lib` in groups: everything but `ship_tests::`, `job_tests::`, `ci_tests::`, then each of those alone, because mock servers hold threads and a step container has `--pids-limit 512` (`engine.rs`). 010 adds a `ci_tests::step_secrets::` split. `ci_tests.rs` `Hub::drop` calls `server.unblock()`. `--skip ci_tests::` does not match `ci_state_tests::`, so new server modules need their own `--skip` and process groups. The in-memory `FakeReleases` keeps queue, state and bundle tests off HTTP, so race tests use at most 6 joined threads and run in the first group.
+**Evidence**: `rust-ci-runner/.factory-ci.toml` runs `cargo test --locked --lib` in groups: everything but `ship_tests::`, `job_tests::`, `ci_tests::`, then each of those alone, because mock servers hold threads and a step container has `--pids-limit 512` (`engine.rs`). 010 adds a `ci_tests::step_secrets::` split. `ci_tests.rs` `Hub::drop` calls `server.unblock()`. `--skip ci_tests::` does not match `tick_state_tests::`, so new server modules need their own `--skip` and process groups. The in-memory `FakeReleases` keeps queue, state and bundle tests off HTTP, so race tests use at most 6 joined threads and run in the first group.
 
 ## R-G Findings that changed the design late
 
