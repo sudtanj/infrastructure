@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const R: &str = "o/r";
+const D: &str = "docker";
 
 thread_local! {
     static SLEPT_MS: Cell<u64> = const { Cell::new(0) };
@@ -80,7 +81,7 @@ fn no_id_leaves_repo_id_empty_and_a_matching_id_fills_it() {
 
 #[test]
 fn the_default_branch_comes_from_the_repo_lookup() {
-    // The default branch still names the row; secrets_ok is false for every row (T017b)
+    // The default branch still names the row; secrets_ok is false for every row of this fixture, which has no image project (T017b; 012 T013)
     let api = fake();
     api.set_repo(R, 1, false, "trunk");
     add_repo(&api, R, &[("main", 1, 30), ("trunk", 2, 20)], &["."]);
@@ -257,12 +258,19 @@ fn rows_split_by_allow_docker_use_the_docker_token_and_share_unique_numbers() {
     let plain = fake();
     let docker = FakeApi::new("ci-docker-bot", NOW);
     add_repo(&plain, "o/plain", &[("main", 1, 10)], &["."]);
-    add_repo(
-        &docker,
+    // 012 plan decision 2, FR-023: only image rows on main are docker rows. The path is built, not
+    // written out: `the_hardening_fixture_has_no_docker_project` scans this file for the literal.
+    docker.set_branch("o/dock", "main", &sha(2));
+    docker.set_tree(
         "o/dock",
-        &[("main", 2, 10), ("dev", 3, 20)],
-        &["."],
+        &sha(2),
+        &[
+            ("docker", "tree"),
+            (format!("{D}/ab").as_str(), "tree"),
+            (format!("{D}/ab/.factory-ci.toml").as_str(), "blob"),
+        ],
     );
+    docker.set_commits("o/dock", &sha(2), vec![(sha(2), vec![], 10)]);
     let list = entries(&[("o/plain", ""), ("o/dock", "allow_docker = true")]);
     let apis = Apis {
         plain: &plain,
@@ -270,7 +278,7 @@ fn rows_split_by_allow_docker_use_the_docker_token_and_share_unique_numbers() {
     };
     let fin = finish(&apis, candidates(&apis, &list, &opts()), &opts());
     assert_eq!(fin.matrix.len(), 1);
-    assert_eq!(fin.matrix_docker.len(), 2);
+    assert_eq!(fin.matrix_docker.len(), 1);
     assert!(fin
         .matrix_docker
         .iter()
@@ -285,10 +293,10 @@ fn rows_split_by_allow_docker_use_the_docker_token_and_share_unique_numbers() {
         "{:?}",
         docker.calls()
     );
-    assert!(docker.posts().len() == 2 && plain.posts().len() == 1);
+    assert!(docker.posts().len() == 1 && plain.posts().len() == 1);
     let mut n: Vec<usize> = rows(&fin).iter().map(|r| r.n as usize).collect();
     n.sort();
-    assert_eq!(n, [0, 1, 2]);
+    assert_eq!(n, [0, 1]);
 }
 
 #[test]

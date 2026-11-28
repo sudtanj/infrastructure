@@ -401,3 +401,10 @@ fn project_path_ok_accepts_the_three_shapes_and_nothing_else() {
         assert!(!project_path_ok(bad), "{bad:?}");
     }
 }
+
+#[test]
+fn docker_itself_is_never_a_project() {
+    // the `docker` parent folder with its own `.factory-ci.toml` makes nothing
+    let t = [e("docker", "tree"), e(&format!("docker/{TOML}"), "blob")];
+    assert!(found(&t).is_empty());
+}

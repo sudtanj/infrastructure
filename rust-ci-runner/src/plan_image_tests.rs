@@ -40,7 +40,6 @@ fn add(api: &FakeApi, tips: &[(&str, u32, i64)], folders: &[&str], images: &[&st
 }
 
 #[test]
-#[ignore = "test-first"]
 fn an_image_row_on_main_is_a_docker_row_with_secrets_ok() {
     // 012 T013; S2; FR-023, I7. The `rust-ci-runner` row of the same entry stays plain.
     let api = fake();
@@ -64,7 +63,6 @@ fn an_image_row_on_main_is_a_docker_row_with_secrets_ok() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn plain_rows_stay_in_the_plain_matrix() {
     // 012 T013; FR-023: a `rust-ci-runner` or `ci-canary` row on `main` under an entry with `allow_docker`
     let api = fake();
@@ -83,7 +81,6 @@ fn plain_rows_stay_in_the_plain_matrix() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn an_image_row_on_another_branch_has_neither_flag() {
     // 012 T013; S2: a `docker/x` row on `dev` is a plain row
     let api = fake();
@@ -107,7 +104,6 @@ fn an_image_row_on_another_branch_has_neither_flag() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn secrets_ok_true_only_for_main_image_rows() {
     // 012 T013; I7 over the grid: entry flag x branch x project
     for flag in ["", "allow_docker = true\n"] {

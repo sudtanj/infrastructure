@@ -60,7 +60,8 @@ pub fn find(tree: &[TreeEntry]) -> Vec<Found> {
     }
     for e in tree
         .iter()
-        .filter(|e| e.kind == "tree" && !e.path.contains('/'))
+        // `docker` is the image parent, never a project itself (fail closed).
+        .filter(|e| e.kind == "tree" && !e.path.contains('/') && e.path != "docker")
     {
         if is_blob(&format!("{}/{TOML}", e.path)) {
             out.push(Found {

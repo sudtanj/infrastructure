@@ -2138,6 +2138,7 @@ fn prepare_refuses_a_pipeline_that_lists_a_secret_before_any_name() {
 // ---- project paths at the job boundary (S2, T014) ----
 
 #[test]
+#[ignore = "test-first"]
 fn project_path_shapes_at_the_job_boundary() {
     // 012 T014; S2: `docker/<name>` is accepted, the rest is refused before any container or status
     let w = W::new();
