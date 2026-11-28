@@ -580,7 +580,7 @@ fn attempt(
         Err(d) => return d,
     };
     let publishes = image::publishes(&o.t.project, &o.branch) && o.allow_docker;
-    if let Some(d) = publishes.then(|| publish::check_failed(&dir)).flatten() {
+    if let Some(d) = publishes.then(|| publish::check_failed(&dir, false)).flatten() {
         return d;
     }
     let (p, secrets) = match prepare(&dir, None, |n| var(env, n), o.allow_docker, false) {
@@ -704,7 +704,7 @@ fn secret_names(
     }
     dind_image(env, &p)?;
     let publishes = image::publishes(&o.t.project, &o.branch) && o.allow_docker;
-    let clean = publishes && image::check(&dir).is_empty();
+    let clean = publishes && image::check(&dir, false).is_empty();
     Ok(if clean {
         format!("{}\n{}\n", image::USERNAME_NAME, image::TOKEN_NAME)
     } else {

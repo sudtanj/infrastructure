@@ -70,8 +70,8 @@ const SCRIPT_B: &str = r#"o=$("$CRANE" tag "$REPO:$TAG" latest 2>&1) || fail "$o
 "#;
 
 /// `check failed: <ids>` (at most three) when the project folder breaks a rule.
-pub(crate) fn check_failed(dir: &Path) -> Option<Done> {
-    let bad = image::check(dir);
+pub(crate) fn check_failed(dir: &Path, after_build: bool) -> Option<Done> {
+    let bad = image::check(dir, after_build);
     if bad.is_empty() {
         return None;
     }
@@ -269,7 +269,7 @@ fn go(
         return Err(err(LEFT_OVER));
     }
     // The sidecar is gone, so the check reads files nothing can change any more.
-    if let Some(d) = check_failed(dir) {
+    if let Some(d) = check_failed(dir, true) {
         return Err(d);
     }
     // Nothing else can touch the archives now: check each, move it, then read it.

@@ -12,7 +12,7 @@ The runner creates the public Docker Hub repository `sudtanj/<image>` itself whe
 
 ## `.factory-ci.toml` (one step, no check step, no secrets)
 
-The runner runs the check itself before and inside publish, so the file only builds and saves, once per platform. The step image is the one pinned `docker:27.5.1-cli` digest of `pins.md` (`step-template`; `step-image` for the pin shape), and `env` is absent.
+The runner runs the check itself before and inside publish, so the file only builds and saves, once per platform. The step image is the one pinned `docker:27.5.1-cli` digest of `pins.md` (`step-template`; `step-image` for the pin shape), and `env` is absent. When the step image digest changes, `tests/fixtures/image/pass/.factory-ci.toml`, `tests/job_publish.rs` and this contract change with it.
 
 ```toml
 [steps.build]
@@ -59,7 +59,7 @@ What the image is, how to pull it (`docker pull sudtanj/<image>:latest`, both ar
 
 ## `docker/README.md`
 
-How to add an image (three files; the runner creates the public repository), and the refresh routine: when a base gets a security fix, the owner resolves the new index digest (`docker buildx imagetools inspect`), edits the `FROM` lines and the step image, and merges; the commit rebuilds and republishes. Pins carry their source tag in a comment.
+How to add an image (three files; the runner creates the public repository), and the refresh routine: when a base gets a security fix, the owner resolves the new index digest (`docker buildx imagetools inspect`), edits the `FROM` lines and the step image (the final base stays one of the three distroless repositories of `data-model.md` `final-base`), and merges; the commit rebuilds and republishes. Pins carry their source tag in a comment.
 
 ## Failure examples (fixtures for tests)
 

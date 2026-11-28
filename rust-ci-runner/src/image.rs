@@ -93,7 +93,8 @@ pub fn name_ok(name: &str) -> bool {
 }
 
 /// The ids of the rules the folder breaks, sorted, once each. Never panics, whatever the files hold.
-pub fn check(dir: &Path) -> Vec<&'static str> {
+/// `after_build` is true once the build wrote its two archives; before it, those names are refused.
+pub fn check(dir: &Path, after_build: bool) -> Vec<&'static str> {
     let mut bad = BTreeSet::new();
     let regular = |n: &str| std::fs::symlink_metadata(dir.join(n)).is_ok_and(|m| m.is_file());
     let (df, readme, toml) = (
@@ -115,7 +116,7 @@ pub fn check(dir: &Path) -> Vec<&'static str> {
     if toml {
         toml_rules(dir, &mut bad);
     }
-    folder_rules(dir, &mut bad);
+    folder_rules(dir, after_build, &mut bad);
     bad.into_iter().collect()
 }
 
@@ -272,8 +273,10 @@ fn secret_file(name: &str) -> bool {
 
 /// Every file of the folder, not only the three the check names: capped in entries, bytes and depth, no
 /// entry that is not a regular file or a directory, no credential file name, no credential in a file.
-/// The two archives the build writes at the top are skipped; `publish` reads them with `archive`.
-fn folder_rules(dir: &Path, bad: &mut BTreeSet<&'static str>) {
+/// After the build, the two archives at the top are skipped when they are regular files with those exact
+/// lowercase names; `publish` reads them with `archive`. Before it, any entry with those names, in any
+/// case, is a `layout` failure.
+fn folder_rules(dir: &Path, after_build: bool, bad: &mut BTreeSet<&'static str>) {
     let (mut seen, mut total) = (0, 0);
     let mut todo = vec![(dir.to_path_buf(), 0)];
     while let Some((d, depth)) = todo.pop() {
@@ -292,14 +295,18 @@ fn folder_rules(dir: &Path, bad: &mut BTreeSet<&'static str>) {
                 continue;
             };
             let name = e.file_name().to_string_lossy().to_lowercase();
-            if depth == 0 && PLATFORMS.iter().any(|(_, f)| *f == name) {
-                continue;
-            }
             let meta = std::fs::symlink_metadata(e.path());
             let Ok(m) = meta else {
                 bad.insert("layout");
                 continue;
             };
+            if depth == 0 && PLATFORMS.iter().any(|(_, f)| *f == name) {
+                let exact = e.file_name().to_str().is_some_and(|n| n == name);
+                if !(after_build && exact && m.is_file()) {
+                    bad.insert("layout");
+                }
+                continue;
+            }
             if m.is_dir() && depth < MAX_DEPTH {
                 todo.push((e.path(), depth + 1));
                 continue;
@@ -640,6 +647,13 @@ fn run_copy(i: &Ins, stages: &mut [Stage], bad: &mut BTreeSet<&'static str>) {
     }
 }
 
+/// The only distroless repositories a final stage may end at.
+const DISTROLESS: [&str; 3] = [
+    "gcr.io/distroless/static",
+    "gcr.io/distroless/static-debian12",
+    "gcr.io/distroless/base-nossl",
+];
+
 fn final_rules(stages: &[Stage], base: &[String], bad: &mut BTreeSet<&'static str>) {
     let Some(last) = stages.len().checked_sub(1) else {
         bad.insert("final-base");
@@ -656,8 +670,8 @@ fn final_rules(stages: &[Stage], base: &[String], bad: &mut BTreeSet<&'static st
     }
     let end = &base[cur];
     let name = end.split('@').next().unwrap_or("");
-    let safe =
-        end == "scratch" || (name.starts_with("gcr.io/distroless/") && !name.contains("debug"));
+    let (repo, tag) = name.split_once(':').unwrap_or((name, ""));
+    let safe = end == "scratch" || (DISTROLESS.contains(&repo) && !tag.contains("debug"));
     if !safe {
         bad.insert("final-base");
     }

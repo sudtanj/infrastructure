@@ -295,6 +295,20 @@ fn rows_carry_repo_id_secrets_ok_and_retry() {
 }
 
 #[test]
+fn a_private_repo_image_row_gets_no_docker_and_no_secrets() {
+    // T048: a private watched repo must not publish a public image
+    for (private, want) in [(true, false), (false, true)] {
+        let api = fake();
+        api.set_repo(R, 123, private, "main");
+        add_repo(&api, R, &[("main", 1, 10)], &["docker/img"]);
+        let list = entries(&[(R, "id = 123\nallow_docker = true")]);
+        let (_, fin) = plan_all(&api, &list, &opts());
+        let r = rows(&fin)[0].clone();
+        assert_eq!((r.allow_docker, r.secrets_ok), (want, want), "private {private}");
+    }
+}
+
+#[test]
 fn a_truncated_tree_is_not_an_error() {
     // FR-008 edge case
     let api = fake();

@@ -46,7 +46,7 @@ fn project(df: &[u8], toml: &str) -> Tmp {
 }
 
 fn run(t: &Tmp) -> Vec<&'static str> {
-    check(&t.0)
+    check(&t.0, false)
 }
 
 fn ids(df: &str) -> Vec<&'static str> {
@@ -97,14 +97,14 @@ fn the_passing_fixture_returns_empty() {
 fn the_fixture_dir_on_disk_passes_too() {
     // 012 T004: the committed fixture folder, not the in-memory copy
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/image/pass");
-    assert_eq!(check(&dir), Vec::<&str>::new());
+    assert_eq!(check(&dir, false), Vec::<&str>::new());
 }
 
 #[test]
 fn the_real_hello_static_passes() {
     // 012 T006 (needs T018): the shipped first image passes its own check; FR-006
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../docker/hello-static");
-    assert_eq!(check(&dir), Vec::<&str>::new());
+    assert_eq!(check(&dir, false), Vec::<&str>::new());
 }
 
 #[test]
@@ -197,7 +197,7 @@ fn layout_fails_for_an_empty_folder_and_a_missing_folder() {
     // 012 T006
     let t = Tmp::new();
     expect_has(run(&t), "layout", "empty folder");
-    expect_has(check(&t.0.join("nope")), "layout", "missing folder");
+    expect_has(check(&t.0.join("nope"), false), "layout", "missing folder");
 }
 
 #[test]
@@ -654,6 +654,11 @@ fn final_base_fails_for_debug_and_non_distroless_bases() {
         format!("gcr.io/distroless-evil/static@sha256:{b}"),
         format!("mirror.gcr.io/distroless/static@sha256:{b}"),
         format!("eu.gcr.io/distroless/static@sha256:{b}"),
+        format!("gcr.io/distroless/python3@sha256:{b}"),
+        format!("gcr.io/distroless/static-evil@sha256:{b}"),
+        format!("gcr.io/distroless/cc:latest@sha256:{b}"),
+        "gcr.io/distroless/static:debug".to_string(),
+        "gcr.io/distroless/base-nossl:debug-nonroot".to_string(),
     ] {
         expect_has(ids(&df_with(&good, &r)), "final-base", &r);
     }
@@ -672,7 +677,7 @@ fn final_base_passes_scratch_and_distroless() {
     for r in [
         format!("gcr.io/distroless/base-nossl@sha256:{b}"),
         format!("gcr.io/distroless/static-debian12:nonroot@sha256:{b}"),
-        format!("gcr.io/distroless/cc:latest@sha256:{b}"),
+        format!("gcr.io/distroless/static:latest@sha256:{b}"),
     ] {
         let df = df_with(&good, &format!("FROM {r}"));
         assert_eq!(ids(&df), Vec::<&str>::new(), "{r}");
@@ -1362,9 +1367,40 @@ fn the_folder_walk_refuses_links_and_oversized_folders() {
 fn the_two_build_archives_are_not_walked() {
     // 012 T039: `publish` checks the folder again after the build; the archives are big and hold layers
     let tar = format!("sk_live_{}", "A".repeat(24));
-    let ids = with_files(&[
-        ("image-amd64.tar", tar.as_str()),
-        ("image-arm64.tar", tar.as_str()),
-    ]);
-    assert_eq!(ids, Vec::<&str>::new());
+    let t = project(DF.as_bytes(), TOML);
+    for f in ["image-amd64.tar", "image-arm64.tar"] {
+        std::fs::write(t.0.join(f), &tar).unwrap();
+    }
+    assert_eq!(check(&t.0, true), Vec::<&str>::new());
+}
+
+#[test]
+fn the_archive_names_fail_before_the_build_in_any_form() {
+    // 012 T046: a file, a directory and a changed case each enter the build context unscanned otherwise
+    let cases: [(&str, bool); 3] = [
+        ("image-amd64.tar", false),
+        ("image-amd64.tar", true),
+        ("IMAGE-AMD64.TAR", false),
+    ];
+    for (name, dir) in cases {
+        let t = project(DF.as_bytes(), TOML);
+        let p = t.0.join(name);
+        if dir {
+            std::fs::create_dir(&p).unwrap();
+        } else {
+            std::fs::write(&p, "x").unwrap();
+        }
+        expect_has(run(&t), "layout", name);
+    }
+}
+
+#[test]
+fn after_the_build_only_regular_files_with_the_exact_names_are_skipped() {
+    // 012 T046
+    let t = project(DF.as_bytes(), TOML);
+    std::fs::create_dir(t.0.join("image-amd64.tar")).unwrap();
+    expect_has(check(&t.0, true), "layout", "directory after the build");
+    let t = project(DF.as_bytes(), TOML);
+    std::fs::write(t.0.join("IMAGE-ARM64.TAR"), "x").unwrap();
+    expect_has(check(&t.0, true), "layout", "upper case after the build");
 }

@@ -53,7 +53,7 @@ fn docker_folders_pass_the_static_check() {
                 "docker/{name}/{f} is missing or not a plain file"
             );
         }
-        let ids = check(&path);
+        let ids = check(&path, false);
         assert!(ids.is_empty(), "docker/{name} fails the check: {ids:?}");
     }
 }
@@ -77,7 +77,7 @@ fn the_walk_would_catch_a_bad_folder() {
     ));
     std::fs::create_dir_all(&tmp).unwrap();
     assert!(
-        !check(&tmp).is_empty(),
+        !check(&tmp, false).is_empty(),
         "an empty folder must fail the layout check"
     );
     assert!(!name_ok("Bad_Name") && !name_ok("a") && name_ok("ab"));

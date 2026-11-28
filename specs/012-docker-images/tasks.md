@@ -118,6 +118,14 @@ Found by the S6b re-review at `f57240e`.
 - [x] T044 [US2] M2: `image::check` `step-template` also requires the step `image` to equal the one pinned `docker:27.5.1-cli` digest of `pins.md` (`image::STEP_IMAGE`) and an empty `env`; test cases for both. In `failed_check_pushes_nothing` the `secret-flag` case cannot trip `secret-flag` alone (the template pins every command), so it asserts that `step-template` fires too
 - [x] T045 [US2] M3: `image::secret_file` also refuses names starting with `.env.`, `.npmrc`, `.netrc`, `id_dsa`, and names ending in `.p12` or `.pfx`; test cases
 
+Found by the final security and review pass at `08543e7`.
+
+- [x] T046 [US1] Security Low 1: `image::check(dir, after_build)` skips `image-amd64.tar` and `image-arm64.tar` only after the build, and only a regular file with the exact lowercase name. Before the build, any top-level entry with those names, in any case, fails `layout`. `job.rs` (twice) passes `false`, `publish::go` passes `true`. Acceptance: tests in `image_tests.rs` for a committed file, a directory and `IMAGE-AMD64.TAR` before the build, a directory and `IMAGE-ARM64.TAR` after it, and the real archives passing after it. Update `data-model.md`
+- [x] T047 [US1] Security Low 2: `final-base` accepts `scratch` or a repository that, once the `@sha256:` digest and the tag are removed, equals `gcr.io/distroless/static`, `gcr.io/distroless/static-debian12` or `gcr.io/distroless/base-nossl`, with no `debug` in the tag. Acceptance: those pass; `gcr.io/distroless/python3`, `static-evil`, `cc` and tagged debug forms fail (`image_tests.rs`). Update `data-model.md`, `spec.md` FR-010, `contracts/image-project.md` and `docker/README.md`
+- [x] T048 [US1] Security Low 3: `plan.rs` gives an image row from a private repository neither `allow_docker` nor `secrets_ok`, from the `repo.private` the plan already reads; `publish.rs` needs no change because those flags gate the job. Acceptance: a `plan_tests.rs` test with a private and a public repo. Document it in `docker/README.md`
+- [x] T049 [US2] Reviewer minor: `docker/README.md` step 3 also lists `rust-ci-runner/tests/fixtures/image/pass/.factory-ci.toml`, `rust-ci-runner/tests/job_publish.rs` and `specs/012-docker-images/contracts/image-project.md`. Chosen over building the TOML from `STEP_IMAGE`: `job_publish.rs` holds two string constants and a function per template is the bigger change. Acceptance: the README lists the three paths
+- [x] T050 [US2] Reviewer minor: `docker/README.md` says every `.env.*` file is refused, including `.env.example` and `.env.sample`, and the other T045 names. Acceptance: the README names them
+
 ## Dependencies and order
 
 - Phase 1 first; T001 feeds T005 (`CRANE_IMAGE`) and T018; T002 feeds T005 (`CRANE_SH`, `CRANE_BIN`), T012 (login endpoint) and T019.
