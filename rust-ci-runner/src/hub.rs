@@ -5,7 +5,7 @@
 
 use serde_json::{json, Value};
 use std::io::Read;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const CALL_LIMIT: Duration = Duration::from_secs(30);
 const BODY_MAX: u64 = 1 << 20;
@@ -15,6 +15,7 @@ const PRIVATE: &str = "publish refused: repository is private";
 const NO_ACCESS: &str = "docker hub api refused repository access";
 const NO_CREATE: &str = "docker hub api refused repository creation";
 const API: &str = "docker hub api error";
+const TIME: &str = "publish refused: time ran out";
 
 enum Repo {
     Public,
@@ -57,12 +58,13 @@ fn probe(
     agent: &ureq::Agent,
     base: &str,
     jwt: &str,
-    namespace: &str,
-    name: &str,
+    (namespace, name): (&str, &str),
+    timeout: Duration,
 ) -> Result<Repo, &'static str> {
     let req = agent
         .get(&format!("{base}/v2/repositories/{namespace}/{name}/"))
-        .set("Authorization", &format!("Bearer {jwt}"));
+        .set("Authorization", &format!("Bearer {jwt}"))
+        .timeout(timeout);
     match send(req, None).ok_or(API)? {
         (200, text) => {
             match serde_json::from_str::<Value>(&text).map(|v| v["is_private"].as_bool()) {
@@ -77,23 +79,32 @@ fn probe(
     }
 }
 
-/// Public repository: `Ok`. Private: refused. Missing: created public, then probed again.
+/// Public repository: `Ok`. Private: refused. Missing: created public, then probed again. `limit` is
+/// the time left of the job; each call gets `min(30 s, time left)` and none starts with nothing left.
 pub fn ensure_public(
     base: &str,
     user: &str,
     token: &str,
     namespace: &str,
     name: &str,
+    limit: Duration,
 ) -> Result<(), &'static str> {
     if !base_ok(base) {
         return Err(API);
     }
     let base = base.trim_end_matches('/');
-    let agent = ureq::AgentBuilder::new()
-        .timeout(CALL_LIMIT)
-        .redirects(0)
-        .build();
-    let login = agent.post(&format!("{base}/v2/auth/token"));
+    // A limit too big for `Instant` leaves only the per-call limit.
+    let end = Instant::now().checked_add(limit);
+    let slice = || {
+        let now = Instant::now();
+        let left = end.map_or(CALL_LIMIT, |e| e.saturating_duration_since(now));
+        let left = left.min(CALL_LIMIT);
+        (!left.is_zero()).then_some(left).ok_or(TIME)
+    };
+    let agent = ureq::AgentBuilder::new().redirects(0).build();
+    let login = agent
+        .post(&format!("{base}/v2/auth/token"))
+        .timeout(slice()?);
     let body = json!({"identifier": user, "secret": token});
     let jwt = match send(login, Some(body)).ok_or(API)? {
         (200, text) => serde_json::from_str::<Value>(&text)
@@ -108,16 +119,18 @@ pub fn ensure_public(
         Repo::Private => Err(PRIVATE),
         Repo::Missing => Err(API),
     };
-    match probe(&agent, base, &jwt, namespace, name)? {
+    let target = (namespace, name);
+    match probe(&agent, base, &jwt, target, slice()?)? {
         Repo::Missing => {}
         repo => return check(repo),
     }
     let create = agent
         .post(&format!("{base}/v2/repositories/"))
-        .set("Authorization", &format!("Bearer {jwt}"));
+        .set("Authorization", &format!("Bearer {jwt}"))
+        .timeout(slice()?);
     let body = json!({"namespace": namespace, "name": name, "is_private": false});
     match send(create, Some(body)).ok_or(API)?.0 {
-        201 | 400 | 409 => check(probe(&agent, base, &jwt, namespace, name)?),
+        201 | 400 | 409 => check(probe(&agent, base, &jwt, target, slice()?)?),
         401 | 403 => Err(NO_CREATE),
         _ => Err(API),
     }

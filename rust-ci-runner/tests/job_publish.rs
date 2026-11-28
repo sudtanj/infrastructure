@@ -1,8 +1,5 @@
-//! 012 T019, T021, T023, T025 and S6/S7 (test-first). Binary-level publish tests: the real `rust-ci-runner job`
-//! with a stub `docker` on PATH, a fake GitHub (statuses and `branches`) and a fake Docker Hub.
-//!
-//! Every test is `#[ignore = "test-first"]`: remove the marker as the test passes. The file compiles today (it
-//! imports nothing from `image`, `publish` or `hub`), and `cargo test --test job_publish` lists the ignored tests.
+//! 012 T019, T021, T023, T025 and S6/S7. Binary-level publish tests: the real `rust-ci-runner job` with a stub
+//! `docker` on PATH, a fake GitHub (statuses and `branches`) and a fake Docker Hub.
 //!
 //! The publish step cannot be called directly, because the plan does not pin the signature of
 //! `publish::publish` (the contract names `(engine, env, api, target, dir, log) -> Done`, and `Done` and `Target`
@@ -19,9 +16,6 @@
 //! `FACTORY_CI_HUB_URL`. Change that one name if the engineer picks another seam.
 //!
 //! Secrets here are fakes: the token is the canary of `tasks.md`.
-
-// S6 removes this: the file calls code (`queue`) that exists only after S6, so it cannot compile yet.
-#![cfg(any())]
 
 mod common;
 use common::*;
@@ -291,7 +285,7 @@ fn gh(tips: &[String]) -> Gh {
     let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
     let port = server.server_addr().to_ip().unwrap().port();
     let reqs: Arc<Mutex<Vec<Req>>> = Arc::default();
-    let log = reqs.clone();
+    let queue: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(tips.iter().cloned().collect()));
     let tips_handle = queue.clone();
     let log = reqs.clone();
     std::thread::spawn(move || {
@@ -796,7 +790,6 @@ const ARCHIVE_LINES: [&str; 3] = [
 // ---- the main path (S6, FR-014, FR-017, FR-026) ----
 
 #[test]
-#[ignore = "test-first"]
 fn main_image_publishes_both_tags() {
     // 012 T019; S6; FR-014, FR-017
     let w = W::new();
@@ -818,7 +811,6 @@ fn main_image_publishes_both_tags() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn list_has_both_platforms() {
     // 012 T019; FR-026; either media type and either order pass
     let amd_arm = [("linux", "amd64"), ("linux", "arm64")];
@@ -838,7 +830,6 @@ fn list_has_both_platforms() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn single_arch_or_bad_index_never_tags() {
     // 012 T019; FR-026; I10, I11
     let single = "{\"schemaVersion\":2,\"mediaType\":\"application/vnd.oci.image.manifest.v1+json\",\"config\":{}}";
@@ -877,7 +868,6 @@ fn single_arch_or_bad_index_never_tags() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn failed_build_pushes_nothing() {
     // 012 T019; FR-026, FR-007: a failing step, and one archive absent
     let w = W::new();
@@ -896,7 +886,6 @@ fn failed_build_pushes_nothing() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn image_step_failure_is_error_and_retried() {
     // 012 T019; FR-007, MAJOR-2; I15: a failed step with any exit code, and a timeout, end `error` for an image row
     for code in ["1", "2", "125", "126", "127"] {
@@ -921,7 +910,6 @@ fn image_step_failure_is_error_and_retried() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_step_of_a_plain_project_still_ends_failure() {
     // 012 T019; FR-007 last sentence: only image rows change
     let w = W::new();
@@ -954,7 +942,6 @@ fn refuses(id: &str, setup: impl Fn(&W)) {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn failed_check_pushes_nothing() {
     // 012 T021; FR-008, FR-029, SC-002: a sample of ids and bypasses
     refuses("instruction", |w| {
@@ -1009,7 +996,6 @@ fn failed_check_pushes_nothing() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn emulation_refused() {
     // 012 T021; FR-027: a stage with `RUN` and no `--platform=$BUILDPLATFORM`
     refuses("emulation", |w| {
@@ -1021,7 +1007,6 @@ fn emulation_refused() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn pipeline_with_secrets_fails_check() {
     // 012 T021; FR-011: the check runs before `prepare()`, so the id is named, not the fixed secrets line
     refuses("pipeline-secrets", |w| {
@@ -1033,7 +1018,6 @@ fn pipeline_with_secrets_fails_check() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn step_image_unpinned_fails_check() {
     // 012 T021; FR-029: no digest, and a tag
     for image in ["alpine", "alpine:3.23"] {
@@ -1047,7 +1031,6 @@ fn step_image_unpinned_fails_check() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn omitted_check_step_still_refused_in_publish() {
     // 012 T021; FR-008: a build step rewrites the Dockerfile after the first check; publish checks again
     let w = W::new();
@@ -1069,7 +1052,6 @@ fn omitted_check_step_still_refused_in_publish() {
 // ---- the archives (S6 lines 4 and 5; FR-030) ----
 
 #[test]
-#[ignore = "test-first"]
 fn archive_with_root_user_shell_entrypoint_or_wrong_platform_refused() {
     // 012 T021; FR-030, QA-1: the policy is `publish`'s, each fixed line starts no container
     let root = "publish refused: image runs as root";
@@ -1138,7 +1120,6 @@ fn archive_with_root_user_shell_entrypoint_or_wrong_platform_refused() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn archive_policy_lets_the_allowed_shapes_through() {
     // 012 T021; data-model.md "Archive config": uid 0 is the only numeric refusal, both empty is allowed, and
     // `cmd` counts only when `entrypoint` is empty
@@ -1161,7 +1142,6 @@ fn archive_policy_lets_the_allowed_shapes_through() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn archive_lines_for_missing_empty_symlinked_garbage_and_oversized() {
     // 012 T015; S6 line 4; FR-030: the size limit is inclusive (2 GiB passes, one byte more is refused)
     let w = W::new();
@@ -1214,7 +1194,6 @@ fn archive_lines_for_missing_empty_symlinked_garbage_and_oversized() {
 // ---- the tip (FR-018) ----
 
 #[test]
-#[ignore = "test-first"]
 fn unreadable_tip_pushes_nothing() {
     // 012 T025; FR-018: no `main` entry, or an empty list, before any Hub call or container
     for body in [
@@ -1230,7 +1209,6 @@ fn unreadable_tip_pushes_nothing() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn second_tip_read_fails_leaves_sha_tag() {
     // 012 T025; FR-018: the `sha-` list is written, `latest` is not
     let w = W::with(HubCfg::ok(), &[tip(SHA), NO_TIP.to_string()]);
@@ -1242,7 +1220,6 @@ fn second_tip_read_fails_leaves_sha_tag() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn older_commit_pushes_sha_only() {
     // 012 T025; FR-018: another tip on the first read, or on the second
     for tips in [vec![tip(OTHER)], vec![tip(SHA), tip(OTHER)]] {
@@ -1257,7 +1234,6 @@ fn older_commit_pushes_sha_only() {
 // ---- reuse of an existing list (FR-020, MAJOR-3) ----
 
 #[test]
-#[ignore = "test-first"]
 fn existing_valid_list_is_reused_without_digest_compare() {
     // 012 T025; FR-020, I14: digests differ from the archives', nothing is pushed or overwritten
     let w = W::new();
@@ -1279,7 +1255,6 @@ fn existing_valid_list_is_reused_without_digest_compare() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn existing_invalid_list_errors() {
     // 012 T025; FR-020: never overwritten, never tagged, container B never runs
     for bad in [
@@ -1307,7 +1282,6 @@ fn existing_invalid_list_errors() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn repeat_publish_only_tags_latest() {
     // 012 T025; FR-020: a first run for an older tip leaves the `sha-` list; the retry only tags `latest`
     let w = W::with(HubCfg::ok(), &[tip(OTHER)]);
@@ -1337,7 +1311,6 @@ fn repeat_publish_only_tags_latest() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn repeat_publish_ends_in_the_same_text_as_the_first_run() {
     // 012 T015; S6 last line: a commit whose list exists
     let w = W::new();
@@ -1356,7 +1329,6 @@ fn repeat_publish_ends_in_the_same_text_as_the_first_run() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn first_publish_pushes_by_digest_then_appends_once() {
     // 012 T019; FR-026, contracts/publish-step.md script A and B
     let w = W::new();
@@ -1405,7 +1377,6 @@ fn first_publish_pushes_by_digest_then_appends_once() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn no_tag_other_than_sha12_and_latest_is_ever_named() {
     // 012 T019; FR-017, FR-026; I6: every crane argument, every `-e TAG`, and the two scripts
     let w = W::new();
@@ -1437,7 +1408,6 @@ fn no_tag_other_than_sha12_and_latest_is_ever_named() {
 // ---- exit codes (contracts/publish-step.md "Exit mapping") ----
 
 #[test]
-#[ignore = "test-first"]
 fn container_exit_codes_map_to_fixed_lines() {
     // 012 T015; S6: exit 41, 42, 43 and any other code
     let refused = "registry refused the token";
@@ -1469,7 +1439,6 @@ fn container_exit_codes_map_to_fixed_lines() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn the_scripts_map_crane_errors_to_the_exit_codes() {
     // 012 T015; contracts/publish-step.md scripts A and B: 41 for a refused login or UNAUTHORIZED or DENIED, 43 for
     // a digest failure, 42 for anything else
@@ -1527,7 +1496,6 @@ fn the_scripts_map_crane_errors_to_the_exit_codes() {
 // ---- containers (FR-014, FR-015) ----
 
 #[test]
-#[ignore = "test-first"]
 fn publish_container_names_the_entrypoint() {
     // 012 T019; FR-014, MAJOR-4: `--entrypoint <CRANE_SH> <CRANE_IMAGE> -c <script>`, crane called by CRANE_BIN
     let w = W::new();
@@ -1560,7 +1528,6 @@ fn publish_container_names_the_entrypoint() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn publish_container_hardening_flags() {
     // 012 T019; contracts/publish-step.md "Containers A and B"; FR-015
     let w = W::new();
@@ -1603,7 +1570,6 @@ fn publish_container_hardening_flags() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn publish_dir_holds_only_the_archives_read_only() {
     // 012 T019; FR-014, FR-015; I12: a fresh directory, two files, mounted `:ro`, gone afterwards
     let w = W::new();
@@ -1638,7 +1604,6 @@ fn publish_dir_holds_only_the_archives_read_only() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn sidecar_removed_before_publish_containers_start() {
     // 012 T023; FR-015; I12: the stub log shows the teardown after the last step and before any publish call
     let w = W::new();
@@ -1671,7 +1636,6 @@ fn sidecar_removed_before_publish_containers_start() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn hub_ensure_runs_after_teardown_and_before_container_a() {
     // 012 T015; S6, contracts/publish-step.md step 8: even when the repository has to be created
     let w = W::with(
@@ -1692,7 +1656,6 @@ fn hub_ensure_runs_after_teardown_and_before_container_a() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_left_over_resource_stops_the_publish() {
     // 012 T015; S6, QA-4: `run_left` true gives the fixed line, no Hub call and no container
     let w = W::new();
@@ -1704,7 +1667,6 @@ fn a_left_over_resource_stops_the_publish() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn run_left_fails_closed() {
     // 012 T015; QA-4: a failed `ps`, `network ls` or `volume ls` counts as "left"
     for cmd in ["ps -aq", "network ls", "volume ls"] {
@@ -1718,7 +1680,6 @@ fn run_left_fails_closed() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn publish_stops_when_the_deadline_is_near() {
     // 012 T019; FR-033, I16. ASSUMED SEAM: `FACTORY_CI_JOB_DEADLINE_SECS`, read in debug builds only. With one
     // second left, no publish call has its minimum
@@ -1733,7 +1694,6 @@ fn publish_stops_when_the_deadline_is_near() {
 // ---- the Docker Hub (FR-016) ----
 
 #[test]
-#[ignore = "test-first"]
 fn missing_repository_is_created_public_before_the_push() {
     // 012 T019; FR-016: login, probe 404, create, probe, then container A
     let w = W::with(
@@ -1761,7 +1721,6 @@ fn missing_repository_is_created_public_before_the_push() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn existing_private_repository_stops_the_item() {
     // 012 T019; FR-016: no create, no container
     let w = W::with(
@@ -1778,7 +1737,6 @@ fn existing_private_repository_stops_the_item() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn probe_401_is_not_a_bad_token() {
     // 012 T019; FR-016, R13: 401 and 403 on the probe are a scope line
     for code in [401, 403] {
@@ -1802,7 +1760,6 @@ fn probe_401_is_not_a_bad_token() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn hub_failures_end_with_their_fixed_lines() {
     // 012 T019; FR-016; contracts/hub-api.md "Mapping": nothing is pushed on any of them
     let refused = "registry refused the token";
@@ -1864,7 +1821,6 @@ fn hub_failures_end_with_their_fixed_lines() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn hub_requests_carry_the_token_only_in_the_login_body() {
     // 012 T019, T023; FR-015, FR-016; I4
     let w = W::with(
@@ -1906,7 +1862,6 @@ fn hub_requests_carry_the_token_only_in_the_login_body() {
 // ---- credentials: who gets them, who sees them (FR-013, FR-015, FR-031, SC-003) ----
 
 #[test]
-#[ignore = "test-first"]
 fn token_only_on_stdin_of_publish_containers() {
     // 012 T023; FR-015; I4: stdin of A and B is the token, whole; nothing else carries it
     let w = W::new();
@@ -1931,7 +1886,6 @@ fn token_only_on_stdin_of_publish_containers() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn canary_token_absent_from_public_lines_argv_envs_status() {
     // 012 T023; FR-015, SC-003: with a log store too, and a step that prints the token and its docker-auth form
     let w = W::new();
@@ -1959,7 +1913,6 @@ fn canary_token_absent_from_public_lines_argv_envs_status() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn user_step_env_never_holds_token() {
     // 012 T023; FR-015, FR-024: the step container and every client environment
     let w = W::new();
@@ -1986,7 +1939,6 @@ fn user_step_env_never_holds_token() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn login_name_must_equal_the_namespace_and_is_never_redacted_or_printed() {
     // 012 T023; FR-031: `sudtanj` passes and stays visible, the token and its docker-auth form are masked
     let w = W::new();
@@ -2028,7 +1980,6 @@ fn login_name_must_equal_the_namespace_and_is_never_redacted_or_printed() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_missing_or_empty_token_is_refused() {
     // 012 T015; S6 line 3
     for set in [Some(""), None] {
@@ -2047,7 +1998,6 @@ fn a_missing_or_empty_token_is_refused() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn non_image_project_exports_no_credential() {
     // 012 T023; FR-013, SC-003; I1: a plain project and an image project on another branch use no credential
     let w = W::new();
@@ -2076,7 +2026,6 @@ fn non_image_project_exports_no_credential() {
 // ---- prepare mode: the names file (S7, contracts/publish-step.md 1, I8) ----
 
 #[test]
-#[ignore = "test-first"]
 fn prepare_lists_both_names_for_a_passing_image_row_on_main() {
     // 012 T017, T024; S7
     let w = W::new();
@@ -2091,7 +2040,6 @@ fn prepare_lists_both_names_for_a_passing_image_row_on_main() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn prepare_names_stay_empty_for_every_other_case() {
     // 012 T017, T024; S7, I8: another branch, a failing check, a plain project; the run still exits 0
     let w = W::new();
@@ -2117,7 +2065,6 @@ fn prepare_names_stay_empty_for_every_other_case() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn prepare_refuses_a_pipeline_that_lists_a_secret_before_any_name() {
     // 012 T017; S7 "`NO_JOB_SECRETS` still first"
     let w = W::new();
@@ -2138,7 +2085,6 @@ fn prepare_refuses_a_pipeline_that_lists_a_secret_before_any_name() {
 // ---- project paths at the job boundary (S2, T014) ----
 
 #[test]
-#[ignore = "test-first"]
 fn project_path_shapes_at_the_job_boundary() {
     // 012 T014; S2: `docker/<name>` is accepted, the rest is refused before any container or status
     let w = W::new();

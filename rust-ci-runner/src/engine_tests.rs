@@ -1,9 +1,8 @@
-//! 012 T009 (test-first, plan step S4). Targets `Engine::capture_in(args, env, input, limit, container)` and
+//! 012 T009 (plan step S4). Targets `Engine::capture_in(args, env, input, limit, container)` and
 //! `Engine::run_left(run_id)` with a stub engine script (FR-015: the token reaches a child on standard input only).
 //!
-//! Not yet registered: add `#[cfg(test)] mod engine_tests;` to `lib.rs` (plan Files table says the tests belong to
-//! test passes. `input` is passed as `&[u8]` through `feed`; change that one helper if the signature takes `&str`.
-//! The tests without the marker pin `capture` as it behaves today and must stay green.
+//! `input` is passed as `&[u8]` through `feed`; change that one helper if the signature takes `&str`.
+//! The tests of `capture` pin it as it behaves today and must stay green.
 
 use crate::engine::Engine;
 use std::os::unix::fs::PermissionsExt;
@@ -250,6 +249,17 @@ fn the_engine_source_still_has_one_command_new_and_never_formats_the_input() {
             assert!(!line.contains("input"), "input in a format!: {line}");
         }
     }
+}
+
+#[test]
+fn a_limit_too_big_for_an_instant_does_not_panic() {
+    // 012 T016; review of S5a: `Instant::now() + limit` panics on `Duration::MAX`
+    let d = Dir::new();
+    let e = d.engine("cat > /dev/null\necho ok");
+    assert_eq!(
+        feed(&e, &["x"], &[], "", Duration::MAX, None),
+        Ok("ok\n".to_string())
+    );
 }
 
 // ---- capture, unchanged ----

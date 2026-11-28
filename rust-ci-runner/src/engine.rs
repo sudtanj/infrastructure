@@ -214,7 +214,8 @@ impl Engine {
         let stdin = child.stdin.take();
         let out = child.stdout.take();
         let err = child.stderr.take();
-        let end = Instant::now() + limit;
+        // A limit too big for `Instant` means no limit; `+` would panic.
+        let end = Instant::now().checked_add(limit);
         std::thread::scope(|sc| {
             // A child that exits without reading breaks the pipe; its exit status decides the result.
             let w = sc.spawn(move || {
@@ -227,7 +228,7 @@ impl Engine {
             let status = loop {
                 match child.try_wait() {
                     Ok(Some(st)) => break Ok(st),
-                    Ok(None) if Instant::now() >= end => {
+                    Ok(None) if end.is_some_and(|e| Instant::now() >= e) => {
                         if let Some(name) = container {
                             self.kill(name);
                         }

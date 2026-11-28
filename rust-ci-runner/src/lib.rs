@@ -9,6 +9,7 @@ pub mod log;
 pub mod pipeline;
 pub mod plan;
 pub mod projects;
+pub mod publish;
 pub mod redact;
 pub mod ship;
 pub mod store;
@@ -49,6 +50,8 @@ mod plan_tests;
 mod projects_image_tests;
 #[cfg(test)]
 mod projects_tests;
+#[cfg(test)]
+mod publish_tests;
 #[cfg(test)]
 mod secret_names_tests;
 #[cfg(test)]

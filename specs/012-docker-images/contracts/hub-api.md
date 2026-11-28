@@ -1,8 +1,8 @@
 # Contract: Docker Hub API calls of the publish step
 
-Made by the runner process with `ureq` (already a dependency), from `rust-ci-runner/src/hub.rs`. No child process, no argv, no environment variable for the token: the login body is the only request that carries it, and the access token it returns is kept in memory for the next two calls. The base is a function argument: `ensure_public(base, user, token, namespace, name)`; production passes `HUB_BASE` (`https://hub.docker.com`). The runner refuses a base that is not `https://` or `http://127.0.0.1`. Binary-level tests need to point the runner at a fake, so `job.rs` reads the override variable `FACTORY_CI_HUB_URL` only under `#[cfg(debug_assertions)]`; a release binary never reads it, and the workflow never sets it. Every call has a 30-second timeout (the test of that timeout stays and runs in its own `cargo test --lib hub_tests::` command, see plan S5a); each call also uses at most the time left of the shared `JOB_DEADLINE`. The login endpoint (`/v2/auth/token`, or the fallback `/v2/users/login`) is pending T002.
+Made by the runner process with `ureq` (already a dependency), from `rust-ci-runner/src/hub.rs`. No child process, no argv, no environment variable for the token: the login body is the only request that carries it, and the access token it returns is kept in memory for the next two calls. The base is a function argument: `ensure_public(base, user, token, namespace, name, limit)`, where `limit` is the time left of the shared `JOB_DEADLINE` (never `Duration::MAX`; an overflowing sum is clamped, not a panic); production passes `HUB_BASE` (`https://hub.docker.com`). The runner refuses a base that is not `https://` or `http://127.0.0.1`. Binary-level tests need to point the runner at a fake, so `job.rs` reads the override variable `FACTORY_CI_HUB_URL` only under `#[cfg(debug_assertions)]`; a release binary never reads it, and the workflow never sets it. Every call has a 30-second timeout (the test of that timeout stays and runs in its own `cargo test --lib hub_tests::` command, see plan S5a); each call gets `min(30 seconds, time left)`, and with no time left `ensure_public` refuses with `publish refused: time ran out` before it makes the call. The login endpoint (`/v2/auth/token`, or the fallback `/v2/users/login`) is pending T002.
 
-`ensure_public(base, user, token, namespace, name) -> Result<(), &'static str>`
+`ensure_public(base, user, token, namespace, name, limit) -> Result<(), &'static str>`
 
 ## Calls
 
@@ -35,5 +35,5 @@ T002 decides the login endpoint: if `/v2/auth/token` does not accept a personal 
 
 - The runner never calls an endpoint that changes visibility, deletes, or edits a README.
 - The login name is the value of `DOCKERHUB_USERNAME`, already checked equal to `NAMESPACE` by `publish`; it is not registered with a redactor.
-- The token and the access token never appear in a `format!` that is returned or logged. The redactor passed to the final post includes both.
+- Neither the token nor the access token appears in a `format!` that is returned or logged. `ensure_public` returns only `Ok` or a fixed line, so the access token never leaves `hub.rs` and no redactor holds it; the redactor passed to the final post holds the token and its base64.
 - A repeat run finds the repository and does nothing here (idempotent).

@@ -1,15 +1,12 @@
-//! 012 T015 (test-first, plan step S6) and the source rules of S7. Targets the pure `publish::verify_index(&str)
+//! 012 T015 (plan step S6) and the source rules of S7. Targets the pure `publish::verify_index(&str)
 //! -> Result<(), &'static str>` (contracts/publish-step.md 5, data-model.md "Tags and the manifest list"; I10),
 //! the constants the publish step needs, and a few source-level rules that no behaviour test can see.
 //!
 //! The flows of S6 (token, login name, archives, tips, teardown, Hub order, containers, reuse, exit codes,
-//! deadline) are in `tests/job_publish.rs`: the plan does not pin the signature of `publish::publish`, so they run
-//! through `job`, where the real arguments exist.
+//! deadline) are in `tests/job_publish.rs`: they run through `job`, where the real arguments exist.
 //!
-//! Not yet registered: with `pub mod publish;` in `lib.rs`, add `#[cfg(test)] mod publish_tests;` beside it, then
-//! remove each `#[ignore = "test-first"]` as its test passes (T016, T017). Run this module as its own cargo command
-//! (`cargo test --locked --lib publish_tests::`) as the plan says (MINOR-1); nothing here starts a thread or a
-//! server, so the split is for the integration flows that do.
+//! Run this module as its own cargo command (`cargo test --locked --lib publish_tests::`) as the plan says
+//! (MINOR-1); nothing here starts a thread or a server, so the split is for the integration flows that do.
 
 use crate::publish::verify_index;
 use std::time::Duration;
@@ -59,7 +56,6 @@ fn good() -> String {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn both_platforms_pass_in_both_media_types_and_either_order() {
     // 012 T015; data-model.md "Manifest list.mediaType, .manifests"
     for media in [OCI, DOCKER] {
@@ -71,7 +67,6 @@ fn both_platforms_pass_in_both_media_types_and_either_order() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn extra_fields_in_an_entry_or_the_index_do_not_matter() {
     // 012 T015: only media type, the two platforms and the digests are judged
     let e1 = "{\"mediaType\":\"x\",\"digest\":\"DIGEST_A\",\"size\":1,\"annotations\":{\"a\":\"b\"},\"platform\":{\"architecture\":\"amd64\",\"os\":\"linux\",\"os.version\":\"1\"}}"
@@ -84,7 +79,6 @@ fn extra_fields_in_an_entry_or_the_index_do_not_matter() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn the_wrong_number_or_mix_of_platforms_fails() {
     // 012 T015; contracts/publish-step.md 5: one entry, three, two `amd64`, no `arm64`, an attestation entry
     let cases: Vec<(&str, String)> = vec![
@@ -110,7 +104,6 @@ fn the_wrong_number_or_mix_of_platforms_fails() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_malformed_digest_fails() {
     // 012 T015; data-model.md "Manifest list.digest": `sha256:` plus 64 lowercase hex
     let upper = format!("sha256:{}", "A".repeat(64));
@@ -151,7 +144,6 @@ fn a_malformed_digest_fails() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_missing_or_partial_platform_fails() {
     // 012 T015: missing `platform`, missing `os`, missing `architecture`
     let no_os = "{\"mediaType\":\"m\",\"digest\":\"DIGEST\",\"size\":1,\"platform\":{\"architecture\":\"amd64\"}}"
@@ -167,7 +159,6 @@ fn a_missing_or_partial_platform_fails() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_single_manifest_or_another_media_type_fails() {
     // 012 T015: a single image manifest (the `latest` tag must never point at one), no `manifests`, odd types
     let manifest = "{\"schemaVersion\":2,\"mediaType\":\"application/vnd.oci.image.manifest.v1+json\",\"config\":{\"digest\":\"DIGEST\"},\"layers\":[]}"
@@ -195,7 +186,6 @@ fn a_single_manifest_or_another_media_type_fails() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn not_json_and_wrong_shapes_fail_without_a_panic() {
     // 012 T015; I2-style: any text, no panic
     let deep = "[".repeat(2000);
@@ -247,7 +237,6 @@ impl Lcg {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn verify_index_accepts_exactly_one_amd64_and_one_arm64() {
     // 012 T015; I10 over generated lists: every permutation, drop, duplicate, add and relabel
     let pool = [
@@ -292,7 +281,6 @@ fn verify_index_accepts_exactly_one_amd64_and_one_arm64() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn every_single_mutation_of_a_good_index_fails() {
     // 012 T015; I10: the good list passes and each mutation of it does not
     let a = entry(Some(AMD), &digest('a'));
@@ -341,14 +329,12 @@ fn every_single_mutation_of_a_good_index_fails() {
 // ---- constants the publish step needs (data-model.md "Constants") ----
 
 #[test]
-#[ignore = "test-first"]
 fn the_job_deadline_leaves_five_minutes_of_the_job_limit() {
     // 012 T016; FR-033: 40 minutes of the 45-minute job limit
     assert_eq!(crate::image::JOB_DEADLINE, Duration::from_secs(40 * 60));
 }
 
 #[test]
-#[ignore = "test-first"]
 fn crane_paths_are_absolute_and_safe_to_pass_as_one_argument() {
     // 012 T016; MAJOR-4: `--entrypoint <CRANE_SH>` and `-e CRANE=<CRANE_BIN>`
     for p in [crate::image::CRANE_SH, crate::image::CRANE_BIN] {
@@ -368,7 +354,6 @@ const PUBLISH_SRC: &str = include_str!("publish.rs");
 const JOB_SRC: &str = include_str!("job.rs");
 
 #[test]
-#[ignore = "test-first"]
 fn publish_starts_containers_only_through_the_engine() {
     // 012 T016; S6 constraints: `capture_in` for both containers, no `Command::new`, no token on a command line
     assert!(
@@ -397,7 +382,6 @@ fn publish_starts_containers_only_through_the_engine() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn the_hub_override_is_read_only_in_debug_builds() {
     // 012 T017; MINOR-2: every mention of `FACTORY_CI_HUB_URL` in job.rs follows a `cfg(debug_assertions)`
     let name = "FACTORY_CI_HUB_URL";

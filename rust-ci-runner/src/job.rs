@@ -1,12 +1,14 @@
 use crate::engine::{execute, Engine, Outcome, RunCtx, State, DIND_IMAGE, SPAWN_FAIL};
 use crate::github::{compose_description, Api, ApiError, HttpApi};
+use crate::image;
 use crate::log::Log;
 use crate::pipeline::{self, Pipeline};
 use crate::projects;
+use crate::publish;
 use crate::redact::Redactor;
 use crate::ship::{self, Labels, LogConfig, Meta, Shipper, FLUSH_WINDOW};
 use crate::text;
-use crate::util::random_id;
+use crate::util::{base64, random_id};
 use std::collections::{BTreeMap, HashMap};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
@@ -17,6 +19,8 @@ use std::time::{Duration, Instant};
 pub type Env<'a> = &'a dyn Fn(&str) -> Option<String>;
 
 const RETRY: &str = " (retry)";
+/// The longest the clone runs, from now.
+const CLONE_LIMIT: Duration = Duration::from_secs(10 * 60);
 const LOG_VARS: [&str; 3] = [
     "FACTORY_CI_LOG_URL",
     "FACTORY_CI_LOG_USER",
@@ -86,6 +90,11 @@ pub(crate) fn prepare(
     }
 }
 
+/// The longest one pipeline runs, from now.
+pub(crate) fn pipeline_deadline() -> Instant {
+    Instant::now() + Duration::from_secs(30 * 60)
+}
+
 /// Runs the graph in `dir`: the one executor behind both `run` and `job`. The caller cleans up.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_pipeline(
@@ -97,6 +106,7 @@ pub(crate) fn run_pipeline(
     secrets: BTreeMap<String, String>,
     log: &Log,
     dind_image: &str,
+    deadline: Instant,
 ) -> Result<Outcome, String> {
     let ctx = RunCtx {
         engine,
@@ -106,7 +116,7 @@ pub(crate) fn run_pipeline(
         secrets,
         // shortcut: fixed limits; the server's config file does not apply here.
         max_parallel: 4,
-        deadline: Instant::now() + Duration::from_secs(30 * 60),
+        deadline,
         log,
         dind_image,
     };
@@ -192,7 +202,8 @@ pub fn local_with(
     .into_iter()
     .filter(|(_, v)| !v.is_empty())
     .collect();
-    let out = run_pipeline(&engine, &id, &ws, &p, run, secrets, &log, DIND_IMAGE);
+    let end = pipeline_deadline();
+    let out = run_pipeline(&engine, &id, &ws, &p, run, secrets, &log, DIND_IMAGE, end);
     engine.cleanup_run(&id);
     let res = out.map(|out| {
         log.event(
@@ -246,11 +257,11 @@ fn flags(
 }
 
 /// What names one status: the repo, the commit, the project and the run.
-struct Target {
-    repo: String,
-    sha: String,
-    project: String,
-    run_id: String,
+pub(crate) struct Target {
+    pub(crate) repo: String,
+    pub(crate) sha: String,
+    pub(crate) project: String,
+    pub(crate) run_id: String,
     retry: bool,
 }
 
@@ -378,13 +389,19 @@ pub fn status(args: &[String], env: Env) -> i32 {
     }
 }
 
-/// The token and the log credentials: never printed, never posted.
+/// The tokens and the log credentials: never printed, never posted. The Docker Hub token comes with
+/// the base64 of `<namespace>:<token>`, the form a docker config holds; the login name is no secret.
 fn token_values(env: Env) -> Vec<String> {
-    ["FACTORY_CI_TOKEN"]
+    let mut v: Vec<String> = ["FACTORY_CI_TOKEN"]
         .iter()
         .chain(&LOG_VARS)
         .filter_map(|k| var(env, k))
-        .collect()
+        .collect();
+    if let Some(t) = var(env, image::TOKEN_NAME) {
+        v.push(base64(format!("{}:{t}", image::NAMESPACE).as_bytes()));
+        v.push(t);
+    }
+    v
 }
 
 struct Opts {
@@ -440,13 +457,13 @@ fn opts(args: &[String]) -> Result<Opts, String> {
 }
 
 /// How a run ended: the state, a one-line reason and the secret values it learned (to mask).
-struct Done {
-    state: &'static str,
-    reason: String,
-    secrets: Vec<String>,
+pub(crate) struct Done {
+    pub(crate) state: &'static str,
+    pub(crate) reason: String,
+    pub(crate) secrets: Vec<String>,
 }
 
-fn done(state: &'static str, reason: impl Into<String>) -> Done {
+pub(crate) fn done(state: &'static str, reason: impl Into<String>) -> Done {
     Done {
         state,
         reason: reason.into(),
@@ -478,7 +495,7 @@ pub(crate) fn project_dir(ws: &Path, project: &str) -> Result<PathBuf, String> {
     dir.ok_or_else(|| "project directory is missing or not a plain directory".to_string())
 }
 
-/// Clones into `ws` and returns the project directory.
+/// Clones into `ws`, giving up at `end`, and returns the project directory.
 fn checkout(
     o: &Opts,
     env: Env,
@@ -486,11 +503,11 @@ fn checkout(
     ws: &Path,
     log: &Log,
     image: &str,
+    end: Instant,
 ) -> Result<PathBuf, Done> {
     let server = var(env, "GITHUB_SERVER_URL").unwrap_or_else(|| "https://github.com".to_string());
     let url = format!("{}/{}.git", server.trim_end_matches('/'), o.t.repo);
     let token = var(env, "FACTORY_CI_TOKEN").unwrap_or_default();
-    let end = Instant::now() + Duration::from_secs(10 * 60);
     let st = engine.clone_repo(
         image,
         &o.t.run_id,
@@ -508,7 +525,30 @@ fn checkout(
     project_dir(ws, &o.t.project).map_err(|e| done("error", e))
 }
 
-/// Clone, check, run. Every way out is a `Done`; nothing here posts or cleans up.
+/// The time one job has for clone, pipeline and publish. Debug builds can shorten it for a test.
+fn job_len(env: Env) -> Duration {
+    let secs = if cfg!(debug_assertions) {
+        var(env, "FACTORY_CI_JOB_DEADLINE_SECS")
+    } else {
+        None
+    };
+    let cap = image::JOB_DEADLINE;
+    let secs = secs.and_then(|s| s.parse::<u64>().ok());
+    secs.map_or(cap, |s| Duration::from_secs(s).min(cap))
+}
+
+/// The Docker Hub base. Debug builds let a test point it at a fake; a release build never reads it.
+fn hub_base(env: Env) -> String {
+    let over = if cfg!(debug_assertions) {
+        var(env, "FACTORY_CI_HUB_URL")
+    } else {
+        None
+    };
+    over.unwrap_or_else(|| image::HUB_BASE.to_string())
+}
+
+/// Clone, check, run, publish. Every way out is a `Done`; nothing here posts or cleans up.
+#[allow(clippy::too_many_arguments)]
 fn attempt(
     o: &Opts,
     env: Env,
@@ -517,7 +557,9 @@ fn attempt(
     creds: &[String],
     shipper: &Option<Arc<Shipper>>,
     image: &str,
+    api: &HttpApi,
 ) -> Done {
+    let deadline = Instant::now() + job_len(env);
     let mk_log = |vals: Vec<String>| {
         let out: Box<dyn std::io::Write + Send> = if o.private {
             Box::new(std::io::sink())
@@ -529,10 +571,16 @@ fn attempt(
             shipper,
         )
     };
-    let dir = match checkout(o, env, engine, ws, &mk_log(creds.to_vec()), image) {
+    let clone_end = (Instant::now() + CLONE_LIMIT).min(deadline);
+    let log = mk_log(creds.to_vec());
+    let dir = match checkout(o, env, engine, ws, &log, image, clone_end) {
         Ok(d) => d,
         Err(d) => return d,
     };
+    let publishes = image::publishes(&o.t.project, &o.branch);
+    if let Some(d) = publishes.then(|| publish::check_failed(&dir)).flatten() {
+        return d;
+    }
     let (p, secrets) = match prepare(&dir, None, |n| var(env, n), o.allow_docker, false) {
         Ok(v) => v,
         Err(bad) => return done("error", bad.join(". ")),
@@ -544,7 +592,14 @@ fn attempt(
     let vals: Vec<String> = secrets.values().cloned().collect();
     let log = mk_log(creds.iter().cloned().chain(vals.clone()).collect());
     let run = run_env(&o.t.run_id, &o.t.sha, o.prev.as_deref(), &o.branch, "push");
-    let out = run_pipeline(engine, &o.t.run_id, &dir, &p, run, secrets, &log, &dind);
+    let end = pipeline_deadline().min(deadline);
+    let out = run_pipeline(engine, &o.t.run_id, &dir, &p, run, secrets, &log, &dind, end);
+    // A failed step of an image row is `error`, so the next tick retries it (FR-007).
+    let fail = if image::image_project(&o.t.project) {
+        "error"
+    } else {
+        "failure"
+    };
     let (state, reason) = match out {
         Err(e) => ("error", format!("runner fault: {e}")),
         // 125 and a failed spawn are the engine's own failure (FR-017); 126 and 127 are the step's.
@@ -557,17 +612,25 @@ fn attempt(
         Ok(Outcome {
             failed: Some((n, r)),
             ..
-        }) => ("failure", format!("step {n} failed: {r}")),
+        }) => (fail, format!("step {n} failed: {r}")),
         Ok(Outcome {
             timed_out: true, ..
-        }) => ("failure", "run timed out".to_string()),
+        }) => (fail, "run timed out".to_string()),
         Ok(_) => ("success", "all steps passed".to_string()),
     };
-    Done {
+    let finished = Done {
         state,
         reason,
         secrets: vals,
+    };
+    if publishes && state == "success" {
+        let hub = hub_base(env);
+        return Done {
+            secrets: finished.secrets,
+            ..publish::publish(engine, env, api, &o.t, &dir, deadline, &hub)
+        };
     }
+    finished
 }
 
 pub(crate) fn remove_ws(engine: &Engine, image: &str, ws: &Path) {
@@ -590,12 +653,18 @@ pub(crate) fn dind_image(env: Env, p: &Pipeline) -> Result<String, String> {
     }
 }
 
+/// Where the runner puts what it creates: `RUNNER_TEMP`, else the system temp directory.
+pub(crate) fn temp_base(env: Env) -> PathBuf {
+    var(env, "RUNNER_TEMP").map_or_else(std::env::temp_dir, PathBuf::from)
+}
+
 fn workspace(o: &Opts, env: Env) -> PathBuf {
-    let base = var(env, "RUNNER_TEMP").map_or_else(std::env::temp_dir, PathBuf::from);
+    let base = temp_base(env);
     base.join(format!("fci-job-{}-{}", o.t.run_id, random_id()))
 }
 
-/// The names file content (always empty: the job refuses secrets) or the reason it is refused.
+/// The names file content (the two Docker Hub names for a passing image row on `main`, else empty) or the
+/// reason it is refused.
 /// Every pre-container check of a real run happens here; no step container starts.
 fn secret_names(
     o: &Opts,
@@ -611,7 +680,8 @@ fn secret_names(
         MAX_LOG_BYTES,
     )
     .quiet(true);
-    let dir = checkout(o, env, engine, ws, &log, image).map_err(|d| d.reason)?;
+    let end = Instant::now() + CLONE_LIMIT;
+    let dir = checkout(o, env, engine, ws, &log, image, end).map_err(|d| d.reason)?;
     let p = load_pipeline(&dir, None).map_err(|v| v.join(". "))?;
     if !p.secret_names().is_empty() {
         return Err(NO_JOB_SECRETS.to_string());
@@ -621,7 +691,12 @@ fn secret_names(
         return Err(bad.join(". "));
     }
     dind_image(env, &p)?;
-    Ok(String::new())
+    let clean = image::publishes(&o.t.project, &o.branch) && image::check(&dir).is_empty();
+    Ok(if clean {
+        format!("{}\n{}\n", image::USERNAME_NAME, image::TOKEN_NAME)
+    } else {
+        String::new()
+    })
 }
 
 /// Prepare mode: writes the names file, or one reason line to the reason file. Prints nothing,
@@ -712,7 +787,7 @@ pub fn job(args: &[String], env: Env) -> i32 {
         Err(e) => done("error", format!("cannot create the workspace: {e}")),
         // A panic must not leave the item without a final status.
         Ok(()) => catch_unwind(AssertUnwindSafe(|| {
-            attempt(&o, env, &engine, &ws, &creds, &shipper, &image)
+            attempt(&o, env, &engine, &ws, &creds, &shipper, &image, &api)
         }))
         .unwrap_or_else(|_| done("error", "internal error")),
     };

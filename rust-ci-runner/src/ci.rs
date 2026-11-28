@@ -5,8 +5,8 @@
 
 use crate::engine::{run_capped, Engine};
 use crate::job::{
-    dind_image, load_pipeline, project_dir, remove_ws, run_env, run_pipeline, with_shipper,
-    MAX_LOG_BYTES,
+    dind_image, load_pipeline, pipeline_deadline, project_dir, remove_ws, run_env, run_pipeline,
+    with_shipper, MAX_LOG_BYTES,
 };
 use crate::log::{Log, LOG_STORE_HINT};
 use crate::pipeline::valid_name;
@@ -415,7 +415,8 @@ fn run_checkout(
         ("GIT_CONFIG_VALUE_0", "/workspace"),
     ];
     step_env.extend(safe.map(|(k, v)| (k.to_string(), v.to_string())));
-    let out = run_pipeline(engine, run_id, &dir, &p, step_env, secrets, log, &dind);
+    let end = pipeline_deadline();
+    let out = run_pipeline(engine, run_id, &dir, &p, step_env, secrets, log, &dind, end);
     engine.cleanup_run(run_id);
     let passed = match out {
         Ok(o) => {

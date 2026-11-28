@@ -1,9 +1,7 @@
-//! 012 T011 (test-first, plan step S5a). Targets `hub::ensure_public(base, user, token, namespace, name)
+//! 012 T011 (plan step S5a). Targets `hub::ensure_public(base, user, token, namespace, name, limit)
 //! -> Result<(), &'static str>` against a `tiny_http` fake Docker Hub (contracts/hub-api.md "Calls", "Mapping",
-//! "Rules"). Every Hub answer is scripted per call kind; the fake records each request.
-//!
-//! Not yet registered: with `pub mod hub;` in `lib.rs`, add `#[cfg(test)] mod hub_tests;` beside it, then remove each
-//! `POST /v2/auth/token` (`identifier` and `secret`) and the fallback `POST /v2/users/login` (`username` and
+//! "Rules"). Every Hub answer is scripted per call kind; the fake records each request. The login is
+//! `POST /v2/auth/token` (`identifier` and `secret`) or the fallback `POST /v2/users/login` (`username` and
 //! `password`) alike. Tokens here are obvious fakes.
 
 use crate::hub::ensure_public;
@@ -16,6 +14,7 @@ const USER: &str = "sudtanj";
 const TOKEN: &str = "fake-token-AAAA-0123456789";
 const JWT: &str = "fake-jwt-BBBB-9876543210";
 const CANARY: &str = "canary-Zq81-value-key-0123456789";
+const LIMIT: Duration = Duration::from_secs(600);
 
 const REFUSED_TOKEN: &str = "registry refused the token";
 const PRIVATE: &str = "publish refused: repository is private";
@@ -167,7 +166,7 @@ fn serve(s: Script) -> Hub {
 }
 
 fn call(h: &Hub) -> Result<(), &'static str> {
-    ensure_public(&h.base, USER, TOKEN, "sudtanj", "hello")
+    ensure_public(&h.base, USER, TOKEN, "sudtanj", "hello", LIMIT)
 }
 
 // ---- login ----
@@ -389,6 +388,7 @@ fn a_refused_connection_is_a_hub_api_error() {
         TOKEN,
         "sudtanj",
         "hello",
+        LIMIT,
     );
     assert_eq!(r, Err(API));
 }
@@ -409,6 +409,7 @@ fn a_server_that_drops_the_connection_is_a_hub_api_error() {
         TOKEN,
         "sudtanj",
         "hello",
+        LIMIT,
     );
     assert_eq!(r, Err(API));
 }
@@ -446,7 +447,7 @@ fn a_base_that_is_not_https_or_loopback_http_is_refused() {
         "",
         "HTTP://example.com",
     ] {
-        let r = ensure_public(base, USER, TOKEN, "sudtanj", "hello");
+        let r = ensure_public(base, USER, TOKEN, "sudtanj", "hello", LIMIT);
         assert!(r.is_err(), "{base:?} accepted: {r:?}");
     }
 }
@@ -462,7 +463,7 @@ fn a_loopback_prefix_trick_is_refused_without_a_request() {
         format!("http://127.0.0.1:{port}@localhost:{port}"),
         format!("http://127.0.0.1\\@localhost:{port}"),
     ] {
-        let r = ensure_public(&base, USER, TOKEN, "sudtanj", "hello");
+        let r = ensure_public(&base, USER, TOKEN, "sudtanj", "hello", LIMIT);
         assert!(r.is_err(), "{base:?} accepted: {r:?}");
     }
     assert!(h.requests().is_empty(), "{:?}", h.requests());
@@ -591,6 +592,7 @@ fn a_redirect_never_carries_the_token_or_the_access_token_elsewhere() {
             TOKEN,
             "sudtanj",
             "hello",
+            LIMIT,
         );
         assert!(r.is_err(), "{code}: a redirect is not a login");
     }
@@ -600,4 +602,37 @@ fn a_redirect_never_carries_the_token_or_the_access_token_elsewhere() {
             "{r:?}"
         );
     }
+}
+
+// ---- the shared job deadline (FR-033) ----
+
+#[test]
+fn no_time_left_refuses_before_any_request() {
+    // 012 T016; review of S5a: `limit` is the time left of `JOB_DEADLINE`
+    let h = serve(script(vec![public()], a(201, "{}")));
+    let r = ensure_public(&h.base, USER, TOKEN, "sudtanj", "hello", Duration::ZERO);
+    assert_eq!(r, Err("publish refused: time ran out"));
+    assert!(h.requests().is_empty(), "{:?}", h.requests());
+}
+
+#[test]
+fn a_limit_shorter_than_the_call_cuts_the_call() {
+    // 012 T016: each call gets `min(30 s, time left)`
+    let h = serve_slow(
+        script(vec![public()], a(201, "{}")),
+        Duration::from_secs(10),
+    );
+    let t = Instant::now();
+    let short = Duration::from_secs(2);
+    let r = ensure_public(&h.base, USER, TOKEN, "sudtanj", "hello", short);
+    assert_eq!(r, Err(API));
+    assert!(t.elapsed() < Duration::from_secs(8), "{:?}", t.elapsed());
+}
+
+#[test]
+fn a_limit_too_big_for_an_instant_does_not_panic() {
+    // review of S5a: `Instant::now() + limit` panics on `Duration::MAX`
+    let h = serve(script(vec![public()], a(201, "{}")));
+    let r = ensure_public(&h.base, USER, TOKEN, "sudtanj", "hello", Duration::MAX);
+    assert_eq!(r, Ok(()));
 }

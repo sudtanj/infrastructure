@@ -1,13 +1,12 @@
-//! 012 T010 (test-first, plan step S5). Targets `archive::read_config(&Path) -> Result<ImageConfig, &'static str>`
+//! 012 T010 (plan step S5). Targets `archive::read_config(&Path) -> Result<ImageConfig, &'static str>`
 //! on a `docker save` tar (data-model.md "Archive config"). Tars are built in memory, then written to a file named
 //! `image-amd64.tar` so the platform the name implies is the one the config says.
 //!
-//! Not yet registered: with `pub mod archive;` in `lib.rs`, add `#[cfg(test)] mod archive_tests;` beside it, then
-//! and `user` (String), `entrypoint` and `cmd` (Vec<String>).
+//! `ImageConfig` has `os`, `architecture` and `user` (String), `entrypoint` and `cmd` (Vec<String>).
 //!
-//! The policy errors of data-model.md (`image runs as root`, `image has a shell entrypoint`,
-//! `image platform mismatch`) are not tested here: the plan does not say whether `read_config` or `publish`
-//! applies them (reported to the lead). Every config below is policy-clean.
+//! `read_config` judges nothing. The policy errors of data-model.md (`image runs as root`,
+//! `image has a shell entrypoint`, `image platform mismatch`) are applied by `publish` and tested through the
+//! job in `tests/job_publish.rs` (QA-1). Every config below is policy-clean.
 
 use crate::archive::read_config;
 use std::path::PathBuf;
