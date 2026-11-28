@@ -170,6 +170,7 @@ Behaviour changes decided after the security review and QA, tracked as T017a in 
 - **L5, floor of 8.** FR-006 and FR-007: every non-blank trimmed line of a value has at least 8 characters. A shorter value ends the run with `step secret unavailable`.
 - **L6, no secret-named step in a public line.** WHEN a step name, after redaction, differs from the name THE SYSTEM SHALL print the public line as `[step] ...` without the name.
 - **Forms.** FR-011 also covers `base64(value + "\n")`, 64-column wrapped base64 next to 76, lowercase percent-encoding, the `encodeURIComponent` set, `+` for a space, uppercase hex, and the JSON `\/` and `\uXXXX` escapes. The pump cut (FR-013) looks for a form that starts at the end of the chunk once, within the longest form, and then only for whole forms that cross the cut, so a run of a form's first character does not move it.
+- **Tick and job refuse secrets (T017b).** WHEN the by-hand tick plans a repo THE SYSTEM SHALL set `secrets_ok` to false on every row, and WHEN the tick's job reads a pipeline that lists any secret THE SYSTEM SHALL end the item in `error` with the fixed reason `steps with secrets are not run by this job: use the ci command`, naming no secret, before any secret fetch and before any container. Secrets run only through the manual `ci` command; feature 011 retires the tick. The `ci` command keeps no allowlisted store row from its one `bws` call when the ref may not hold secrets.
 
 ## Success Criteria *(mandatory)*
 
