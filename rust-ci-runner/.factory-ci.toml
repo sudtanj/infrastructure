@@ -11,11 +11,13 @@
 [steps.unit]
 image = "rust:1.90"
 commands = [
-  "cargo test --locked --lib -- --skip ship_tests:: --skip job_tests:: --skip ci_tests::",
+  "cargo test --locked --lib -- --skip ship_tests:: --skip job_tests:: --skip ci_tests:: --skip hub_tests:: --skip publish_tests::",
   "cargo test --locked --lib ship_tests::",
   "cargo test --locked --lib job_tests::",
   "cargo test --locked --lib ci_tests:: -- --skip ci_tests::step_secrets::",
   "cargo test --locked --lib ci_tests::step_secrets::",
+  "cargo test --locked --lib hub_tests::",
+  "cargo test --locked --lib publish_tests::",
 ]
 timeout = 1800
 

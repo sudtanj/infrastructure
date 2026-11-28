@@ -2,7 +2,6 @@
 //! `Engine::run_left(run_id)` with a stub engine script (FR-015: the token reaches a child on standard input only).
 //!
 //! Not yet registered: add `#[cfg(test)] mod engine_tests;` to `lib.rs` (plan Files table says the tests belong to
-//! `engine.rs`; a sibling file keeps the 668-line engine file as it is). Remove each `#[ignore = "test-first"]` as its
 //! test passes. `input` is passed as `&[u8]` through `feed`; change that one helper if the signature takes `&str`.
 //! The tests without the marker pin `capture` as it behaves today and must stay green.
 
@@ -70,7 +69,6 @@ const SEC: Duration = Duration::from_secs(20);
 // ---- capture_in ----
 
 #[test]
-#[ignore = "test-first"]
 fn capture_in_delivers_the_input_bytes_to_standard_input() {
     // 012 T009; S4 "writes `input` to the child's standard input ... and closes it, returns stdout"
     let d = Dir::new();
@@ -82,7 +80,6 @@ fn capture_in_delivers_the_input_bytes_to_standard_input() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn capture_in_closes_standard_input_after_the_write() {
     // 012 T009: `cat` only ends at EOF; a pipe left open would hit the limit
     let d = Dir::new();
@@ -98,7 +95,6 @@ fn capture_in_closes_standard_input_after_the_write() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn the_input_is_in_no_argv_and_no_environment() {
     // 012 T009; S4 "argv and the client env hold none of them"; FR-015
     let d = Dir::new();
@@ -116,7 +112,6 @@ fn the_input_is_in_no_argv_and_no_environment() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn capture_in_keeps_the_env_clearing_of_command() {
     // 012 T009; "keeps the env-clearing of `Engine::command`"
     std::env::set_var("FCI_QA_LEAK_PROBE", "leak-value");
@@ -152,7 +147,6 @@ fn capture_in_keeps_the_env_clearing_of_command() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn large_input_and_large_output_do_not_deadlock() {
     // 012 T009: the child fills its output pipe before it reads; a write on the calling thread would block forever
     let d = Dir::new();
@@ -164,7 +158,6 @@ fn large_input_and_large_output_do_not_deadlock() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_child_that_never_reads_standard_input_does_not_panic_or_hang() {
     // 012 T009: the write fails with a broken pipe; the exit status decides the result
     let d = Dir::new();
@@ -176,7 +169,6 @@ fn a_child_that_never_reads_standard_input_does_not_panic_or_hang() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_nonzero_exit_is_reported_as_exit_status_n_with_stderr() {
     // 012 T009; S4 "reports a non-zero exit as `exit status: <n>`"; publish maps 41, 43, 45 on this text
     let d = Dir::new();
@@ -193,7 +185,6 @@ fn a_nonzero_exit_is_reported_as_exit_status_n_with_stderr() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_timeout_is_reported_and_the_container_is_killed_and_removed() {
     // 012 T009; S4 "kills the container on timeout"
     let d = Dir::new();
@@ -222,7 +213,6 @@ fn a_timeout_is_reported_and_the_container_is_killed_and_removed() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_timeout_without_a_container_name_kills_only_the_child() {
     // 012 T009: `container` None means no kill call
     let d = Dir::new();
@@ -233,7 +223,6 @@ fn a_timeout_without_a_container_name_kills_only_the_child() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_missing_engine_binary_is_the_spawn_failure_text() {
     // 012 T009: same fixed prefix as `capture`
     let e = Engine::new("/nonexistent/engine-bin");
@@ -305,7 +294,6 @@ fn lister(d: &Dir) -> Engine {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn run_left_is_false_when_nothing_carries_the_label() {
     // 012 T009; S4 "`run_left(run_id)` is true while any container, network or volume with the label exists"
     let d = Dir::new();
@@ -313,7 +301,6 @@ fn run_left_is_false_when_nothing_carries_the_label() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn run_left_is_true_for_a_container_a_network_or_a_volume() {
     // 012 T009
     for (file, text) in [("ps", "abc123\n"), ("net", "net987\n"), ("vol", "vol555\n")] {
@@ -328,7 +315,6 @@ fn run_left_is_true_for_a_container_a_network_or_a_volume() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn run_left_matches_the_exact_run_id() {
     // 012 T009: another run's resources, and an id that only shares a prefix, do not count
     let d = Dir::new();
@@ -343,7 +329,6 @@ fn run_left_matches_the_exact_run_id() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn run_left_asks_each_kind_with_the_label_filter_and_includes_stopped_containers() {
     // 012 T009: a stopped container still holds the label, so `ps` must list all
     let d = Dir::new();
@@ -366,7 +351,6 @@ fn run_left_asks_each_kind_with_the_label_filter_and_includes_stopped_containers
 }
 
 #[test]
-#[ignore = "test-first"]
 fn run_left_only_reads() {
     // 012 T009: it never removes, kills or stops anything
     let d = Dir::new();

@@ -3,7 +3,6 @@
 //! "Rules"). Every Hub answer is scripted per call kind; the fake records each request.
 //!
 //! Not yet registered: with `pub mod hub;` in `lib.rs`, add `#[cfg(test)] mod hub_tests;` beside it, then remove each
-//! `#[ignore = "test-first"]` as its test passes (T012). The login endpoint is T002's call: the fake accepts
 //! `POST /v2/auth/token` (`identifier` and `secret`) and the fallback `POST /v2/users/login` (`username` and
 //! `password`) alike. Tokens here are obvious fakes.
 
@@ -174,7 +173,6 @@ fn call(h: &Hub) -> Result<(), &'static str> {
 // ---- login ----
 
 #[test]
-#[ignore = "test-first"]
 fn login_401_is_a_refused_token_and_nothing_else_is_called() {
     // 012 T011; S5a "login 401"; Mapping
     let mut s = script(vec![public()], a(201, "{}"));
@@ -185,7 +183,6 @@ fn login_401_is_a_refused_token_and_nothing_else_is_called() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn login_other_failures_are_a_hub_api_error() {
     // 012 T011; "login any other status, network error, timeout, body without access_token"
     for login in [
@@ -215,7 +212,6 @@ fn login_other_failures_are_a_hub_api_error() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn the_login_request_carries_user_and_token_in_a_json_body() {
     // 012 T011; contracts/hub-api.md "login": POST, JSON, identifier + secret (fallback: username + password)
     let h = serve(script(vec![public()], a(201, "{}")));
@@ -238,7 +234,6 @@ fn the_login_request_carries_user_and_token_in_a_json_body() {
 // ---- probe ----
 
 #[test]
-#[ignore = "test-first"]
 fn a_public_repository_ends_after_login_and_one_probe() {
     // 012 T011; "probe 200 public does nothing more"
     let h = serve(script(vec![public()], a(201, "{}")));
@@ -250,7 +245,6 @@ fn a_public_repository_ends_after_login_and_one_probe() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_repeat_call_on_a_public_repository_is_idempotent() {
     // 012 T011; "A repeat run finds the repository and does nothing here"
     let h = serve(script(vec![public()], a(201, "{}")));
@@ -260,7 +254,6 @@ fn a_repeat_call_on_a_public_repository_is_idempotent() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_private_repository_is_refused_and_never_created_or_edited() {
     // 012 T011; "probe 200 private gives `publish refused: repository is private` and no create call"
     let h = serve(script(vec![private()], a(201, "{}")));
@@ -269,7 +262,6 @@ fn a_private_repository_is_refused_and_never_created_or_edited() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn probe_401_and_403_are_an_access_error_never_a_bad_token() {
     // 012 T011; "probe 401 or 403 with a valid login gives `docker hub api refused repository access`"
     for code in [401, 403] {
@@ -288,7 +280,6 @@ fn probe_401_and_403_are_an_access_error_never_a_bad_token() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn other_probe_statuses_and_bodies_are_a_hub_api_error() {
     // 012 T011; "probe any other status", a non-JSON body, and (fail closed) a body without `is_private`
     for probe in [
@@ -315,7 +306,6 @@ fn other_probe_statuses_and_bodies_are_a_hub_api_error() {
 // ---- create ----
 
 #[test]
-#[ignore = "test-first"]
 fn a_missing_repository_is_created_public_then_probed() {
     // 012 T011; "probe 404 then create 201 then a probe that shows public succeeds"
     let h = serve(script(vec![missing(), public()], a(201, "{}")));
@@ -330,7 +320,6 @@ fn a_missing_repository_is_created_public_then_probed() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_create_race_400_or_409_is_followed_by_a_probe() {
     // 012 T011; "create answered 400 or 409 (a race) is followed by a probe and succeeds when public"
     for code in [400, 409] {
@@ -344,7 +333,6 @@ fn a_create_race_400_or_409_is_followed_by_a_probe() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_create_race_that_ends_private_or_missing_fails() {
     // 012 T011: the second probe decides; mapping of "create 201 / 400 / 409"
     for code in [201, 400, 409] {
@@ -358,7 +346,6 @@ fn a_create_race_that_ends_private_or_missing_fails() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn create_401_and_403_are_a_creation_error() {
     // 012 T011; "create 401 or 403 gives `docker hub api refused repository creation`"
     for code in [401, 403] {
@@ -378,7 +365,6 @@ fn create_401_and_403_are_a_creation_error() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn create_with_any_other_status_is_a_hub_api_error() {
     // 012 T011; "create any other status"
     for code in [500, 502, 503, 404, 422, 429] {
@@ -391,7 +377,6 @@ fn create_with_any_other_status_is_a_hub_api_error() {
 // ---- network, timeout, base ----
 
 #[test]
-#[ignore = "test-first"]
 fn a_refused_connection_is_a_hub_api_error() {
     // 012 T011; "network error"
     let port = {
@@ -409,7 +394,6 @@ fn a_refused_connection_is_a_hub_api_error() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_server_that_drops_the_connection_is_a_hub_api_error() {
     // 012 T011
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -430,7 +414,6 @@ fn a_server_that_drops_the_connection_is_a_hub_api_error() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_call_that_never_answers_times_out_as_a_hub_api_error() {
     // 012 T011; "a timeout"; 30-second limit per call (this test takes about 30 seconds)
     let h = serve_slow(
@@ -448,7 +431,6 @@ fn a_call_that_never_answers_times_out_as_a_hub_api_error() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_base_that_is_not_https_or_loopback_http_is_refused() {
     // 012 T011; "`base` other than `https://` or `http://127.0.0.1` is refused"
     for base in [
@@ -470,7 +452,6 @@ fn a_base_that_is_not_https_or_loopback_http_is_refused() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_loopback_prefix_trick_is_refused_without_a_request() {
     // 012 T011: `starts_with("http://127.0.0.1")` alone would let these through; the fake would see the call
     let h = serve(script(vec![public()], a(201, "{}")));
@@ -488,7 +469,6 @@ fn a_loopback_prefix_trick_is_refused_without_a_request() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn loopback_http_with_any_port_is_accepted() {
     // 012 T011: the override exists for tests only, and these tests rely on it
     let h = serve(script(vec![public()], a(201, "{}")));
@@ -499,7 +479,6 @@ fn loopback_http_with_any_port_is_accepted() {
 // ---- secrets and bodies ----
 
 #[test]
-#[ignore = "test-first"]
 fn the_token_is_only_in_the_login_body() {
     // 012 T011; "the request bodies carry the token only in the login call"; no URL, no header
     let h = serve(script(vec![missing(), public()], a(201, "{}")));
@@ -520,7 +499,6 @@ fn the_token_is_only_in_the_login_body() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn only_the_access_token_field_is_used_and_only_is_private_decides() {
     // 012 T011; "only the `access_token` and `is_private` fields are read"
     let mut s = script(
@@ -542,7 +520,6 @@ fn only_the_access_token_field_is_used_and_only_is_private_decides() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn no_response_body_reaches_a_returned_string() {
     // 012 T011; "response bodies never reach a returned string"; every error is one of the fixed texts
     let body =
@@ -592,7 +569,6 @@ fn no_response_body_reaches_a_returned_string() {
 // ---- redirects ----
 
 #[test]
-#[ignore = "test-first"]
 fn a_redirect_never_carries_the_token_or_the_access_token_elsewhere() {
     // 012 T011 (FR-015): a hostile or broken Hub answer must not move credentials to another server
     let decoy = serve(script(vec![public()], a(201, "{}")));

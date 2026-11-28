@@ -5,7 +5,7 @@
 use crate::log::Log;
 use crate::pipeline::{Pipeline, Step};
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -191,16 +191,37 @@ impl Engine {
         limit: Duration,
         container: Option<&str>,
     ) -> Result<String, String> {
+        self.capture_in(args, env, &[], limit, container)
+    }
+
+    /// Like `capture`, with `input` written to the child's standard input from a thread and then
+    /// closed. The input is never put in argv or env, so a token can travel this way (FR-015).
+    pub fn capture_in(
+        &self,
+        args: &[String],
+        env: &[(String, String)],
+        input: &[u8],
+        limit: Duration,
+        container: Option<&str>,
+    ) -> Result<String, String> {
         let mut child = self
             .command(args, env)
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| format!("{SPAWN_FAIL}{}: {e}", self.bin))?;
+        let stdin = child.stdin.take();
         let out = child.stdout.take();
         let err = child.stderr.take();
         let end = Instant::now() + limit;
         std::thread::scope(|sc| {
+            // A child that exits without reading breaks the pipe; its exit status decides the result.
+            let w = sc.spawn(move || {
+                if let Some(mut s) = stdin {
+                    let _ = s.write_all(input);
+                }
+            });
             let o = sc.spawn(move || out.map(|r| read_capped(r, 16 << 20)).unwrap_or_default());
             let e = sc.spawn(move || err.map(|r| read_capped(r, 64 << 10)).unwrap_or_default());
             let status = loop {
@@ -218,6 +239,7 @@ impl Engine {
                     Err(e) => break Err(e.to_string()),
                 }
             };
+            let _ = w.join();
             let (o, e) = (o.join().unwrap_or_default(), e.join().unwrap_or_default());
             match status {
                 Ok(st) if st.success() => Ok(o),
@@ -262,6 +284,18 @@ impl Engine {
 
     pub fn cleanup_run(&self, run_id: &str) {
         self.cleanup(&format!("{LABEL}={run_id}"));
+    }
+
+    /// True while a container, network or volume of the run exists. Fails closed: an engine
+    /// error counts as left.
+    pub fn run_left(&self, run_id: &str) -> bool {
+        let filter = format!("label={LABEL}={run_id}");
+        let kinds: [&[&str]; 3] = [&["ps", "-aq"], &["network", "ls", "-q"], &["volume", "ls", "-q"]];
+        kinds.iter().any(|list| {
+            let mut a: Vec<&str> = list.to_vec();
+            a.extend(["--filter", &filter]);
+            self.quick(&a).map_or(true, |out| !out.trim().is_empty())
+        })
     }
 
     /// Deletes `parent/name` as root inside a container: files that steps created as root

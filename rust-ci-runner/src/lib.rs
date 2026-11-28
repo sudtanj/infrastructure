@@ -1,6 +1,8 @@
+pub mod archive;
 pub mod ci;
 pub mod engine;
 pub mod github;
+pub mod hub;
 pub mod image;
 pub mod job;
 pub mod log;
@@ -16,11 +18,17 @@ pub mod walk;
 pub mod watch;
 
 #[cfg(test)]
+mod archive_tests;
+#[cfg(test)]
 mod ci_tests;
 #[cfg(test)]
 mod fake;
 #[cfg(test)]
+mod engine_tests;
+#[cfg(test)]
 mod github_tests;
+#[cfg(test)]
+mod hub_tests;
 #[cfg(test)]
 mod image_tests;
 #[cfg(test)]

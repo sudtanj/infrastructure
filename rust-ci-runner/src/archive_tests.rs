@@ -3,7 +3,6 @@
 //! `image-amd64.tar` so the platform the name implies is the one the config says.
 //!
 //! Not yet registered: with `pub mod archive;` in `lib.rs`, add `#[cfg(test)] mod archive_tests;` beside it, then
-//! remove each `#[ignore = "test-first"]` as its test passes. `ImageConfig` fields are read as `os`, `architecture`
 //! and `user` (String), `entrypoint` and `cmd` (Vec<String>).
 //!
 //! The policy errors of data-model.md (`image runs as root`, `image has a shell entrypoint`,
@@ -132,7 +131,6 @@ fn read(bytes: &[u8]) -> Result<crate::archive::ImageConfig, &'static str> {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn reads_the_blobs_form() {
     // 012 T010; S5 `blobs/sha256/<hex>`; Archive config.os, .architecture, .user, .entrypoint
     let c = read(&good_tar()).unwrap();
@@ -144,7 +142,6 @@ fn reads_the_blobs_form() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn reads_the_hex_dot_json_form() {
     // 012 T010; S5 `<hex>.json`
     let path = format!("{HEX}.json");
@@ -157,7 +154,6 @@ fn reads_the_hex_dot_json_form() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn returns_entrypoint_and_cmd_as_given() {
     // 012 T010; Archive config.entrypoint
     let cfg = config_json("1000", "[\"/app\",\"--serve\"]", "[\"--port\",\"80\"]");
@@ -173,7 +169,6 @@ fn returns_entrypoint_and_cmd_as_given() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn null_and_empty_entrypoint_and_cmd_are_allowed() {
     // 012 T010; "empty both is allowed"
     for (e, c) in [("null", "null"), ("[]", "[]")] {
@@ -189,7 +184,6 @@ fn null_and_empty_entrypoint_and_cmd_are_allowed() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn manifest_may_come_after_or_before_the_config() {
     // 012 T010: "reads manifest.json then the config member it names" whatever the member order
     let mut v = member("manifest.json", manifest_json(&blob_path()).as_bytes());
@@ -199,7 +193,6 @@ fn manifest_may_come_after_or_before_the_config() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_large_layer_member_is_seeked_past() {
     // 012 T010; S5 "seeking past data", "no allocation proportional to the archive": a 3 MB layer is no error and
     // the 1 MB member cap does not apply to members the reader skips
@@ -213,7 +206,6 @@ fn a_large_layer_member_is_seeked_past() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn gnu_long_name_and_pax_headers_are_skipped() {
     // 012 T010; S5 "GNU long-name and PAX headers skipped"
     let long = format!("blobs/sha256/{}/{}", "d".repeat(80), "layer.tar");
@@ -232,7 +224,6 @@ fn gnu_long_name_and_pax_headers_are_skipped() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_directory_entry_before_the_members_is_fine() {
     // 012 T010: `docker save` lists `blobs/` and `blobs/sha256/` as directories (typeflag 5, size 0)
     let mut v = typed("blobs/", b'5', b"");
@@ -248,7 +239,6 @@ fn a_directory_entry_before_the_members_is_fine() {
 // ---- failure paths: every one is a fixed error, never a panic ----
 
 #[test]
-#[ignore = "test-first"]
 fn an_unreadable_path_is_a_fixed_error() {
     // 012 T010
     let t = Tmp::new();
@@ -261,7 +251,6 @@ fn an_unreadable_path_is_a_fixed_error() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn empty_garbage_and_zero_files_are_unreadable() {
     // 012 T010; "a truncated or garbage file"
     let mut seed: u64 = 42;
@@ -284,7 +273,6 @@ fn empty_garbage_and_zero_files_are_unreadable() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn every_truncation_inside_the_needed_members_is_unreadable_and_none_panics() {
     // 012 T010: cut the good tar at each length; before the manifest and config are whole it must fail
     let tar = good_tar();
@@ -305,7 +293,6 @@ fn every_truncation_inside_the_needed_members_is_unreadable_and_none_panics() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_header_with_a_huge_or_garbage_size_is_unreadable() {
     // 012 T010: size 0o77777777777 (8 GiB - 1) on a member of a tiny file; and non-octal size bytes
     let mut v = header(b"layer.tar", 0o77777777777, b'0').to_vec();
@@ -319,7 +306,6 @@ fn a_header_with_a_huge_or_garbage_size_is_unreadable() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_missing_manifest_or_config_member_is_unreadable() {
     // 012 T010; "a missing member"
     let mut no_manifest = member("layer.tar", b"x");
@@ -342,7 +328,6 @@ fn a_missing_manifest_or_config_member_is_unreadable() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_manifest_naming_a_path_that_is_not_in_the_tar_is_unreadable() {
     // 012 T010; the tar holds a config, but not the one the manifest names
     let mut v = member(&blob_path(), good_config().as_bytes());
@@ -352,7 +337,6 @@ fn a_manifest_naming_a_path_that_is_not_in_the_tar_is_unreadable() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_manifest_naming_a_path_outside_the_tar_layout_is_unreadable() {
     // 012 T010: `../x`, an absolute path and an empty name never resolve to a member
     for p in ["../manifest.json", "/etc/passwd", ""] {
@@ -363,7 +347,6 @@ fn a_manifest_naming_a_path_outside_the_tar_layout_is_unreadable() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn the_manifest_must_hold_exactly_one_image_entry() {
     // 012 T010; "one image entry required"
     let one = manifest_json(&blob_path());
@@ -380,7 +363,6 @@ fn the_manifest_must_hold_exactly_one_image_entry() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn invalid_json_in_the_manifest_or_the_config_is_unreadable() {
     // 012 T010
     let mj = manifest_json(&blob_path());
@@ -398,7 +380,6 @@ fn invalid_json_in_the_manifest_or_the_config_is_unreadable() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_config_or_manifest_member_over_1_mb_is_unreadable() {
     // 012 T010; S5 "member size cap 1 MB": one byte over, JSON padded with spaces so only the cap fails it
     let over = (1 << 20) + 1;
@@ -423,7 +404,6 @@ fn a_config_or_manifest_member_over_1_mb_is_unreadable() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_config_well_under_the_cap_with_a_big_history_is_read() {
     // 012 T010: the cap must not reject a normal large config (about 300 KB of history)
     let history = format!(
@@ -443,7 +423,6 @@ fn a_config_well_under_the_cap_with_a_big_history_is_read() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_member_whose_data_runs_past_the_end_of_the_file_is_unreadable() {
     // 012 T010: the header promises 4096 bytes of config, the file ends after 100
     let mut v = header(blob_path().as_bytes(), 4096, b'0').to_vec();
@@ -452,7 +431,6 @@ fn a_member_whose_data_runs_past_the_end_of_the_file_is_unreadable() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn no_error_text_carries_archive_content() {
     // 012 T010: only fixed strings leave the module; a config full of a canary never shows it
     let canary = "canary-Zq81-value-key-0123456789";
