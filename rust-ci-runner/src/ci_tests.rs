@@ -2944,7 +2944,11 @@ printf '%s' '{VAL}' | od -An -tx1 | tr -d ' \n' | tr a-f A-F; echo"#
         // the other lines are the state lines and the stub's own `step-output` marker
         let out = lines(&w, "b", "stdout");
         let masked: Vec<_> = out.iter().filter(|l| l.contains("***")).collect();
-        assert_eq!(masked, ["***", "prefix-***-suffix", "***", "***"], "{out:?}");
+        assert_eq!(
+            masked,
+            ["***", "prefix-***-suffix", "***", "***"],
+            "{out:?}"
+        );
         assert!(!w.hub.bodies().contains(VAL));
         no_step_output_shipped(&w, "a");
         assert_public(&w);
@@ -2954,7 +2958,11 @@ printf '%s' '{VAL}' | od -An -tx1 | tr -d ' \n' | tr a-f A-F; echo"#
     #[test]
     fn a_step_named_like_a_secret_value_prints_as_step() {
         let name = "deploy-prod";
-        let w = world(&one_step(name, &[KEY]), &entry(MAIN, &[KEY]), &[(KEY, name)]);
+        let w = world(
+            &one_step(name, &[KEY]),
+            &entry(MAIN, &[KEY]),
+            &[(KEY, name)],
+        );
         assert_eq!(w.ok(), 0, "{}", w.stderr());
         assert_eq!(
             norm(&w.stdout()),
