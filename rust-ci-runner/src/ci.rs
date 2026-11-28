@@ -223,25 +223,23 @@ fn job(
     };
     a.id = entry.id.unwrap_or_default(); // `listed` only holds entries with an id
     a.ref_may_hold_secrets = entry.secrets_allowed_on(&a.git_ref);
-    // The Docker Hub names are for the tick's publish step only: a manual run never hands them out.
-    let hub = [image::TOKEN_NAME, image::USERNAME_NAME];
-    a.allowed = entry
-        .secrets
-        .into_iter()
-        .filter(|n| !hub.contains(&n.as_str()))
-        .collect();
+    a.allowed = entry.secrets;
     if token.is_empty() {
         return fail("BWS_ACCESS_TOKEN is not set");
     }
     let server = env("FACTORY_CI_BWS_SERVER_URL").filter(|v| !v.is_empty());
     // The one call also brings the four runner values, so it cannot be skipped; a ref that may not hold
     // secrets keeps no step-secret row from it.
-    let keep: &[String] = if a.ref_may_hold_secrets {
-        &a.allowed
-    } else {
-        &[]
-    };
-    let fetched = match store::fetch_with(&s.bws, token, server.as_deref(), s.limits.bws, keep) {
+    // The Docker Hub names are for the tick's publish step only: a manual run never fetches them.
+    let hub = [image::TOKEN_NAME, image::USERNAME_NAME];
+    let may = a.ref_may_hold_secrets;
+    let keep: Vec<String> = a
+        .allowed
+        .iter()
+        .filter(|n| may && !hub.contains(&n.as_str()))
+        .cloned()
+        .collect();
+    let fetched = match store::fetch_with(&s.bws, token, server.as_deref(), s.limits.bws, &keep) {
         Ok(v) => v,
         Err(e) => return fail(&e.to_string()),
     };
