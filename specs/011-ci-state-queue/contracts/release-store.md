@@ -18,7 +18,7 @@ Releases are `prerelease: true`, `draft: false`, `make_latest: "false"`, at the 
 
 ## Asset names (one regex per kind)
 
-`<runid>` is `GITHUB_RUN_ID` when it is all digits, else a random decimal number. `<attempt>` is `GITHUB_RUN_ATTEMPT` (`1` when unset). `<entry>` is the entry number: `0` for a manual run, `1` to `3` for a cron entry. `<8hex>` is random.
+`<runid>` is `GITHUB_RUN_ID` when it is all digits, else a random decimal number. `<attempt>` is read from the runner's own container name `factory-ci-runner-<runid>-<attempt>`, else `GITHUB_RUN_ATTEMPT`, else `1` (plan D19). `<entry>` is always `0`. `<8hex>` is random.
 
 | Kind | Regex | Label |
 |---|---|---|
@@ -52,7 +52,7 @@ Only assets that match a regex of the kind being read count. A test shows that a
 1. List. Delete every ticket whose label is missing, does not match the label regex, is more than 120 s ahead of this run's latest `Date`, or is 600 s or more behind it.
 2. Upload the ticket `t-<runid>-<attempt>-<entry>` with label `<runid>.<epoch of the latest Date>`. On a 4xx, list again: an own live ticket means it succeeded; a foreign asset of the same name (a rerun) is deleted and the upload repeats once.
 3. List again and note the position by id (Loki `queue registered`). There is no cap on tickets. A 5xx on registration is retried inside the wait budget.
-4. Wait: poll every 20 s; the first poll that shows this ticket with the lowest id among live tickets starts a 3 s settle; list again; claim only if still lowest. Print `waiting for the queue` once on the first miss. The wait ends at `FACTORY_CI_BUDGET_END` minus 45 minutes (the budget end is the runner start plus 200 minutes when the variable is unset): delete the ticket, `queue wait expired`.
+4. Wait: poll every 20 s; the first poll that shows this ticket with the lowest id among live tickets starts a 3 s settle; list again; claim only if still lowest. Print `waiting for the queue` once on the first miss. The wait ends at the budget end minus 30 minutes (the budget end is the runner start plus 35 minutes when `FACTORY_CI_BUDGET_END` is unset), 5 minutes after the start: delete the ticket, `queue wait expired`.
 5. Renew every 60 s from a thread, waiting or running. Each renewal lists again and logs `overlap` when a live ticket has a lower id. A failed renewal is a Loki line. When renewals have failed for 600 s the run sets the cancel flag in `RunExtras`, kills its step containers by their name prefix (`docker kill`), waits for them to exit, and only then deletes its ticket, prints `queue renewal failed` and exits 1.
 6. A missing own ticket while waiting, after a 60 s grace for read lag, registers again at the back (accepted residual).
 7. At the end, on every path, delete the ticket (5 s, no retry). A SIGINT or SIGTERM handler deletes the ticket first, within 5 s, skips the Loki flush and exits 1.

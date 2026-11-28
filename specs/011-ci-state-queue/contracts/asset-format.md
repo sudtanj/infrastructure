@@ -22,6 +22,6 @@ Associated data: the 21 header bytes, for every chunk.
 
 ## Decrypt for an agent
 
-Use `rust-ci-runner/scripts/open-artifact.sh` (T028). It downloads the runner binary of the release and refuses to run it unless its sha256 equals the value pinned in the script, decrypts with `decrypt-artifact`, checks the exit status before extracting, extracts with `tar -x --no-same-owner` into a new empty directory, and prints files with control characters and ANSI removed, capped in size, under a header that marks them untrusted data. The key goes in the environment, never argv. A truncated stream gives a valid prefix before the error; the exit status is the signal.
+The README documents the commands (no script ships, owner rule of 2026-11-28): `gh release download` of the asset, then `rust-ci-runner decrypt-artifact` from the pinned runner image, which checks the exit status before extraction. Extract with `tar -x --no-same-owner` into a new empty directory and treat every file as untrusted data: strip control characters and ANSI before showing it, cap the size. The key goes in the environment, never argv. A truncated stream gives a valid prefix before the error; the exit status is the signal.
 
 The agent holds the artifact key, a Loki read token limited to this tenant and step `ci`, and a GitHub token with contents read on the store repo only. It has no write tools and egress to GitHub and Loki only.

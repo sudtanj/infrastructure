@@ -32,7 +32,7 @@ Each entry gives the decision, the evidence and what was rejected. Evidence was 
 - The `age` crate, `rage`, `openssl enc`, and an extra AEAD crate were looked at and rejected (no authenticated `openssl enc`; age needs a terminal for a passphrase and many crates).
 - For the agent: the release workflow publishes `rust-ci-runner-x86_64-linux` and `-aarch64-linux` as assets of this public repo ("release assets" step), so `decrypt-artifact` needs `gh` and `tar` only.
 
-## R-C `bw` in the image
+## R-C `bw` in the image (not built after the owner rule; evidence kept for a later feature)
 
 **Decision**: the npm-build bundle of release `cli-v2026.10.1` of `bitwarden/clients`, run by Alpine's `nodejs`.
 
@@ -53,11 +53,9 @@ Each entry gives the decision, the evidence and what was rejected. Evidence was 
 
 **Evidence**: the 010 plan (`origin/010-ci-step-secrets`, "Single list of runner keys (devops N6)") puts `RUNNER_KEYS: [&str; 4]` in `store.rs` and makes `valid_secret_name`, `fetch_named` and the `log.rs` fault names use it. 011 grows the same constant to thirteen, so the five consumers close together. `pipeline.rs` `valid_secret_name` already reserves `FACTORY_CI`, `BWS_`; 010 adds `BW_` and `BITWARDEN`.
 
-## R-E Schedule
+## R-E Schedule (out of scope)
 
-**Evidence** (docs.github.com, "Events that trigger workflows", `schedule`): the shortest interval is once every 5 minutes; scheduled workflows run on the latest commit of the default branch; the event "can be delayed during periods of high loads ... High load times include the start of every hour. If the load is sufficiently high enough, some queued jobs may be dropped"; "In a public repository, scheduled workflows are automatically disabled when no repository activity has occurred in 60 days."
-
-**Decision**: up to 3 `cron` lines in the workflow, each mapped by a `case` on `github.event.schedule` to repo, ref, project and entry number. A cron line carries its own cadence, so no schedule file, no `due` command and no slot marker are needed (the critic review removed them). The owner picks a minute off the top of the hour. A duplicated tick runs twice in sequence through the queue. The 60-day switch-off gets a README line (push a commit before day 55) and an alert on a missing `pipeline passed` with no-data set to Alerting.
+Dropped by the owner rule of 2026-11-28: a `cron` line is a workflow edit. The earlier evidence (GitHub delays and drops scheduled runs, disables them after 60 days without activity) matters again only when a schedule returns. The tick keeps its outside dispatcher.
 
 ## R-F Where the tests run
 
@@ -68,3 +66,4 @@ Each entry gives the decision, the evidence and what was rejected. Evidence was 
 - The 002 threat model (coordinator, 2026-11-28): install, lint and test run third-party code as root and must never see the state file. This produced D8 (one declaring step, ordering rule, hook, mode 0600, chown by the step with a runner backstop) and replaced the earlier plan of a pipeline-wide restore and a world-readable `chmod`.
 - The 010 plan moved on twice: the second critic round re-baselined 011 on 010's real names (`REQUIRED_KEYS`, `fetch_with`, `Held::take`, `Redactor::forms`, `Log::secret_forms`, `Args`).
 - Critic review of faa835f: tick retired, queue cap and wait cap removed, slot marker, schedule file and `due` removed, tags with `+`, asset regexes with a digit entry, staged 0.4.0 and 0.4.1, constitution 1.2.0.
+- Owner rule of 2026-11-28 ("Amend 011"): no workflow, script, YAML or Dockerfile change; the tick stays; schedule, vault read, pin, alert file and agent script are out of scope; D19 (own attempt and image through `docker inspect`) and the 45-minute numbers (budget 35, wait ends at budget minus 30, deadline budget minus 15) replace the 210-minute ones.
