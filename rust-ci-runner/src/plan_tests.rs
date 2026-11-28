@@ -304,7 +304,11 @@ fn a_private_repo_image_row_gets_no_docker_and_no_secrets() {
         let list = entries(&[(R, "id = 123\nallow_docker = true")]);
         let (_, fin) = plan_all(&api, &list, &opts());
         let r = rows(&fin)[0].clone();
-        assert_eq!((r.allow_docker, r.secrets_ok), (want, want), "private {private}");
+        assert_eq!(
+            (r.allow_docker, r.secrets_ok),
+            (want, want),
+            "private {private}"
+        );
     }
 }
 

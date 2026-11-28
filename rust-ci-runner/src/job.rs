@@ -580,7 +580,10 @@ fn attempt(
         Err(d) => return d,
     };
     let publishes = image::publishes(&o.t.project, &o.branch) && o.allow_docker;
-    if let Some(d) = publishes.then(|| publish::check_failed(&dir, false)).flatten() {
+    if let Some(d) = publishes
+        .then(|| publish::check_failed(&dir, false))
+        .flatten()
+    {
         return d;
     }
     let (p, secrets) = match prepare(&dir, None, |n| var(env, n), o.allow_docker, false) {
