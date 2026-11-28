@@ -1,44 +1,47 @@
-# Contract: runner commands
+# Contract: runner behaviour
 
-## `rust-ci-runner watch-list --out FILE [--bws PATH] [--project ID]`
+## `watch::parse` (every caller: `plan` phase A, `plan --check`, `ci`)
 
-- Env in: the Bitwarden access token variable (required; read once, removed from the process environment before any thread starts, added to the redactor), `FACTORY_CI_BWS_SERVER_URL` (optional, same rule as `ci`), `HOME`, `PATH`.
-- Flags: `--out` required. `--bws` defaults to `/usr/local/bin/bws`. `--project` optional; 1 to 64 characters of `[0-9A-Za-z-]`, not starting with `-`; passed as one argument after `secret list`.
-- stdout: empty. Exit 0 only when the file was written.
-- stderr, one line per problem, all from this set (N and K are numbers):
+Same keys and limits as before (`repo`, `id`, `branches`, `secret_branches`, `secrets`, `allow_docker`; 64 KiB; 100 entries; 20 items per list; unknown keys refused). It returns `Err(Vec<String>)` with every problem at once. **Messages never contain list text.** `N` is the 1-based position of the table; `K` a line number.
 
-| Line | When |
+| Message | When |
 |---|---|
-| `watch list: BWS_ACCESS_TOKEN is not set` | empty token |
-| `watch list: secret store unreachable` | store failure after 2 attempts |
-| `watch list: secret store rejected the access token` | 400, 401, 403 |
-| `watch list: key FACTORY_CI_REPOS not found` | no row |
-| `watch list: key FACTORY_CI_REPOS found N times` | N rows, N at least 2 |
-| `watch list: FACTORY_CI_REPOS is empty` | blank or non-string |
-| `watch list: FACTORY_CI_REPOS is larger than 64 KiB` | size |
-| `watch list: line K: invalid TOML` | syntax error |
-| `watch list: entry N: <problem>` | validation, problem from the table below |
-| `watch list: FACTORY_CI_REPOS has no entries` | zero tables |
-| `watch list: more than 100 entries` | count |
-| `watch list: cannot write the output file` | write error |
-| usage text | bad arguments |
+| `line K: invalid TOML` | syntax error (K from the parser span; no snippet) |
+| `file: larger than 64 KB` | size |
+| `file: more than 100 entries` | count |
+| `file: no entries` | zero tables, or no `watch` key |
+| `file: unknown top-level key` | any key other than `watch` |
+| `file: watch must be a list of [[watch]] tables` | wrong type |
+| `entry N: must be a table` | an item is not a table |
+| `entry N: missing repo` / `repo must be a string` / `repo is not owner/name` | repo problems |
+| `entry N: duplicate of entry M` | repo repeated (case-insensitive) |
+| `entry N: unknown key` | key outside the six |
+| `entry N: id is not a number` | id problem |
+| `entry N: id is required with allow_docker or secrets` | new rule |
+| `entry N: branches must be a list of strings` / `branches has more than 20 items` | same two forms for `secret_branches` and `secrets` |
+| `entry N: malformed glob (length)` / `(unsupported sequence)` / `(unsupported character)` | glob problems, no glob shown |
+| `entry N: secret_branches must not be * or **` | new rule |
+| `entry N: secret is reserved or malformed` / `secret is listed twice` | secrets |
+| `entry N: allow_docker must be true or false` | type |
 
-- File: mode 0600, the value byte for byte. On any failure the path is removed if it exists.
+`watch::check_owner(entries, owner)` returns `entry N: repo owner differs from the repository owner` per mismatch (case-insensitive); an empty `owner` returns `file: repository owner is not known`.
 
-## Problem table of `parse_private` (the only texts it may produce)
+## `plan`
 
-`entry N: missing repo`, `repo must be a string`, `repo is not owner/name`, `duplicate of entry M`, `unknown key`, `id is not a number`, `branches must be a list of strings`, `branches has more than 20 items`, the same three forms for `secret_branches` and `secrets`, `malformed glob (length)`, `malformed glob (unsupported sequence)`, `malformed glob (unsupported character)`, `secret is reserved or malformed`, `secret is listed twice`, `allow_docker must be true or false`, `must be a table`. Top level: `line K: invalid TOML`, `unknown top-level key`, `watch must be a list of [[watch]] tables`. Nothing from the input appears in any of them.
-
-## `rust-ci-runner plan --repos FILE --check` and `plan --repos - --check`
-
-- `FILE`: validated with `parse` as today; stdout `N entries ok`, N may be 0.
-- `-`: stdin, at most 64 KiB + 1 byte, validated with `parse_private`; stdout `N entries ok`. Zero entries prints `watch list: FACTORY_CI_REPOS has no entries` and exits 1; empty stdin prints `watch list: stdin is empty`. Errors on stderr in the `entry N:` form. No network.
-- `--repos -` without `--check` is a usage error.
-
-## `plan` phase A
-
-Reads the file at `--repos`. An empty list: stderr `watch list has no entries`, exit 1, no candidates file. Summary lines name `item N` and `entry N` only.
+- `plan --repos FILE|- --check`: validates with `parse`; `FILE` or stdin (at most 64 KiB + 1 byte, `-` only with `--check`). Prints `N entries ok` on stdout; errors on stderr, exit 1. Zero entries is an error. No network. `check_owner` runs only when `GITHUB_REPOSITORY_OWNER` is set.
+- Phase A (`--repos FILE --rows-out CAND`): `parse`, then `check_owner` (unset owner refuses), then the plan. Summary and problem lines use `entry N` and `item N`. The line for an `allow_docker` entry without a docker token is `entry N: FACTORY_CI_TOKEN_DOCKER is not set`. An id mismatch says `id differs from the list`.
+- `B_PRIVATE` is private only when it equals `true`.
+- Phase C reads only candidates; its redactor is seeded from the repos in the candidate rows.
 
 ## `ci`
 
-Fault lines (`[runner] ` prefix): the unlisted line (also for an empty token) and `watch list unusable`. `BWS_ACCESS_TOKEN is not set` leaves `FAULTS`. One `bws` call per run.
+- Without `--repos`: the list comes from the one `bws secret list` call, scoped by `FACTORY_CI_BWS_PROJECT` when set; `watch_text`, `parse`, `check_owner` (with `GITHUB_REPOSITORY_OWNER`).
+- With `--repos FILE`: the file path as before (development and tests; the production workflow never passes it).
+- Fault lines (`[runner] ` prefix): `repository or ref not in the watch list` (also for an empty token) and `watch list unusable`. `BWS_ACCESS_TOKEN is not set` leaves `FAULTS`.
+- One `bws` call per run.
+
+## `store.rs`
+
+- `fetch_json(bws_bin, token, server_url, limit, project) -> Result<String, StoreError>`: retry once on a transient failure, never on 400, 401, 403.
+- `watch_text(json) -> Result<String, ListError>`: `Missing`, `Many(n)`, `Empty`.
+- `project`: 1 to 64 characters of `[0-9A-Za-z-]`, no leading `-`; otherwise the call is refused (`Unreachable`).

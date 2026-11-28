@@ -1,7 +1,7 @@
-# Specification Quality Checklist: Bitwarden watch list and a 5-minute schedule
+# Specification Quality Checklist: Bitwarden watch list, 5-minute schedule, clean public repo
 
 **Purpose**: Validate specification completeness and quality before planning
-**Created**: 2026-11-28
+**Created**: 2026-11-28 (re-validated after revision 2)
 **Feature**: [spec.md](../spec.md)
 
 ## Content Quality
@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [x] No [NEEDS CLARIFICATION] markers remain; the three owner decisions E1 to E3 are recorded with an assumed default and gated in the plan
+- [x] No [NEEDS CLARIFICATION] markers remain; the owner's answers are recorded as clarification sessions
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria avoid implementation detail where one exists
@@ -31,4 +31,5 @@
 
 ## Notes
 
-- E1 to E3 need the owner's answer before the gated tasks run. The default assumed is "approve".
+- The spec never writes a private name; the strings are derived in contracts/history-rewrite.md.
+- Owner questions still open: see the end of tasks.md.
