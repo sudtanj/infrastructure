@@ -43,7 +43,7 @@ Thirteen names in `store::RUNNER_KEYS`. The first four are `REQUIRED_KEYS`, read
 
 ## Ticket
 
-Release `ci-queue+<repo>+<project>+<state>` in the store repo, asset `t-<runid>-<attempt>-<entry>` (1 byte), label `<runid>.<epoch>`. State machine: `absent` -> `registered` -> `claimed` (lowest live id, settled) -> `released` (deleted). No cap. Live means an `uploaded` asset, or a non-`uploaded` asset younger than 120 s. Stale means the label is missing, malformed, more than 120 s ahead of the reader's latest `Date`, or 600 s or more behind it. A run that cannot claim before its budget (`FACTORY_CI_BUDGET_END` minus 45 minutes) deletes the ticket and ends `queue wait expired`.
+Release `ci-queue+<repo>+<project>+<state>` in the store repo, asset `t-<runid>-<attempt>-<entry>` (1 byte), label `<runid>.<epoch>`. State machine: `absent` -> `registered` -> `claimed` (lowest live id, settled) -> `released` (deleted). No cap. Live means an `uploaded` asset, or a non-`uploaded` asset that matches the ticket regex and is under 120 s old; any other non-`uploaded` asset is deleted only once it is over 360 s old. Stale means the label is missing, malformed, more than 120 s ahead of the reader's latest `Date`, or 600 s or more behind it. A run that cannot claim before its budget (`FACTORY_CI_BUDGET_END` minus 45 minutes) deletes the ticket and ends `queue wait expired`.
 
 ## State asset
 
