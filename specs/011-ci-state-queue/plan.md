@@ -8,19 +8,21 @@ Skill note: `.specify/scripts/bash/setup-plan.sh` ran. `.specify/extensions.yml`
 
 ## Summary
 
-011 builds on 010 (step secrets). It ships in one runner release, 0.4.0, and every part is Rust, `Cargo` files or toml.
+011 builds on 010 (step secrets). It ships in two runner releases. Every part is Rust, `Cargo` files, toml, the runner `Dockerfile`, one YAML rule file and one shell script under `rust-ci-runner/`; nothing under `.github/workflows/` or `.github/scripts/` changes.
 
-**0.4.0**: a strict FIFO queue per state (release assets in a separate private store repo, one ticket per run, no cap), encrypted state restored into one named step only, encrypted debug artifacts behind a secret scan, all 13 runner key names reserved, and the vault declarations parsed and refused with `vault unavailable`. The runner finds its own attempt number and image by asking docker about its own container (D19), so the unchanged workflow does not have to pass them.
+**0.4.0**: a strict FIFO queue per state (release assets in a separate private store repo, one ticket per run, no cap), encrypted state restored into one named step only, encrypted debug artifacts behind a secret scan, all 13 runner key names reserved, and the vault declarations parsed and refused with `vault unavailable`. The runner finds its own attempt number and image by asking docker about its own container (D19), so the unchanged workflow does not have to pass them. The alert rules (`rust-ci-runner/alerts/factory-ci.yaml`) and the agent script ship with it.
 
-**Owner rule of 2026-11-28 (binding)**: no file under `.github/workflows/` or `.github/scripts/` changes. The tick workflow stays and keeps its outside dispatcher (feature 012 relies on it). The schedule, the workflow edits, the pin bump, the vault read and `bw` image, the alert-rule file and the agent script are out of scope (table below).
+**0.4.1**: the vault read (`bw` from the pinned Bitwarden CLI bundle, run by Alpine's `nodejs`), the `vault_items` read path, FR-042 to FR-047 and FR-056.
 
-Everything else (watch list, Loki, fixed public grammar, redactor, engine) stays as in 008 and 010. Interim website logins use 010 step secrets.
+**Owner rule of 2026-11-28 (binding), as corrected the same day**: no file under `.github/workflows/` or `.github/scripts/` changes. The tick workflow stays and keeps its outside dispatcher (feature 012 relies on it). The schedule, the workflow edits, the pin of the manual workflow, the smoke step of the release workflow and the watch keys are out of scope. The queue, state, artifacts and vault read run only through the manual `ci` workflow, whose pin is a workflow line, so they stay inert until the owner decides. The tick reads its runner from the repository variable `RUNNER_IMAGE_DIGEST`, so the new binary can reach the tick path with `gh variable set` (T039); the tick path uses none of the new features (D20).
+
+Everything else (watch list, Loki, fixed public grammar, redactor, engine) stays as in 008 and 010. Interim website logins use 010 step secrets until 0.4.1.
 
 ## Technical Context
 
 **Language/Version**: Rust 2021, `rust:1.90` in the pipeline, musl static binary in the release.
 
-**Primary Dependencies**: `ring` 0.17.14, `memchr` 2.8.3 and `libc` 0.2.191 (all already locked; direct dependencies add one line each to the root package), and two new lock entries, `miniz_oxide` 0.8.9 and `adler2` 2.0.1. The image gains nothing (no Node, no `bw`).
+**Primary Dependencies**: `ring` 0.17.14, `memchr` 2.8.3 and `libc` 0.2.191 (all already locked; direct dependencies add one line each to the root package), and two new lock entries, `miniz_oxide` 0.8.9 and `adler2` 2.0.1. 0.4.1 adds `nodejs` and the `bw` bundle to the image.
 
 **Storage**: GitHub releases of a separate private store repo that holds no code. Local files under `--work`. No database.
 
@@ -34,7 +36,7 @@ Everything else (watch list, Loki, fixed public grammar, redactor, engine) stays
 
 **Constraints**: the dev VM has 1 GB and no cargo, docker or builds. The runner container has a read-only root and a 64 MB `/tmp` tmpfs (`factory-monorepo-ci.yml`), so bundles and ciphertext go under `--work`. A step container allows 512 processes (`engine.rs`). The job limit is 45 minutes, and the workflow passes `-e GITHUB_RUN_ID` and not `GITHUB_RUN_ATTEMPT` or the image name.
 
-**Scale/Scope**: 2 state assets, 10 bundles per project, 50 vault declarations per pipeline (checked, refused), no ticket cap, a 5-minute wait.
+**Scale/Scope**: 2 state assets, 10 bundles per project, 50 vault fields per pipeline, no ticket cap, a 5-minute wait.
 
 ## Constitution Check
 
@@ -49,18 +51,19 @@ Everything else (watch list, Loki, fixed public grammar, redactor, engine) stays
 
 ## Owner rule of 2026-11-28 and what it changes
 
-Rule: no file under `.github/workflows/` and none under `.github/scripts/` may change. Only Rust in `rust-ci-runner/`, `.factory-ci.toml` files and other toml files change. The owner chose "Amend 011" and kept the tick (see the clarification in spec.md).
+Rule: no file under `.github/workflows/` and none under `.github/scripts/` may change. The owner chose "Amend 011" and kept the tick (see the clarifications in spec.md). Correction of the same day: `rust-ci-runner/Dockerfile` and other files outside those two folders may change; the tick reads `vars.RUNNER_IMAGE_DIGEST`, a repository variable.
 
 | Earlier 011 item | Now | Reason |
 |---|---|---|
-| Cron lines, `case`, entry numbers 1 to 3, `--entry` (D5, T010, T023, T030) | Out of scope. Entry is the constant `0` in names. | needs `factory-monorepo-ci.yml` and a shell test |
-| Workflow: no `concurrency`, 210 minutes, `-e` flags, Environment (D18, T023) | Out of scope. The group, 45 minutes and the pin stay. Numbers in D16 follow the 45-minute limit. | workflow edit |
-| Pin to 0.4.0 (T025), canaries and first real run (T026, T029, T031) | Out of scope. The image is released and not pinned. | the pin is a workflow line |
-| Watch keys on `factory-monorepo` (T030) | Out of scope. | the pinned `ci` runner and the tick's `plan` refuse unknown keys |
+| Cron lines, `case`, entry numbers 1 to 3, `--entry` (D5, T010, T023, T030) | Out of scope. Entry is the constant `0` in names. | needs `factory-monorepo-ci.yml` and `.github/scripts` |
+| Workflow: no `concurrency`, 210 minutes, `-e` flags, Environment (D18, T023) | Out of scope. The group, 45 minutes and the manual pin stay. D16 follows the 45-minute limit. | workflow edit |
+| Pin of the manual workflow, canaries, first real run (T025, T026, T029, T031) | Out of scope. The queue, state, artifacts and vault read run only through `ci` and stay inert. | the pin is a workflow line |
+| Tick runner | In scope as a variable change (T039, D20): the tick takes the new binary with `gh variable set`, rollback sets the old digest. | no file changes |
+| Watch keys on `factory-monorepo` (T030) | Out of scope. | the pinned `ci` runner refuses unknown keys |
 | Retire the tick (T022, D17) | Reversed: the tick stays. The tick path ignores `[state]` and `[artifacts]` (FR-062). | owner decision, feature 012 |
-| Vault read, `bw` image, 0.4.1 (D3, T032 to T037) | Out of scope. Declarations are checked and refused. | `Dockerfile` and release workflow edit |
-| Alert-rule file (D10, T027) | Out of scope as a file. The owner builds the rules in Grafana from `contracts/loki-lines.md`. | YAML file |
-| Agent script (D15, T028) | Out of scope. `decrypt-artifact` and one README command remain. | shell script |
+| Vault read, `bw` image, 0.4.1 (D3, T032 to T036) | Back in scope. A `RUN bw --version` line in the `Dockerfile` replaces the release-workflow smoke step. T037 (owner actions) stays deferred. | the `Dockerfile` is not covered by the ban |
+| Alert-rule file (D10, T027) | Back in scope. | not under `.github/workflows/` |
+| Agent script (D15, T028) | Back in scope under `rust-ci-runner/scripts/`. | not under `.github/scripts/` |
 | Attempt number and runner image from the workflow | Read from docker by the runner (D19). | workflow cannot pass them |
 
 Kept in full: D1, D2, D4, D6, D8, D9, D11 to D14, the 13 key names, the 9 fault lines, the Loki lines, the scan, the store hygiene.
@@ -86,9 +89,11 @@ Rejected: git refs (no payload or timestamp, a reused name hides an old holder),
 
 `ring` 0.17.14 is already in `Cargo.lock` (via rustls). HKDF-SHA256 with a fresh 16-byte salt per file and `info` `factory-ci/v1/state` or `/artifact`; input is the decoded bytes of the key (base64 or hex text decoding to 32 bytes or more, 8 or more distinct byte values). STREAM chunks with a final flag; `open` reads one byte ahead, so a plaintext of exactly 64 KiB has one valid encoding. Layout in [contracts/asset-format.md](contracts/asset-format.md). `decrypt-artifact` reads the key from `FACTORY_CI_ARTIFACT_KEY`. Rejected: `age`, `openssl enc`, an extra AEAD crate, AES-GCM, PBKDF2 (open point O3).
 
-### D3 `bw` (out of scope)
+### D3 `bw` (0.4.1 only)
 
-The vault read needs Node and the `bw` bundle in `rust-ci-runner/Dockerfile` and a smoke step in `rust-ci-runner-release.yml`. The owner rule allows neither, so D3 is not built. The evidence stays in research.md (R-C) for the day the rule is lifted. 0.4.0 ends a validated vault declaration with `[runner] vault unavailable` before any ticket or container.
+The npm-build bundle of `bitwarden/clients` release `cli-v2026.10.1` (sha256 `43401c3e27cb009a28035dc8f9bea43ae78880e0549490762542f55af0e6b2e3`, 5.1 MB, matches a download) run by Alpine 3.23 `nodejs` 24.22.3 (installed 52.3 MB plus about 15 MB of libraries, index read today) behind a two-line `/usr/local/bin/bw`. The standalone binary is 143 MB, glibc-linked (`readelf` shows interpreter `/lib64/ld-linux-x86-64.so.2` and `libstdc++`, `libc.so.6`); rejected. Estimated image growth is about +86 MB; the PR records the measured size and the pull time. `RUN bw --version` on amd64 blocks; the arm64 run under QEMU does not.
+
+Sequence per run: `login --apikey` (only `BW_CLIENTID`, `BW_CLIENTSECRET`), `unlock --passwordenv BW_PASSWORD --raw`, `list items --organizationid --collectionid` (only `BW_SESSION`, `BW_NOINTERACTION=true`), `logout`, then remove the data dir (a 0700 folder on the tmpfs) and check it is gone, all before the first container. The runner lists items and filters by exact name, so no item name is in argv. An item outside the allowlist in the answer is `vault unavailable`. The `bw` server is the US cloud; with `FACTORY_CI_BWS_SERVER_URL` set and a vault declaration the run ends `vault unavailable`. No new key.
 
 ### D4 One list of runner keys, one `bws` call
 
@@ -100,18 +105,18 @@ No cron lines, no `case`, no `--entry`. The tick keeps its outside dispatcher. T
 
 ### D6 Where the tests run
 
-No-server modules (`seal_tests`, `scan_tests`, `bundle_tests`, `state_tests`, `queue_tests` with at most 6 joined threads) run in the first command. `releases_http_tests` and `ci_state_tests` start servers and get their own process groups in `.factory-ci.toml`, with matching `--skip` flags (`--skip ci_tests::` does not match `ci_state_tests::`).
+No-server modules (`seal_tests`, `scan_tests`, `bundle_tests`, `state_tests`, `queue_tests` with at most 6 joined threads, `vault_tests`) run in the first command. `releases_http_tests` and `ci_state_tests` start servers and get their own process groups in `.factory-ci.toml`, with matching `--skip` flags (`--skip ci_tests::` does not match `ci_state_tests::`).
 
 ### D7 Order inside `run_checkout` (extends 010)
 
 1. Load the pipeline: parse faults (state, artifacts, vault shape, reserved names, project and tag rules) are `pipeline file refused`.
 2. Docker rules (010) plus: a vault list with `docker = true`, and any `docker = true` in a pipeline with `[state]`, are refused.
 3. State or artifacts declared: the entry needs `state = true` and the pipeline repo must be private (identity call returns `private`), else `state not allowed`.
-4. Allowlists: 010's `unlisted` (`step secret not allowed`), then vault items against `vault_items` (`vault item not allowed`); a validated vault declaration ends `vault unavailable` here, before any ticket.
+4. Allowlists: 010's `unlisted` (`step secret not allowed`), then vault items against `vault_items` (`vault item not allowed`); in 0.4.0 a validated vault declaration ends `vault unavailable` here, before any ticket.
 5. Ref gate (`secrets_allowed_on`) for step secrets, vault, state and artifacts.
-6. Runner keys from `Held`: state token, store repo, both keys (checked, different); any miss is `state store not configured`. The runner reads its own attempt and image (D19). `GET /repos/<store>` must answer `private: true`. Before step 6 reads anything and before any store call or any line that can carry a value (the lines of steps 1 to 5 are fixed text), `log.add_secrets` receives the state token, the state and artifact keys, the store repo name and `base64("x-access-token:" + token)` (FR-061). A 5xx on registration is retried inside the wait budget.
+6. Runner keys from `Held`: state token, store repo, both keys (checked, different); any miss is `state store not configured`. The runner reads its own attempt and image (D19). `GET /repos/<store>` must answer `private: true`. Before step 6 reads anything and before any store call or any line that can carry a value (the lines of steps 1 to 5 are fixed text), `log.add_secrets` receives the state token, the state and artifact keys, the store repo name and `base64("x-access-token:" + token)` (and in 0.4.1 the vault credentials) (FR-061). A 5xx on registration is retried inside the wait budget.
 7. 010's `Held::take` for step secrets, then `log.add_secrets`.
-8. `[state]`: register and wait (`queue wait expired`). Inside the turn: restore into memory (`state restore failed`), add its strings to the log.
+8. `[state]`: register and wait (`queue wait expired`). A 0.4.0 vault declaration was already refused at step 4, before any ticket. Inside the turn: restore into memory (`state restore failed`), add its strings to the log; 0.4.0: a vault declaration ends `vault unavailable` here; 0.4.1: the vault read.
 9. `run_pipeline` with the step hook of D8 and the deadline of D16.
 10. After: chown the artifact paths (runner image helper), build, scan, encrypt, upload when due, save the captured state when the pipeline passed (the `after` hook of D8 has already run `state_strings` on the bytes it read and `add_secrets`, so a cookie issued during the run is masked and scanned before any artifact is built), release the ticket, remove the checkout.
 
@@ -125,7 +130,7 @@ A separate private repo that holds no code and no workflows, one initial README 
 
 ### D10 Monitoring
 
-[contracts/loki-lines.md](contracts/loki-lines.md) fixes every Loki line, each with a test. The alert-rule file is out of scope (YAML). The owner builds these Grafana rules by hand, no-data set to Alerting: a missing `pipeline passed` for `sudtanj/factory-monorepo`; any fault line over 1 h; `queue wait expired`; `queue renewal failed`; any `overlap`; more than one `restore none` in 24 h; more than two `restore failed` in 24 h; any `stale break`; `rate limited` more than 3 times in 1 h. The README carries a runbook for `state restore failed` (delete the newest state asset, or all of them to start empty).
+[contracts/loki-lines.md](contracts/loki-lines.md) fixes every Loki line, each with a test. `rust-ci-runner/alerts/factory-ci.yaml` holds the Grafana rules, no-data set to Alerting: a missing `pipeline passed` for `sudtanj/factory-monorepo` over 24 hours; any fault line over 1 h; `queue wait expired`; `queue renewal failed`; any `overlap`; more than one `restore none` in 24 h; more than two `restore failed` in 24 h; any `stale break`; `rate limited` more than 3 times in 1 h. A Rust test checks that every string in the file is in the contract or in `FAULTS`. The README carries a runbook for `state restore failed` (delete the newest state asset, or all of them to start empty).
 
 ### D11 Filesystem trust
 
@@ -133,7 +138,7 @@ The state hook and `bundle::build` canonicalise the declared path, require `star
 
 ### D12 Names and maps
 
-A name in both a `secrets` list and a vault `env` is refused pipeline-wide. A vault value map would be separate from step secrets (out of scope with the vault read). Entries with `state` or `vault_items` need an explicit `secret_branches = ["main"]` (`plan --check` refuses otherwise). Vault item names in the public watch file are opaque (`ci-login-1`).
+A name in both a `secrets` list and a vault `env` is refused pipeline-wide. Vault values live in a separate `(item, field)` map (0.4.1). Entries with `state` or `vault_items` need an explicit `secret_branches = ["main"]` (`plan --check` refuses otherwise). Vault item names in the public watch file are opaque (`ci-login-1`).
 
 ### D13 Scan scope
 
@@ -143,19 +148,19 @@ The scan set is `Log::secret_forms()` minus the numeric `FACTORY_CI_LOG_USER` (a
 
 Fixed hosts, redirects off, download `Location` only https on `*.githubusercontent.com`, name and size checks before a download, pagination with a 300-asset fail-closed bound, one retry of a restore on a 404.
 
-### D15 Agent kit (script out of scope)
+### D15 Agent kit
 
-No `open-artifact.sh`. The agent kit is the artifact key, a Loki read token and a read-only GitHub token. The README gives the download (`gh release download`) and `rust-ci-runner decrypt-artifact` commands, says the runner binary comes from the pinned image, and tells the reader to treat the decrypted content as untrusted data (strip control characters, extract with `tar -x --no-same-owner` into a new empty directory).
+`rust-ci-runner/scripts/open-artifact.sh` downloads the runner binary of a release and runs it only if its sha256 equals the value pinned in the script, decrypts, checks the exit status, extracts with `tar -x --no-same-owner` into a new empty directory, and prints files stripped of control characters and ANSI, size-capped, under an untrusted-data header. The README names the pins that move per release (image digest, script sha) in a release checklist line.
 
 ### D16 Deadline
 
 The workflow's `timeout-minutes` is 45 and stays. `JOB_LIMIT` is a Rust constant of 45 minutes next to the budget code in `ci.rs`; a test reads `.github/workflows/factory-monorepo-ci.yml` (read only, through `CARGO_MANIFEST_DIR`) and asserts the `timeout-minutes` of the `ci` job equals it. A later workflow edit then turns the test red.
 
-`budget_end` is read through `Seams.timing` (tests set it; production leaves the variable unset): the value of `FACTORY_CI_BUDGET_END` if set, else runner start plus 35 minutes (the limit minus 10 for start-up and cleanup). Pipeline deadline `= min(now + 30 min, budget_end - 15 min)`; the 15 minutes are 5 for the artifact scan and upload, 5 for the save and 5 for cleanup. The wait ends at `budget_end - 30 min` (5 restore, a 10-minute minimum pipeline window, the 15-minute reserve), which is 5 minutes after the start. A hold is at most 40 minutes. The README documents the 5-minute wait and the minimum pipeline window of 10 minutes.
+`budget_end` is read through `Seams.timing` (tests set it; production leaves the variable unset): the value of `FACTORY_CI_BUDGET_END` if set, else runner start plus 35 minutes (the limit minus 10 for start-up and cleanup). Pipeline deadline `= min(now + 30 min, budget_end - 15 min)`; the 15 minutes are 5 for the artifact scan and upload, 5 for the save and 5 for cleanup. The wait ends at `budget_end - 30 min` (5 restore, a 10-minute minimum pipeline window, the 15-minute reserve), which is 5 minutes after the start. A hold is at most 40 minutes. The README documents the 5-minute wait and the minimum pipeline window of 10 minutes. A pipeline that reads the vault (0.4.1) spends up to 5 more minutes before its first step, so a late winner's window can drop to 5 minutes.
 
 ### D17 Rollback and the tick
 
-Rollback reverts the Rust commits. No workflow, pin or watch file changed, so no other step exists. The tick workflow `factory-ci-tick.yml`, its scripts and the `plan` subcommand are not touched (FR-060). The tick path (`job`, `local`) runs a pipeline that declares `[state]` or `[artifacts]` as before 011, with no store call (FR-062).
+Rollback reverts the Rust and `Dockerfile` commits. If the tick variable was moved (D20), set the recorded old digest back first with `gh variable set RUNNER_IMAGE_DIGEST`. No workflow, manual pin or watch file changed, so no other step exists. The tick workflow `factory-ci-tick.yml`, its scripts and the `plan` subcommand are not touched (FR-060). The tick path (`job`, `local`) runs a pipeline that declares `[state]` or `[artifacts]` as before 011, with no store call (FR-062).
 
 ### D18 Environment (out of scope)
 
@@ -170,11 +175,17 @@ The unchanged workflow starts the container as `--name factory-ci-runner-$GITHUB
 
 The hostname is the container id under the workflow's `docker run` (no `--hostname`). Tests set both environment variables, and a fake engine answers `inspect`. Rejected: reading `/proc/self/cgroup` (version-dependent), guessing the image from a constant (it moves with every pin), a second `docker run` flag (workflow edit).
 
+### D20 Shipping through the tick
+
+`.github/workflows/factory-ci-tick.yml` runs `plan` and then `job` from the runner image `ghcr.io/<owner>/rust-ci-runner@${{ vars.RUNNER_IMAGE_DIGEST }}`. That value is a repository variable, so `gh variable set RUNNER_IMAGE_DIGEST --body sha256:<digest>` moves the tick to a new runner and needs no file edit. The manual `factory-monorepo-ci.yml` hardcodes `RUNNER_IMAGE`, so it cannot move.
+
+What the bump proves: the 0.4.x binary still plans, runs and reports the tick items as before. What it does not give: state, queue, artifacts or vault for the tick, because `.github/scripts/factory-ci-job.sh` passes the runner only the declared step secrets and unsets the Bitwarden token, so the runner holds no store setting and no vault credential. `job` and `local` therefore ignore `[state]` and `[artifacts]` and refuse a vault declaration (FR-062, FR-045). T039 carries the steps: record the old digest, set the new one after the tag and the digest check, watch one tick, set the old digest back on any failed status. Feature 012 also relies on the tick, so the bump waits for a quiet moment and the owner is told.
+
 ## Files
 
 ### Added (`rust-ci-runner/src` unless noted)
 
-`seal.rs`, `releases.rs` (the only code that calls api.github.com with the state token), `queue.rs`, `signal.rs` (the one `unsafe`: a `libc::sigaction` call that stores an atomic), `state.rs`, `bundle.rs`, `scan.rs`, `stateful.rs` (post-checkout phase), one `*_tests.rs` per module, `ci_state_tests.rs`, `releases_http_tests.rs`, and the spec artifacts. No `vault.rs`, no `alerts/`, no `scripts/`.
+`seal.rs`, `releases.rs` (the only code that calls api.github.com with the state token), `queue.rs`, `signal.rs` (the one `unsafe`: a `libc::sigaction` call that stores an atomic), `state.rs`, `bundle.rs`, `scan.rs`, `stateful.rs` (post-checkout phase), `vault.rs` (0.4.1, the only new file that names the vendor), one `*_tests.rs` per module, `ci_state_tests.rs`, `releases_http_tests.rs`, `rust-ci-runner/alerts/factory-ci.yaml`, `rust-ci-runner/scripts/open-artifact.sh` with `rust-ci-runner/scripts/test-open-artifact.sh`, and the spec artifacts.
 
 ### Changed
 
@@ -189,12 +200,14 @@ The hostname is the container id under the workflow's `docker run` (no `--hostna
 | `main.rs` | `decrypt-artifact`; `run_ci` installs the signal handler; usage text. |
 | `util.rs` | `parse_http_date`. |
 | `.factory-ci.toml` | Two process groups and the `--skip` flags. |
-| `Cargo.toml`, `Cargo.lock` | 0.4.0; `ring`, `memchr`, `libc`, `miniz_oxide`; two new lock entries by hand. |
+| `Cargo.toml`, `Cargo.lock` | 0.4.0 (then 0.4.1); `ring`, `memchr`, `libc`, `miniz_oxide`; two new lock entries by hand. |
+| `rust-ci-runner/tests/no_vendor.rs` | Allow `vault.rs` (0.4.1). |
+| `rust-ci-runner/Dockerfile` | 0.4.1: Node, the `bw` bundle, wrapper, `RUN bw --version` (the only edit to an existing non-Rust file of `rust-ci-runner/`). |
 | `README.md`, `rust-ci-runner/README.md` | Docs last. |
 
 ### Not changed
 
-`ship.rs` keeps its interface. No file under `.github/` changes, and neither does `rust-ci-runner/Dockerfile` (owner rule). `job.rs` changes minimally: `run_pipeline` builds `RunCtx` itself with a fixed 30-minute deadline, so it gains one `RunExtras { deadline: Instant, hook: Option<&dyn StepHook> }` argument (it already carries `#[allow(clippy::too_many_arguments)]`); `local` and `job` pass the old 30-minute deadline and no hook.
+`ship.rs` keeps its interface. No file under `.github/workflows/` or `.github/scripts/` changes (owner rule). `job.rs` changes minimally: `run_pipeline` builds `RunCtx` itself with a fixed 30-minute deadline, so it gains one `RunExtras { deadline: Instant, hook: Option<&dyn StepHook> }` argument (it already carries `#[allow(clippy::too_many_arguments)]`); `local` and `job` pass the old 30-minute deadline and no hook.
 
 ## Data and API contracts
 
@@ -204,7 +217,7 @@ The hostname is the container id under the workflow's `docker run` (no `--hostna
 
 Precondition: 010 is merged to `main` and released (0.3.0). Names used here are 010's real ones (`wt-infra-010`, `specs/010-ci-step-secrets/tasks.md`): `REQUIRED_KEYS`, `fetch_with`, `Fetched`, `Held::take`, `StepSecrets`, `NamedError { Count { index, found }, Unusable { index } }`, `Redactor::add`, `Redactor::forms`, `Log::add_secrets`, `Log::secret_forms`, `Log::longest_secret`, `WatchEntry::secrets_allowed_on`, `Args`. If a name differs after 010 lands, follow 010. Do not assume a `FAULTS` length.
 
-Order. T001 first, alone (skeleton, dependencies, lock, and the `Releases` trait with its types). T002 to T004 and T009 (tests first) run in parallel after T001; T005 (the fake and the HTTP tests) runs after T001, and T006, T007, T008 run after T005 because they use `FakeReleases`. T011 to T021 (code) run in parallel after T001 and their own tests, except: T014 before T015, T016, T017; T018 before T015 and T017 (the cancel flag, the kill seam and the hook); T013 before T017 and T020; T015 before T020 (the signal install); T019 after T011 to T018; T021 after T019 and T020. T024 (gate and tag) follows the checkpoint. T038 (docs) is last. T010, T022, T023 and T025 to T037 are dropped by the owner rule (table below).
+Order. T001 first, alone (skeleton, dependencies, lock, and the `Releases` trait with its types). T002 to T004 and T009 (tests first, 0.4.0) run in parallel after T001; T005 (the fake and the HTTP tests) runs after T001, and T006, T007, T008 run after T005 because they use `FakeReleases`. T011 to T021 (code) run in parallel after T001 and their own tests, except: T014 before T015, T016, T017; T018 before T015 and T017 (the cancel flag, the kill seam and the hook); T013 before T017 and T020; T015 before T020 (the signal install); T019 after T011 to T018; T021 after T019 and T020. T024 (gate and tag) follows the checkpoint; T027 and T028 after T024; T039 (tick variable) after T024. Phase 5 (0.4.1, T032 to T036) starts after T024: T032 and T034 in parallel; T033 after T032; T035 after T032 to T034; T036 after T035; T039 repeats after T036. T038 (docs) is last. T010, T022, T023, T025, T026, T029, T030, T031 and T037 are dropped (table below).
 
 ### T001 Skeleton, dependencies, lock
 - Goal: new empty modules compile; dependencies and lock proved alone; the `Releases` trait exists for the tests.
@@ -269,9 +282,9 @@ Order. T001 first, alone (skeleton, dependencies, lock, and the `Releases` trait
 ### T019 Wire `ci` (FR-005, FR-006 to FR-009, FR-019 to FR-027, FR-045, FR-049 to FR-055, FR-059, FR-061)
 - Goal: `ci` runs D7, resolves its attempt and image (D19), and the job-limit constant holds.
 - Files: `ci.rs`, `stateful.rs`.
-- Acceptance: the order of D7, each fault with its exact line, exit code 1, no container on a refusal. `ci` has no `--entry` flag; names carry the entry `0`. `identity` returns `private`. The deadline of D16 with `JOB_LIMIT` 45 minutes. D19: attempt and image from `inspect_self`, environment overrides win, `runner fault` before any ticket when the image is missing in a stateful run, no `inspect` call in a stateless run. `stateful.rs` runs restore, the pipeline with the hook, `own_paths`, artifacts, save, release. A scan refusal makes exit 1 and does not stop the state save. Artifacts run when the pipeline did not pass and a step started, or `when = "always"`. A validated vault declaration ends `vault unavailable` before a ticket and a container.
+- Acceptance: the order of D7, each fault with its exact line, exit code 1, no container on a refusal. `ci` has no `--entry` flag; names carry the entry `0`. `identity` returns `private`. The deadline of D16 with `JOB_LIMIT` 45 minutes. D19: attempt and image from `inspect_self`, environment overrides win, `runner fault` before any ticket when the image is missing in a stateful run, no `inspect` call in a stateless run. `stateful.rs` runs restore, the pipeline with the hook, `own_paths`, artifacts, save, release. A scan refusal makes exit 1 and does not stop the state save. Artifacts run when the pipeline did not pass and a step started, or `when = "always"`. In 0.4.0 a validated vault declaration ends `vault unavailable` before a ticket and a container; 0.4.1 reads it (T035).
 - Also: before any line that can carry a value (steps 1 to 5 print fixed text) and before any store call, call `log.add_secrets` with the state token, the state and artifact keys, the store repo name and `base64("x-access-token:" + token)` (FR-061); read the budget end through `Seams.timing`, not `std::env`; pass the cancel flag to the renewal thread. A test reads `.github/workflows/factory-monorepo-ci.yml` through `CARGO_MANIFEST_DIR` (read only) and asserts its `timeout-minutes` equals `JOB_LIMIT`; if the pipeline checkout does not hold that file, report it and keep the README line as the only guard.
-- Constraints: state token and keys reach only `releases.rs` and `seal.rs`. New data goes into `Args`. No `set_var`. No file under `.github/` is written.
+- Constraints: state token and keys reach only `releases.rs` and `seal.rs`. New data goes into `Args`. No `set_var`. No file under `.github/workflows/` or `.github/scripts/` is written.
 
 ### T020 `main.rs` (FR-033)
 - Goal: `decrypt-artifact` and the signal handler.
@@ -289,8 +302,56 @@ Order. T001 first, alone (skeleton, dependencies, lock, and the `Releases` trait
 ### T024 Gate and tag (FR-038)
 - Goal: a published 0.4.0 image and digest.
 - Files: none.
-- Acceptance: T001 to T021 are on `main`, `make lint` and the unchanged selftest pass, the `rust-ci-runner` pipeline passed on that commit (run id and SHA equal), the existing release workflow finished with its smoke step, the digest is verified by `docker pull`, and the digest is recorded in the README release checklist line.
-- Constraints: the owner or lead pushes the tag; never move a tag. Nothing pins the digest (owner rule).
+- Acceptance: T001 to T021 are on `main`, `make lint` and the unchanged selftest pass, the `rust-ci-runner` pipeline passed on that commit (run id and SHA equal), the existing release run finished with its smoke step, the digest is verified by `docker pull`, and the sha256 of `rust-ci-runner-x86_64-linux` is recorded.
+- Constraints: the owner or lead pushes the tag; never move a tag. Nothing pins the digest in the manual workflow (owner rule).
+
+### T027 Alert rules (FR-057)
+- Goal: a silent system never reads as healthy.
+- Files: `rust-ci-runner/alerts/factory-ci.yaml`, `rust-ci-runner/src/ci_state_tests.rs`.
+- Acceptance: the rules of D10 with no-data Alerting; every string matches contracts/loki-lines.md or `FAULTS`; a Rust test reads the file through `CARGO_MANIFEST_DIR` and the contract and asserts each string is in both; no webhook URL.
+- Constraints: names and labels only; the file is not under `.github/`. After T024.
+
+### T028 Agent script (FR-033, D15)
+- Goal: one hardened command for the debug agent.
+- Files: `rust-ci-runner/scripts/open-artifact.sh`, `rust-ci-runner/scripts/test-open-artifact.sh`, `rust-ci-runner/.factory-ci.toml` (one step that runs the test).
+- Acceptance: as D15, plus a shell test with a fake binary of a wrong sha, an empty-directory extraction and control-character stripping.
+- Constraints: shellcheck-clean; never prints the key; both scripts live under `rust-ci-runner/scripts/`, never under `.github/scripts/`. After T024.
+
+### Phase 5, runner 0.4.1 (vault)
+
+### T032 Vault tests (FR-042 to FR-047, FR-056, SC-007)
+- Goal: tests first for the vault read.
+- Files: `vault_tests.rs` (fake `bw` script), additions to `ci_state_tests.rs`, `lib.rs` (`vault`, `vault_tests`).
+- Acceptance: the tests listed under "Test plan, 0.4.1".
+
+### T033 Vault read (FR-044 to FR-047, FR-056)
+- Goal: read only the declared fields and leave nothing behind.
+- Files: `vault.rs`, `tests/no_vendor.rs`.
+- Acceptance: D3's sequence with 60 s per call and one retry of the whole sequence on a timeout or crash, never after a rejected credential; exactly-one login item per name by exact bytes; fields `username`, `password`, `uri`, custom; values with NUL or a trimmed line under 4 characters (4 passes) are `Unavailable`; data dir 0700 removed and checked; items outside the allowlist, a set `FACTORY_CI_BWS_SERVER_URL`, or any failure end `vault unavailable`; errors and logs hold positions and counts only; the session key joins the redactor.
+- Constraints: no item or field name in argv, a file or a log; each call gets only its own variables.
+
+### T034 Image (FR-044)
+- Goal: `bw` runs in the image, pinned.
+- Files: `rust-ci-runner/Dockerfile` only. The release workflow is not edited, so there is no smoke step.
+- Acceptance: `ADD --checksum=sha256:43401c3e27cb009a28035dc8f9bea43ae78880e0549490762542f55af0e6b2e3` of `bitwarden-cli-2026.10.1-npm-build.zip` in a throwaway stage; files copied to `/opt/bw`; `apk add nodejs`; the `bw` wrapper; `ARG TARGETARCH` and `RUN bw --version || [ "$TARGETARCH" != amd64 ]`, so the amd64 build fails on a broken `bw` and the arm64 build under QEMU does not; the unchanged selftest builds the image on the branch and proves it; measured size and pull time in the PR.
+- Constraints: if `bw --version` fails under Node 24, stop and report; do not switch to the glibc binary without a plan change. Do not edit any workflow.
+
+### T035 Wire the vault and release 0.4.1
+- Goal: replace the 0.4.0 refusal with the read in `ci`.
+- Files: `ci.rs`, `stateful.rs`, `engine.rs`, `Cargo.toml`, `Cargo.lock`.
+- Acceptance: a validated declaration reads the vault inside the queue turn (or before the pipeline when there is no `[state]`), values go into the separate `(item, field)` map, `run_step` exports each step's own entries from it, the log learns the values before any line, version `0.4.1`; `job` and `local` keep refusing a vault declaration (FR-062).
+- Constraints: a sibling step never gets a value.
+
+### T036 Tag 0.4.1
+- Goal: a published 0.4.1 image and digest.
+- Files: `rust-ci-runner/scripts/open-artifact.sh` (the pinned sha256 of the new binary, in its own commit after the tag).
+- Acceptance: as T024 for 0.4.1; nothing pins it in the manual workflow; the agent script's pinned sha256 matches the 0.4.1 binary.
+
+### T039 Tick variable (FR-038, D20)
+- Goal: the tick runs the new binary and nothing else changes.
+- Files: none. The change is the repository variable `RUNNER_IMAGE_DIGEST`.
+- Acceptance: the owner (or an agent the owner approves in writing for this run) first records the current value (`gh variable get RUNNER_IMAGE_DIGEST`, a digest, not a secret) in the pull request; after T024 sets `gh variable set RUNNER_IMAGE_DIGEST --body sha256:<digest>` to the digest verified in T024; waits for or dispatches one tick; expects `plan` to report `fail_tick=0`, the same commit statuses (`factory-ci`, `factory-ci/<project>`) as the tick before the bump and no new public line. On any failed status: `gh variable set RUNNER_IMAGE_DIGEST --body <recorded old digest>` and report. The same task repeats with the 0.4.1 digest after T036.
+- Constraints: a variable change only; no file edit; the digest must belong to a published `rust-ci-runner-v0.4.x` tag; feature 012 relies on the tick, so tell the owner before the bump; no secret printed.
 
 ### Dropped by the owner rule
 
@@ -298,22 +359,20 @@ IDs stay reserved so references hold. None of these is built.
 
 | ID | Was | Why dropped |
 |---|---|---|
-| T010 | shell-test updates for cron lines | script edit |
+| T010 | shell-test updates for cron lines | `.github/scripts` edit |
 | T022 | retire the tick | reversed, the tick stays |
 | T023 | rewrite `factory-monorepo-ci.yml` | workflow edit |
-| T025 | pin 0.4.0 in the workflow | workflow edit |
+| T025 | pin the release in the manual workflow | workflow edit |
 | T026 | no-secret canary through the new pin | needs the pin |
-| T027 | alert-rule YAML | YAML file, owner builds rules in Grafana |
-| T028 | `open-artifact.sh` | shell script |
-| T029 | owner actions and release canary on the real store | needs the pin to run a real `ci`; the owner actions stay listed below for the day the rule lifts |
-| T030 | watch entry and first cron line | pinned runner and tick `plan` refuse the keys; cron is a workflow edit |
+| T029 | owner actions and release canary on the real store | needs a real `ci` run, which needs the pin; the owner actions stay listed below for that day |
+| T030 | watch entry and first cron line | the pinned `ci` runner refuses the keys; cron is a workflow edit |
 | T031 | first real run | needs the pin and T030 |
-| T032 to T037 | vault tests, read, image, wiring, 0.4.1 release, owner vault actions | Dockerfile and workflow edit |
+| T037 | vault owner actions and first vault run | needs a real `ci` run |
 
 ### T038 Docs (FR-041), last
 - Goal: both READMEs and the repo description match.
 - Files: `README.md`, `rust-ci-runner/README.md`, `gh repo edit`.
-- Acceptance: they state what FR-041 lists, including the release checklist line (the image digest), the `state restore failed` runbook, the S5 wording (a state step should not follow an install step that runs package scripts), that the state step runs as root, that `queue wait expired` is the one runner-side drop and the wait is 5 minutes, that the concurrency group stays, that the tick stays, what 011 leaves out and why (schedule, vault read, pin, alert and agent files), the Grafana rules to build by hand, the `decrypt-artifact` command and the agent kit, and the accepted risks. No value appears.
+- Acceptance: they state what FR-041 lists, including the release checklist line (image digest, agent script sha, the tick variable), the `state restore failed` runbook, the S5 wording (a state step should not follow an install step that runs package scripts), that the state step runs as root, that `queue wait expired` is the one runner-side drop and the wait is 5 minutes, that the concurrency group and the tick stay, what 011 leaves out and why (schedule, manual pin, watch keys), the Grafana rules, the `decrypt-artifact` command and the agent kit, and the accepted risks. No value appears.
 - Also: the README says that traces from logged-in runs may be refused by the scan and that this is by design; that a burst of renewals at the secondary rate limit can trigger `queue renewal failed`, which an alert covers; that a late winner has a minimum pipeline window of 10 minutes; and that a step on reviewed `main` code could print a transformed secret (accepted).
 - Constraints: stop-slop applies.
 
@@ -339,9 +398,19 @@ IDs stay reserved so references hold. None of these is built.
 | T009 | `ci_state_tests.rs` (own group) | `counter_pipeline_sees_0_1_2_across_three_runs`; `four_runs_of_one_state_never_overlap_and_all_run`; `entry_flag_does_not_exist` (`--entry` is `bad arguments`); `repo_outside_the_watch_list_exits_1`; `state_not_allowed_for_public_repo_and_entry_without_state_true`; `ref_gate_refuses_state_vault_and_artifacts_off_main`; `missing_store_settings_end_before_a_ticket`; `restore_failure_starts_no_container_and_releases_the_ticket`; `validated_vault_declaration_ends_vault_unavailable`; `vault_item_not_allowed_never_reads`; `failing_step_uploads_one_artifact_and_loki_names_it`; `passing_run_with_when_failure_uploads_nothing`; `scan_refusal_fails_a_passing_run_and_still_saves_state`; `artifact_upload_failure_keeps_the_exit_code`; `hostile_fixture_leaks_nothing` (canaries for all thirteen runner keys, state strings; stdout, stderr, every child argv and variable set, every Loki body, every asset); `stderr_lines_are_all_in_faults_and_the_nine_are_members`; `stdout_adds_only_waiting_for_the_queue`; `no_state_pipeline_registers_nothing`; `existing_pipelines_run_unchanged`; `one_bws_call_per_run`; `every_loki_string_of_the_contract_is_emitted` | all stories, FR-029 to FR-031, FR-048, FR-051 to FR-060 |
 | T009 (owner rule) | `ci_state_tests.rs`, `job_tests.rs` | `attempt_comes_from_the_container_name`; `attempt_falls_back_to_the_environment_then_1`; `image_comes_from_inspect_and_the_environment_wins`; `failed_inspect_or_empty_image_ends_runner_fault_before_a_ticket_in_a_stateful_run`; `stateless_run_never_calls_inspect`; `job_limit_equals_the_workflow_timeout` (reads the workflow read-only); `tick_path_runs_a_state_pipeline_without_store_calls_restore_save_or_bundle`; `tick_path_state_step_sees_no_file`; `tick_path_refuses_a_vault_declaration_with_vault_unavailable` | FR-005, FR-039, FR-045, FR-062, D19 |
 
-### 0.4.1 (out of scope)
+### 0.4.1
 
-The vault read, the `bw` image and their tests (old T032 to T035) are not built. The only vault tests are in the 0.4.0 table above (declaration check, allowlist, refusal in `ci`, `job` and `local`).
+| ID | File | Tests | FR |
+|---|---|---|---|
+| T032 | `vault_tests.rs` (fake `bw`) | `sequence_is_login_unlock_list_logout`; `each_call_gets_only_its_own_variables`; `no_item_or_field_name_in_argv`; `list_runs_with_org_and_collection_ids_and_no_interaction`; `reads_each_declared_field_once`; `item_matching_zero_or_two_logins_is_unavailable`; `item_outside_the_allowlist_is_unavailable`; `case_difference_does_not_match`; `missing_empty_nul_and_3_char_line_unavailable_4_passes`; `data_dir_is_0700_and_gone_before_return`; `failed_logout_or_removal_is_unavailable`; `retry_once_on_timeout_not_on_rejected_credential`; `bws_server_url_set_ends_unavailable`; `errors_and_logs_hold_positions_and_counts_only`; `unicode_space_and_equals_in_item_names_match_by_bytes` | FR-044 to FR-047, FR-056 |
+| T032 | `ci_state_tests.rs` | `vault_values_reach_only_the_declaring_step`; `sibling_step_environment_holds_no_vault_value_or_state_file`; `step_dumping_env_and_files_sees_only_declared_vars_and_no_bw_data`; `vault_unavailable_starts_no_container`; `vault_values_join_the_log_before_any_line`; `vault_values_are_in_the_scan_set` | US6, SC-007 |
+
+### Alerts and agent script
+
+| ID | File | Tests | FR |
+|---|---|---|---|
+| T027 | `ci_state_tests.rs` | `alert_rules_cite_only_strings_of_the_loki_contract_or_faults`; `every_fault_and_queue_string_has_a_rule` | FR-057 |
+| T028 | `scripts/test-open-artifact.sh` | `wrong_sha_binary_is_not_run`; `extraction_goes_to_a_new_empty_directory`; `control_characters_are_stripped`; `key_never_printed` | FR-033 |
 
 ## Failure modes
 
@@ -366,10 +435,13 @@ The vault read, the `bw` image and their tests (old T032 to T035) are not built.
 | save | upload, size or fence fails | `state::save` | `state save failed`, new asset deleted, old state kept | T008 |
 | exit | SIGINT, SIGTERM, panic | watcher, drop guard | ticket deleted first within 5 s, exit 1 | T006 |
 | exit | ticket delete fails | next waiter | stale rule frees it in 10 minutes | T006 |
-| vault | any validated vault declaration (`ci`, `job`, `local`) | pipeline check | `vault unavailable`, no ticket, no container | T009 |
+| vault (0.4.0) | any validated vault declaration (`ci`, `job`, `local`) | pipeline check | `vault unavailable`, no ticket, no container | T009 |
+| vault (0.4.1) | `bw` hangs, rejected, 0 or 2 matches, outside item, server URL set | `vault::read` | `vault unavailable`, no container, dir removed | T032 |
+| image (0.4.1) | `bw` does not run on Node 24 | `RUN bw --version` in the Dockerfile | build fails; no release | T034 |
 | own container | `docker inspect` fails, name does not parse, image empty | `inspect_self` | attempt falls back; a stateful run ends `runner fault` before a ticket | T009 |
-| rollout | someone adds `state` keys to the watch file before the pinned runner knows them | the pinned `ci` runner and the tick's `plan` refuse unknown keys | every run of that entry fails | not done in 011 (FR-040); R5 |
+| rollout | someone adds `state` keys to the watch file while the manual pin is old | the pinned `ci` runner refuses unknown keys | every manual run of that entry fails | not done in 011 (FR-040); R5 |
 | job limit | someone edits `timeout-minutes` of the workflow | Rust test of the constant | red test, owner updates `JOB_LIMIT` | T009 |
+| tick bump | the new binary breaks `job` or `plan` | the first tick's statuses and `fail_tick` | `gh variable set RUNNER_IMAGE_DIGEST` with the recorded old digest | T039 |
 
 ## Pre-mortem
 
@@ -378,7 +450,7 @@ Assume it shipped and broke. The five likeliest causes:
 1. Two runs of one state overlap. Causes: a lagging list hides an older ticket, a slow upload, a stale break of a live holder. Prevented: in-flight rule (120 s), settle re-list, overlap log at every renewal, 600 s stale rule on server time, the fence before and after the save, race tests with a lag switch, and the 200-trial canary with two racing runners. O12 stays open.
 2. A secret lands in an artifact, a log or the store. Prevented: the scan reads every zip member (`trace.network` included) against all `secret_forms` plus the state strings, refuses unreadable formats and `.html` members, the state never enters a bundle, two keys with domain separation, the real-trace canary, the hostile fixture over every sink.
 3. The state file reaches a step that must not see it, or a runner file leaves through a symlink. Prevented: one declaring step with an ordering rule, a hook that removes the file, canonical path checks with `O_NOFOLLOW|O_NONBLOCK`, a pre-seal scan, a `/proc/self` test.
-4. The release breaks: the hand-edited lock disagrees, or the new runner meets a workflow it does not expect (45-minute limit, no attempt variable, group kept). Prevented: T001 alone on a branch under `--locked`, D19 (own attempt and image), the job-limit constant and its test, the budget numbers of D16, and no pin or workflow change at all.
+4. The release breaks: the hand-edited lock disagrees, the new runner meets a workflow it does not expect (45-minute limit, no attempt variable, group kept), or the tick bump breaks the live tick. Prevented: T001 alone on a branch under `--locked`, D19 (own attempt and image), the job-limit constant and its test, the budget numbers of D16, the tick-path tests of FR-062 before the bump, and T039 (old digest recorded, one tick watched, one-command rollback). No workflow file changes.
 5. Runs wait too long or are dropped: a long holder makes a waiter expire, GitHub's group cancels a pending run, or a ticket starves. Prevented: a 5-minute wait ends in `queue wait expired` with an alert the owner builds in Grafana, renewals never pause, the group is documented (R4) and nothing pretends the queue recovers a cancelled run.
 
 ## Invariants (qa turns these into property tests)
@@ -398,19 +470,19 @@ Assume it shipped and broke. The five likeliest causes:
 - I13: the state key opens no artifact and the artifact key opens no state asset.
 - I14: no file written by the runner for state or artifacts is world-readable.
 - I15: the tag mapping `(repo, project, state)` to a tag is injective.
-- I16: out of scope with the vault read.
+- I16 (0.4.1): a vault value reaches only the step that declared its `(item, field)`; after the read no `bw` process, session or data dir exists.
 - I17: one `bws` call per run.
 - I18: `JOB_LIMIT` equals the `timeout-minutes` of `factory-monorepo-ci.yml`; the wait end, the deadline and the budget end derive from it only.
 - I19: the tick path (`job`, `local`) makes no store call and writes no state or artifact, for any pipeline.
-- I20: no file under `.github/` or `rust-ci-runner/Dockerfile` differs from `main` on the feature branch.
+- I20: no file under `.github/workflows/` or `.github/scripts/` differs from `main` on the feature branch.
 
 ## Edge-case checklist (feiyi-edge-cases) answered for this plan
 
-- Inputs: handled. Empty and maximum: 64-char names, 20 paths, 20 vault fields, 10 MB and 100 MB bounds, n and n+1 tests (T004, T007, T008). Duplicates: same item twice, same run id twice. Unicode, NUL, newline: path and name rules, item names by bytes (T004). Malformed: tampered or truncated asset (T003, T008).
+- Inputs: handled. Empty and maximum: 64-char names, 20 paths, 20 vault fields, 10 MB and 100 MB bounds, n and n+1 tests (T004, T007, T008). Duplicates: same item twice, same run id twice. Unicode, NUL, newline: path and name rules, item names by bytes (T004, T032). Malformed: tampered or truncated asset (T003, T008); a `bw` list that is not JSON is `vault unavailable`.
 - State: handled. First run (`first_run_has_no_state_and_no_file`). Older format: none; the magic leaves room for a version. Crash mid-operation: stale rule, two assets after a crash, the newest wins, a half upload is not `uploaded` and is deleted after 120 s. Partial failure: the table above. Retry: a rerun replaces its ticket, asset names are unique, deletes are idempotent (404 is gone).
-- Time and concurrency: handled. Races in T006. Timeouts on every GitHub call. Clock: age from the server `Date`. Boundaries: 119 and 120 s, 599 and 600 s, label 120 and 121 s ahead. A duplicated dispatch queues and runs twice, inside the limits of the concurrency group. Late and out-of-order events: stable order by asset id.
+- Time and concurrency: handled. Races in T006. Timeouts on every GitHub and `bw` call. Clock: age from the server `Date`. Boundaries: 119 and 120 s, 599 and 600 s, label 120 and 121 s ahead. A duplicated dispatch queues and runs twice, inside the limits of the concurrency group. Late and out-of-order events: stable order by asset id.
 - Resources: handled with limits. Disk: bundles and ciphertext under `--work`, not the 64 MB `/tmp`. Large input: chunked crypto, streamed scan, caps of 10 MB, 100 MB, 500 MB, 10,000 entries. Slow or garbage dependency: one retry, a bounded pause, then a fixed fault. Growth: 2 state assets, 10 bundles, at most 300 assets listed; the queue itself has no cap, so tickets grow only with waiting runs and each is deleted at its run's end. Memory: 64 KiB chunks, a 64 KiB scan buffer, nested zips at most 64 MB, state at most 10 MB.
-- Permissions and trust: handled. The state token reaches `releases.rs` only (scoped to the store repo); keys reach `seal.rs`; nothing reads vault credentials. The pipeline author cannot name a release, a repo, a setting or a credential, cannot widen the entry (a reviewed file on `main`), and cannot see the state file outside its one step. The agent holds the artifact key, a Loki token and a read token for the store repo, nothing else.
+- Permissions and trust: handled. The state token reaches `releases.rs` only (scoped to the store repo); keys reach `seal.rs`; vault credentials reach `vault.rs` (0.4.1). The pipeline author cannot name a release, a repo, a setting or a credential, cannot widen the entry (a reviewed file on `main`), and cannot see the state file outside its one step. The agent holds the artifact key, a Loki token and a read token for the store repo, nothing else.
 - UI: N/A. No UI; the surface is the fixed stdout and stderr lines.
 
 ## Rollout and rollback
@@ -419,24 +491,28 @@ Rollout:
 
 1. T001 lands alone on a branch (proves the lock). T002 to T021 land on `main` through a pull request linked to this folder; the unchanged selftest and `make lint` pass; the `rust-ci-runner` pipeline passes on `main`.
 2. T024: tag `rust-ci-runner-v0.4.0`; read the digest.
-3. T038: docs.
-4. Nothing else. The pin, the watch file and the workflow do not change, so no real run uses 0.4.0 until the owner lifts the rule or moves the pin by hand. When that happens the order is: pin (its own reviewed commit, on a branch first so the selftest runs), Bitwarden keys and the store repo, then the watch entry keys, then the pipeline (R9). The old canaries (quickstart sections 2 and 3) run at that point.
+3. T027, T028 (alert rules, agent script). T039: record the old tick digest, set the new one, watch one tick.
+4. Phase 5: T032 to T035, then T036 (tag 0.4.1, update the agent script's pinned sha), then T039 again with the 0.4.1 digest.
+5. T038: docs.
+6. Nothing pins the manual workflow, and the watch file does not change, so the queue, state, artifacts and vault read stay inert until the owner moves that pin (spec R5). When that happens the order is: pin (its own reviewed commit, on a branch first so the selftest runs), Bitwarden keys and the store repo, then the watch entry keys, then the pipeline (R9). The old canaries (quickstart sections 2 and 3) run at that point.
 
-Rollback: revert the Rust commits. The released image stays in the registry and is not pinned; nothing here pulls `latest`. If the owner has moved the pin later, the order is: remove the watch keys first (or in the same commit as the pin revert), then revert the pin, because a pinned runner without 0.4.0 refuses unknown keys. Queue, state and artifact releases stay in the store repo; they are encrypted or empty. Fixes ship as the next patch version; never move or delete a tag. Rotate the nine new settings if a leak is suspected and revoke the state token.
+Rollback: if the tick variable moved, set the recorded old digest back first (`gh variable set RUNNER_IMAGE_DIGEST --body <old>`), then revert the Rust and `Dockerfile` commits. The released images stay in the registry; nothing here pulls `latest`. If the owner has moved the manual pin later, remove the watch keys first (or in the same commit as the pin revert), then revert the pin, because a pinned runner without these keys refuses them. Queue, state and artifact releases stay in the store repo; they are encrypted or empty. The release workflow moves `:latest` on each tag; moving it back needs owner approval (`docker buildx imagetools create --tag ghcr.io/sudtanj/rust-ci-runner:latest ghcr.io/sudtanj/rust-ci-runner@<previous digest>`). Fixes ship as the next patch version; never move or delete a tag. Rotate the nine new settings if a leak is suspected and revoke the state token.
 
 ## Owner actions
 
-Done by the owner, never by an agent, when the rule is lifted or the pin moves. No value is written in any file.
+Done by the owner, never by an agent (T039 may be run by an agent the owner approves). No value is written in any file. Items 1 to 9 matter once the manual pin moves.
 
 1. Create the store repo: private, no code, no workflows, no tag rulesets that block creation, immutable releases off, branch protection on its default branch (administrators included), and one initial README commit.
 2. Create a fine-grained token scoped to the store repo only (contents write); put its expiry on a calendar.
-3. Create Bitwarden entries for the four state settings: `FACTORY_CI_STATE_TOKEN`, `FACTORY_CI_STATE_KEY`, `FACTORY_CI_ARTIFACT_KEY`, `FACTORY_CI_STATE_REPO`. The two keys come from `openssl rand -base64 33`, different values. The five vault names stay unset.
-4. The debug agent gets only the artifact key, a Loki read token limited to this tenant and step `ci`, and a GitHub read token scoped to the store repo. No write tools; egress to GitHub and Loki only.
-5. In `sudtanj/factory-monorepo`: branch protection on `main` (reviews, no direct pushes, administrators included); a non-secret fixture for failure drills; the 002 pipeline keeps the Playwright HTML reporter off.
-6. Build the Grafana alert rules by hand from `contracts/loki-lines.md` and attach a contact point.
-7. Calendar item: state token expiry.
-8. Run the release canary (quickstart section 2), including the real Playwright failure trace, before the first real run.
-9. Decide whether to lift the owner rule for the deferred items: pin, schedule, vault read, alert and agent files.
+3. Create Bitwarden entries for the nine new settings: `FACTORY_CI_STATE_TOKEN`, `FACTORY_CI_STATE_KEY`, `FACTORY_CI_ARTIFACT_KEY`, `FACTORY_CI_STATE_REPO`, and (before 0.4.1 is used) `FACTORY_CI_VAULT_CLIENTID`, `FACTORY_CI_VAULT_CLIENTSECRET`, `FACTORY_CI_VAULT_PASSWORD`, `FACTORY_CI_VAULT_ORGID`, `FACTORY_CI_VAULT_COLLECTIONID`. The two keys come from `openssl rand -base64 33`, different values.
+4. Before the vault is used: the dedicated Bitwarden account in an organization that sees one collection; login items there with opaque names (`ci-login-1`).
+5. The debug agent gets only the artifact key, a Loki read token limited to this tenant and step `ci`, and a GitHub read token scoped to the store repo. No write tools; egress to GitHub and Loki only.
+6. In `sudtanj/factory-monorepo`: branch protection on `main` (reviews, no direct pushes, administrators included); a non-secret fixture for failure drills; the 002 pipeline keeps the Playwright HTML reporter off.
+7. Import `rust-ci-runner/alerts/factory-ci.yaml` into Grafana and attach a contact point.
+8. Calendar items: state token expiry, a review of each Bitwarden CLI release.
+9. Run the release canary (quickstart section 2), including the real Playwright failure trace, before the first real run.
+10. Decide on the manual pin: until it moves, the queue, state, artifacts and vault read stay inert.
+11. The tick variable (T039): tell feature 012's owner before the bump; keep the old digest.
 
 ## Devops assessment
 
@@ -444,7 +520,7 @@ Done by the owner, never by an agent, when the rule is lifted or the pin moves. 
 
 Findings from the lead's devops review of 11d2ef0 and the critic review of faa835f, with their handling after the critic decisions.
 
-Amendment of 2026-11-28 (owner rule): these rows change. Cron slack, concurrency cap, the 190-minute margin, the reviewer on `factory-ci`, `due`, image size and the arm64 smoke no longer apply (no schedule, no workflow edit, no Node). Tick still deployed: kept on purpose, the tick is not touched. Rollback order: now a Rust revert. Monitoring: Loki contract and tests stay, the alert file moves to Grafana by hand. Budget: 45-minute limit, budget 35 minutes, wait ends at budget minus 30 (D16).
+Amendment of 2026-11-28 (owner rule and its correction): these rows change. Cron slack, the concurrency cap and the 190-minute margin no longer apply (no schedule, no workflow edit); the reviewer on `factory-ci` and `due` no longer apply. Image size and the arm64 smoke still apply to 0.4.1, with the blocking check now `RUN bw --version` in the Dockerfile (amd64 blocks, arm64 does not). Tick still deployed: kept on purpose, and it moves to the new runner by the repository variable (T039). Rollback order: set the old tick digest, then revert the commits. Monitoring: Loki contract, tests and the alert file all stay. Budget: 45-minute limit, budget 35 minutes, wait ends at budget minus 30 (D16).
 
 | Finding | Handling | Where |
 |---|---|---|
@@ -463,11 +539,11 @@ Amendment of 2026-11-28 (owner rule): these rows change. Cron slack, concurrency
 | Concurrency cap | At most 3 cron lines; with no ticket cap, waiting VMs are R7 | D5, spec R7 |
 | Tick still deployed | Kept on purpose after the owner rule: the tick is not touched (FR-060) | D17 |
 | Reviewer on `factory-ci` holds scheduled runs | Owner decision with a recommendation | D18 |
-| Staged scope | One release, 0.4.0, no Node; the vault read is out of scope | Summary |
+| Staged scope | 0.4.0 without Node; 0.4.1 adds the vault | Summary |
 
 ## Security assessment
 
-Amendment of 2026-11-28 (owner rule): the `bw list` row and the vault parts of the agent-kit and allowed-branch rows are deferred with the vault read. The agent kit is the README commands, not a script; the pinned-script control is gone, so the README says the runner binary comes from the pinned image and artifacts are untrusted data. The tick path never holds store settings (FR-062).
+Amendment of 2026-11-28 (owner rule and its correction): every row stays, because the vault read, the agent script and the alert file are back in scope. The tick path never holds store settings or vault credentials (FR-062, D20); the tick bump (T039) changes only which binary runs `job` and `plan`.
 
 | Finding | Handling | Where |
 |---|---|---|
@@ -491,24 +567,25 @@ Amendment of 2026-11-28 (owner rule): the `bw list` row and the vault parts of t
 ## Open risks
 
 - O1: three GitHub behaviours are not proven here: a duplicate asset name is a 4xx, `PATCH` accepts `label`, asset ids rise. The canary checks them before the first real run. A failing label update is a plan change (observer-side monotonic age).
-- O2: `bw list items` and the collection-limited account belong to the deferred vault read.
+- O2: `bw list items` returns every item the account sees in its collection; the collection-limited account is an owner action, and an outside item fails closed (0.4.1).
 - O3: HKDF assumes machine-made keys; the format check and the README (`openssl rand -base64 33`) are the control. PBKDF2 is the alternative.
 - O4: a store outage at registration prints `state store not configured` and logs the cause.
 - O5: the secondary limit of 500 content-generating requests per hour caps sustained live tickets at about eight.
 - O6: scanning `FACTORY_CI_LOG_USER` (numeric) can refuse a bundle that holds those digits by chance (R11).
 - O7: a state step that never writes the file leaves nothing captured, so the old state stays.
-- O8: no Node in the image (deferred with the vault read).
-- O9: the agent opens bundles with `decrypt-artifact` from the pinned image; there is no pinned-hash script.
+- O8: `nodejs` comes from Alpine 3.23's index (0.4.1); `bw --version` at build time catches a break.
+- O9: the agent opens bundles with the pinned-hash script; the hash is written at T024.
 - O10: the 002 pipeline must order its steps so the state step has no parallel sibling.
 - O11: a token expiry shows only as `state store not configured`; the alert rules and a calendar item guard it.
 - O12: a canary of 200 trials proves read lag is rare, not absent; overlapping runs still cannot corrupt state, because each save checks its fence.
 - O13: a ticket that is broken and registered again goes to the back; accepted residual (FR-011).
 - O14: a duplicated tick runs the Playwright login twice in sequence; accepted ("every run must run").
 - O15: no cron line exists, so no repo, branch or project of a schedule is public.
-- O16: 011 ships inert. The image is released and not pinned, and the watch file cannot carry `state`, so no real run uses the queue or state until the owner lifts the rule or moves the pin (spec R5).
+- O16: the queue, state, artifacts and vault read ship inert. They run only through `ci`, whose pin is a workflow line, and the watch file cannot carry `state` while the pinned runner refuses unknown keys (spec R5). The tick bump (T039) moves a live path and delivers none of them.
 - O17: the concurrency group (kept) already serializes runs of one repo, ref and project, so the queue is mostly a guard for cases the group does not see; the owner may drop US2 with no effect on state and artifacts.
 - O18: D19 relies on the container name and the docker socket of the unchanged workflow; a change there stops stateful runs with `runner fault` and turns the job-limit test red only if `timeout-minutes` changes, not the name. The name parser test documents the format.
-- O19: the Rust-only rule is read as binding workflows, scripts, YAML and the Dockerfile; the READMEs still change (FR-041).
+- O19: the ban is read as covering `.github/workflows/` and `.github/scripts/` only, per the correction of the same day; the Dockerfile, the alert YAML and the agent script are therefore in scope, and the READMEs still change (FR-041).
+- O20: T039 changes a live path that feature 012 also uses; the old digest is recorded first and the rollback is one command.
 
 ## Project Structure
 
@@ -516,12 +593,12 @@ Amendment of 2026-11-28 (owner rule): the `bw list` row and the vault parts of t
 specs/011-ci-state-queue/  spec.md plan.md research.md data-model.md quickstart.md tasks.md
   contracts/ config-files.md release-store.md asset-format.md loki-lines.md
   checklists/requirements.md
-rust-ci-runner/  Cargo.toml Cargo.lock .factory-ci.toml
-  src/  seal releases queue signal state bundle scan stateful (new), store watch pipeline redact log engine job ci main util lib fake (changed), one *_tests.rs per new module
-  tests/no_vendor.rs (unchanged)
+rust-ci-runner/  Dockerfile Cargo.toml Cargo.lock .factory-ci.toml
+  src/  seal releases queue signal state bundle scan stateful (new), vault (0.4.1), store watch pipeline redact log engine job ci main util lib fake (changed), one *_tests.rs per new module
+  alerts/factory-ci.yaml (new)  scripts/open-artifact.sh test-open-artifact.sh (new)  tests/no_vendor.rs
 ```
 
-No file under `.github/` and no `Dockerfile` changes.
+No file under `.github/workflows/` or `.github/scripts/` changes.
 
 **Structure Decision**: the existing layout; new logic in single-purpose modules, no new crate, no new directory.
 
@@ -533,4 +610,5 @@ No file under `.github/` and no `Dockerfile` changes.
 | `libc` direct dependency (already locked) | FR-009 needs SIGINT and SIGTERM handling | a stale rule alone leaves a cancelled run's ticket for 10 minutes |
 | `ring`, `memchr` direct dependencies (already locked) | AEAD, HKDF, fast substring search | new crates for the same primitives |
 | A hand-written tar writer and reader | one archive that the scanner and the decryptor both read | a `tar` crate adds a dependency for about 80 lines |
-| A separate store repo | a code-free repo limits the token | a shared repo exposes code to a content-write token |
+| Node and the `bw` bundle in the image (0.4.1, about +86 MB) | the owner chose Bitwarden Password Manager for vault logins; only the CLI reads it | the standalone binary is 143 MB, glibc-linked; a direct API client reimplements vault crypto |
+| A separate store repo, an alert-rule file and an agent script | a code-free repo limits the token; alerts catch a silent stop; the script pins what the agent runs | a shared repo exposes code to a content-write token; no alerts hides a disabled schedule; a bare command lets a swapped binary steal the key |

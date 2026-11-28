@@ -11,14 +11,14 @@ description: "Task list for the strict queue, saved state and debug artifacts of
 
 **Tests**: Required (constitution Principle V). They come first and must fail before the code exists.
 
-**Rules for everyone**: no file under `.github/` and no `rust-ci-runner/Dockerfile` changes (owner rule of 2026-11-28); `git diff --stat main -- .github rust-ci-runner/Dockerfile` is empty before every commit. no cargo, docker or builds on the agent VM (1 GB); tests run in the `rust-ci-runner` pipeline and the selftest. Never write, print or set a secret value anywhere. `git add` with explicit paths. `redact.rs`, `watch.rs`, `log.rs` and every new file must not name the vendor (`rust-ci-runner/tests/no_vendor.rs`). The state token, keys and vault credentials reach only `releases.rs` and `seal.rs`. No agent ever holds a Bitwarden credential. Use membership asserts for `RUNNER_KEYS` and `FAULTS`, never counts. New data goes into `Args`, not new parameters.
+**Rules for everyone**: no file under `.github/workflows/` or `.github/scripts/` changes (owner rule of 2026-11-28, corrected the same day); `git diff --stat main -- .github/workflows .github/scripts` is empty before every commit, and `rust-ci-runner/Dockerfile` changes only in T034. no cargo, docker or builds on the agent VM (1 GB); tests run in the `rust-ci-runner` pipeline and the selftest. Never write, print or set a secret value anywhere. `git add` with explicit paths. `redact.rs`, `watch.rs`, `log.rs` and every new file except `vault.rs` must not name the vendor (`rust-ci-runner/tests/no_vendor.rs`). The state token, keys and vault credentials reach only `releases.rs`, `seal.rs` and `vault.rs`. No agent ever holds a Bitwarden credential. Use membership asserts for `RUNNER_KEYS` and `FAULTS`, never counts. New data goes into `Args`, not new parameters.
 
 Constrained fields are defined in `data-model.md`; tasks cite them as `data-model.md` `Entity.field`.
 
 ## Format: `[ID] [P?] [Story] Description`
 
 - **[P]**: can run in parallel (different files, no unfinished dependency)
-- Stories: US1 state kept between runs, US2 strict queue, US3 schedule (dropped), US4 failure evidence, US5 nothing leaks and settings stay runner-only, US6 vault login (dropped; only the refusal ships), US7 artifact scan
+- Stories: US1 state kept between runs, US2 strict queue, US3 schedule (dropped), US4 failure evidence, US5 nothing leaks and settings stay runner-only, US6 vault login (0.4.1, runs only through `ci`), US7 artifact scan
 
 ## Phase 1: Setup (serial)
 
@@ -52,39 +52,41 @@ Constrained fields are defined in `data-model.md`; tasks cite them as `data-mode
 - [-] T022 [US3] Dropped by the owner rule (reversed): the tick workflow stays, and so do the selftest workflow, the scripts and the READMEs' tick text. FR-060 now says the tick is untouched.
 - [-] T023 [US3] Dropped by the owner rule: rewriting `.github/workflows/factory-monorepo-ci.yml` (cron lines, `case`, 210 minutes, no `concurrency`, `-e` flags, Environment) is a workflow edit.
 
-**Checkpoint**: T001 to T021 are on `main`, the selftest and `make lint` pass, and the `rust-ci-runner` pipeline passes on that commit. `git diff --stat` of `.github` and `rust-ci-runner/Dockerfile` against the branch point is empty.
+**Checkpoint**: T001 to T021 are on `main`, the selftest and `make lint` pass, and the `rust-ci-runner` pipeline passes on that commit. `git diff --stat` of `.github/workflows` and `.github/scripts` against the branch point is empty.
 
-## Phase 4: Release 0.4.0 (serial, after the checkpoint); the pin and the real runs are dropped
+## Phase 4: Release 0.4.0 and its tick bump (serial, after the checkpoint); the manual pin and the real runs are dropped
 
 - [ ] T024 Tag `rust-ci-runner-v0.4.0` on the passing `main` commit (run id and SHA equal), wait for the existing `.github/workflows/rust-ci-runner-release.yml` (unchanged), record the digest, verify it with `docker pull`; nothing pins it (FR-038)
 - [-] T025 Dropped by the owner rule: the `RUNNER_IMAGE` pin is a line of `factory-monorepo-ci.yml`. Without it no real run uses 0.4.0.
 - [-] T026 Dropped (needs the pin): the no-secret canary through the new pin.
-- [-] T027 Dropped by the owner rule: `rust-ci-runner/alerts/factory-ci.yaml` is a YAML file. The owner builds the alert rules in Grafana from `contracts/loki-lines.md` (FR-057).
-- [-] T028 Dropped by the owner rule: `rust-ci-runner/scripts/open-artifact.sh` is a shell script. `decrypt-artifact` (T020) and the README command remain (FR-033).
+- [ ] T027 [P] Write the Grafana alert rules in `rust-ci-runner/alerts/factory-ci.yaml` matching `contracts/loki-lines.md` and `FAULTS`, and a Rust test in `rust-ci-runner/src/ci_state_tests.rs` that reads the file and the contract and asserts every string is in both (a Rust test, not a shell check); after T024 (FR-057)
+- [ ] T028 [P] Write `rust-ci-runner/scripts/open-artifact.sh` (pinned-sha256 runner binary, decrypt with exit check, `tar -x --no-same-owner` into a new empty directory, sanitised capped output), its shell test `rust-ci-runner/scripts/test-open-artifact.sh`, and the `rust-ci-runner/.factory-ci.toml` step that runs it; both scripts live under `rust-ci-runner/scripts/`, never under `.github/scripts/`; after T024 (FR-033)
 - [-] T029 Dropped (needs the pin): the owner actions and the release canary on the real store repo. The owner actions stay listed in plan.md for the day the rule lifts.
 - [-] T030 Dropped by the owner rule: the watch keys would be refused by the pinned `ci` runner and the tick's `plan`, and the first cron line is a workflow edit (FR-040).
 - [-] T031 Dropped (needs the pin and T030): the first real run (SC-001, SC-003, SC-009 deferred).
+- [ ] T039 Tick variable: record the current `RUNNER_IMAGE_DIGEST` (`gh variable get`), set it to the digest verified in T024 (`gh variable set RUNNER_IMAGE_DIGEST --body sha256:<digest>`), watch one tick (`fail_tick=0`, the same commit statuses, no new public line), and on any failure set the recorded old digest back; owner-run, or agent-run when the owner approves it in writing; repeat with the 0.4.1 digest after T036; tell feature 012 first (FR-038, plan D20); after T024
 
-## Phase 5: Runner 0.4.1, the vault login (dropped by the owner rule)
+## Phase 5: Runner 0.4.1, the vault login (after T024; the release workflow is not edited)
 
-- [-] T032 [US6] Dropped: vault tests need the vault read, which needs `bw` in the image (a `Dockerfile` change). The vault refusal tests live in T009 and T004.
-- [-] T033 [US6] Dropped: the vault read (FR-044, FR-046, FR-047, FR-056).
-- [-] T034 [US6] Dropped by the owner rule: `rust-ci-runner/Dockerfile` and the release workflow smoke step may not change.
-- [-] T035 [US6] Dropped: wiring the vault read; the 0.4.0 refusal stays for good.
-- [-] T036 [US6] Dropped: no 0.4.1 release.
-- [-] T037 [US6] Dropped: the vault owner actions and first vault run.
+- [ ] T032 [P] [US6] Write the vault tests in `rust-ci-runner/src/vault_tests.rs` (fake `bw`), add `vault` and `vault_tests` to `rust-ci-runner/src/lib.rs`, and add the vault cases to `rust-ci-runner/src/ci_state_tests.rs` (FR-042 to FR-047, FR-056, SC-007)
+- [ ] T033 [US6] Implement the vault read and wipe in `rust-ci-runner/src/vault.rs` and allow it in `rust-ci-runner/tests/no_vendor.rs` (FR-044 to FR-047, FR-056); cite `data-model.md` `Vault read.map`
+- [ ] T034 [P] [US6] Add Node and the pinned `bw` bundle (sha256 `43401c3e27cb009a28035dc8f9bea43ae78880e0549490762542f55af0e6b2e3`), the wrapper and `ARG TARGETARCH` with `RUN bw --version || [ "$TARGETARCH" != amd64 ]` to `rust-ci-runner/Dockerfile` only (no release-workflow smoke step: the amd64 build blocks, the arm64 build under QEMU does not); record image size and pull time (FR-044)
+- [ ] T035 [US6] Replace the 0.4.0 vault refusal with the read in `rust-ci-runner/src/ci.rs`, `rust-ci-runner/src/stateful.rs` and `rust-ci-runner/src/engine.rs`, and set the version to `0.4.1` in `rust-ci-runner/Cargo.toml` and `rust-ci-runner/Cargo.lock` (FR-044 to FR-047, FR-056); after T032 to T034
+- [ ] T036 [US6] Tag `rust-ci-runner-v0.4.1`, record the digest, then update the pinned sha256 in `rust-ci-runner/scripts/open-artifact.sh` in its own commit; nothing pins it in the manual workflow; then repeat T039 with the new digest
+- [-] T037 [US6] Dropped (needs the pin): the vault owner actions and first vault run; the owner actions stay listed in plan.md.
 
 ## Final Phase: Docs (last task)
 
-- [ ] T038 Update `README.md`, `rust-ci-runner/README.md` and the GitHub repository description (`gh repo edit`) as listed under T038 in plan.md, including the release checklist line (image digest), the `state restore failed` runbook, the Grafana rules to build by hand, the `decrypt-artifact` command, what 011 leaves out and why (schedule, vault read, pin, alert and agent files), the 5-minute wait and the concurrency group that stays, and the accepted risks (FR-041, FR-048, FR-057)
+- [ ] T038 Update `README.md`, `rust-ci-runner/README.md` and the GitHub repository description (`gh repo edit`) as listed under T038 in plan.md, including the release checklist line (image digest, agent script sha, the tick variable), the `state restore failed` runbook, the Grafana rules, the `decrypt-artifact` command and agent script, what 011 leaves out and why (schedule, manual pin, watch keys), the 5-minute wait, the concurrency group that stays, and the accepted risks (FR-041, FR-048, FR-057)
 
 ## Dependencies
 
 - T001 first, alone (it also declares the `Releases` trait and its types).
 - Tests: T002, T003, T004, T009 in parallel after T001. T005 after T001. T006, T007, T008 after T005 (they use `FakeReleases`); T009 is one file plus `job_tests.rs`.
 - Code, after T001 and each file's tests: T011, T012, T013, T014, T018 in parallel. T015 after T014 and T018; T016 after T014. T017 after T013, T014 and T018. T020 after T013 and T015. T019 after T011 to T018. T021 after T019 and T020.
-- Release: T024 after the checkpoint. T038 last.
-- Dropped IDs (T010, T022, T023, T025 to T037) are not built and block nothing.
+- Release: T024 after the checkpoint. T027, T028 and T039 after T024.
+- Phase 5 starts after T024: T032 and T034 in parallel; T033 after T032; T035 after T032 to T034; T036 after T035; T039 repeats after T036. T038 last.
+- Dropped IDs (T010, T022, T023, T025, T026, T029, T030, T031, T037) are not built and block nothing.
 
 ## Parallel example
 
@@ -92,7 +94,7 @@ After T001: T002, T003, T004, T005, T009 at once, then T006, T007, T008 once T00
 
 ## Implementation strategy
 
-0.4.0 is the only release: T001 to T021, T024 and T038. It carries US1, US2, US4, US5 and US7. US3 (schedule) and US6 (vault read) are dropped by the owner rule of 2026-11-28, which forbids any change to a workflow, a script or the Dockerfile. The image is released and not pinned, so no real run uses it until the owner lifts the rule or moves the pin. Interim logins use 010 step secrets.
+0.4.0 (T001 to T021, T024, T027, T028) carries US1, US2, US4, US5 and US7. The vault (US6, SC-007) is its own 0.4.1 phase, T032 to T036, so a vault problem never blocks the queue and state. US3 (schedule) is dropped by the owner rule of 2026-11-28, which bans changes to `.github/workflows/` and `.github/scripts/`. The queue, state, artifacts and vault read run only through the manual `ci` workflow, whose pin is a workflow line, so they stay inert until the owner decides. The tick takes each release through the repository variable (T039) and uses none of the new features. Interim logins use 010 step secrets.
 
 ## Notes
 

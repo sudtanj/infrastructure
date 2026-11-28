@@ -32,7 +32,7 @@ Each entry gives the decision, the evidence and what was rejected. Evidence was 
 - The `age` crate, `rage`, `openssl enc`, and an extra AEAD crate were looked at and rejected (no authenticated `openssl enc`; age needs a terminal for a passphrase and many crates).
 - For the agent: the release workflow publishes `rust-ci-runner-x86_64-linux` and `-aarch64-linux` as assets of this public repo ("release assets" step), so `decrypt-artifact` needs `gh` and `tar` only.
 
-## R-C `bw` in the image (not built after the owner rule; evidence kept for a later feature)
+## R-C `bw` in the image
 
 **Decision**: the npm-build bundle of release `cli-v2026.10.1` of `bitwarden/clients`, run by Alpine's `nodejs`.
 
@@ -66,4 +66,4 @@ Dropped by the owner rule of 2026-11-28: a `cron` line is a workflow edit. The e
 - The 002 threat model (coordinator, 2026-11-28): install, lint and test run third-party code as root and must never see the state file. This produced D8 (one declaring step, ordering rule, hook, mode 0600, chown by the step with a runner backstop) and replaced the earlier plan of a pipeline-wide restore and a world-readable `chmod`.
 - The 010 plan moved on twice: the second critic round re-baselined 011 on 010's real names (`REQUIRED_KEYS`, `fetch_with`, `Held::take`, `Redactor::forms`, `Log::secret_forms`, `Args`).
 - Critic review of faa835f: tick retired, queue cap and wait cap removed, slot marker, schedule file and `due` removed, tags with `+`, asset regexes with a digit entry, staged 0.4.0 and 0.4.1, constitution 1.2.0.
-- Owner rule of 2026-11-28 ("Amend 011"): no workflow, script, YAML or Dockerfile change; the tick stays; schedule, vault read, pin, alert file and agent script are out of scope; D19 (own attempt and image through `docker inspect`) and the 45-minute numbers (budget 35, wait ends at budget minus 30, deadline budget minus 15) replace the 210-minute ones.
+- Owner rule of 2026-11-28 ("Amend 011"), corrected the same day (the ban covers `.github/workflows/` and `.github/scripts/` only; the tick reads `vars.RUNNER_IMAGE_DIGEST`): the tick stays; the schedule, the manual pin and the watch keys are out of scope; the vault read, alert file and agent script are in scope; T039 moves the tick by variable; D19 (own attempt and image through `docker inspect`) and the 45-minute numbers (budget 35, wait ends at budget minus 30, deadline budget minus 15) replace the 210-minute ones.

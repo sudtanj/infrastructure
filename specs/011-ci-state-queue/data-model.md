@@ -24,7 +24,7 @@ when = "failure"                # "failure" (default) or "always"
 
 [steps.e2e]
 state = true                    # the one step that sees the state file
-vault = [{ item = "ci-login-1", field = "username", env = "E2E_USER" }]   # checked, then refused (`vault unavailable`)
+vault = [{ item = "ci-login-1", field = "username", env = "E2E_USER" }]   # read from 0.4.1
 ```
 
 Rules: exactly one step has `state = true` when `[state]` exists, none otherwise; every other step is a transitive dependency or dependent of it; an artifact path never equals, contains or lies under the state path (by path component); a project with `..`, a trailing `.` or `.lock` cannot use `[state]` or `[artifacts]`; names in `env`, `secrets` and vault `env` are refused when upper-cased they start with `BW_`, `BWS_`, `BITWARDENCLI` or `FACTORY_CI` or equal a runner key; a name present in both a `secrets` list and a vault `env` anywhere in the pipeline is refused; at most 20 vault entries per step and 50 per pipeline; a step with `vault` cannot set `docker = true`; a pipeline with `[state]` has no step with `docker = true`.
@@ -45,9 +45,9 @@ Release `ci-state+<repo>+<project>+<state>`, asset `state-<runid>-<attempt>-<ent
 
 Release `ci-artifacts+<repo>+<project>`, asset `artifact-<runid>-<attempt>-<entry>-<8 hex>.bin`, format `FCI1` kind 2, plaintext a tar. Newest 10 `uploaded` kept. Plaintext at most 100 MB, written under the run's `--work` folder and removed with it.
 
-## Vault read (out of scope)
+## Vault read (0.4.1)
 
-Dropped by the owner rule (the read needs `bw` in the image). A validated vault declaration ends the run with `vault unavailable`; no value is read, held or passed.
+Input: `(item, field)` pairs, deduplicated. Output: a map from pair to value, held in memory, passed only to steps that declared the pair. No item or field name and no value reaches a log line or Loki.
 
 ## Public lines
 
@@ -55,4 +55,4 @@ stdout adds `[runner] waiting for the queue`. stderr adds `queue wait expired`, 
 
 ## Field names cited by tasks
 
-`Watch entry additions.state`, `Watch entry additions.vault_items`; `Runner keys.FACTORY_CI_STATE_KEY`, `Runner keys.FACTORY_CI_ARTIFACT_KEY`; `Ticket.name` (the asset regex) and `Ticket.label` (`<runid>.<epoch>`); `State asset.asset` (name regex) and `State asset.plaintext` (at most 10 MB); `Artifact bundle.asset` and `Artifact bundle.plaintext` (at most 100 MB).
+`Watch entry additions.state`, `Watch entry additions.vault_items`; `Runner keys.FACTORY_CI_STATE_KEY`, `Runner keys.FACTORY_CI_ARTIFACT_KEY`; `Ticket.name` (the asset regex) and `Ticket.label` (`<runid>.<epoch>`); `State asset.asset` (name regex) and `State asset.plaintext` (at most 10 MB); `Artifact bundle.asset` and `Artifact bundle.plaintext` (at most 100 MB); `Vault read.map` (keyed by `(item, field)`).

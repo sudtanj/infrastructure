@@ -33,6 +33,6 @@
 
 - Written by hand from `.specify/templates/spec-template.md`: no shell was available, so `.specify/scripts/bash/*` did not run. `.specify/feature.json` was written by hand. The branch `011-ci-state-queue` was created before this work.
 - `/speckit-clarify`, `/speckit-plan`, `/speckit-tasks` and `/speckit-analyze` still run before implementation (constitution Principle VI).
-- Plan must settle: ticket and renewal mechanism on GitHub (atomic create, server time), the authenticated cipher and the one-line decrypt command, packaging of `bw`, streaming of state and bundles, the `due` and entry-index flags of `ci`, and whether the 45-minute hold budget fits the stale rule. (Amended 2026-11-28: `bw`, `due` and the entry flag are gone; the 45-minute job stays and the numbers follow it, plan D16.)
+- Plan must settle: ticket and renewal mechanism on GitHub (atomic create, server time), the authenticated cipher and the one-line decrypt command, packaging of `bw`, streaming of state and bundles, the `due` and entry-index flags of `ci`, and whether the 45-minute hold budget fits the stale rule. (Amended 2026-11-28: `due` and the entry flag are gone; the 45-minute job stays and the numbers follow it, plan D16.)
 - Check before the plan: FR-050 (cookie values at a key named `value`) may be narrowed if it masks ordinary text in Loki.
 - Not verified: no test or tool was run; line counts and cross-references were checked by reading and by search.

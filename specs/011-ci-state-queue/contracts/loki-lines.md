@@ -1,8 +1,8 @@
 # Contract: Loki lines of step `ci`
 
-Every line is shipped by `log.out("ci", ...)` after redaction. `ci` is a reserved step name, so a pipeline step cannot forge these lines. No line holds a token, key, vault name or value. Each string below has a test in `ci_state_tests.rs`, and the owner's alert rules use them. `<...>` is a placeholder.
+Every line is shipped by `log.out("ci", ...)` after redaction. `ci` is a reserved step name, so a pipeline step cannot forge these lines. No line holds a token, key, vault name or value. Each string below has a test in `ci_state_tests.rs`, and the alert rules grep them. `<...>` is a placeholder.
 
-| String | When |
+| String | When (0.4.0 unless marked 0.4.1) |
 |---|---|
 | `queue registered position <n>` | after the ticket is created |
 | `queue claimed after <s>s` | the run takes the turn |
@@ -23,6 +23,7 @@ Every line is shipped by `log.out("ci", ...)` after redaction. `ci` is a reserve
 | `artifact skipped path <n> not regular` | symlink or special file |
 | `artifact too large <bytes> bytes` | over 100 MB |
 | `artifact refused <n> causes` | scan refusal, a count only |
-| `vault unavailable <reason>` | a refused vault declaration; reason without names |
+| `vault read <n> of <m> items` | 0.4.1, positions and counts only |
+| `vault unavailable <reason>` | 0.4.0 for a refused declaration, 0.4.1 for a read failure; reason without names |
 
-Public fault lines are separate (FR-037). The owner builds Grafana alert rules by hand on these exact strings and the fault strings of `FAULTS`; no alert file is in the repo.
+Public fault lines are separate (FR-037). Alert rules (`rust-ci-runner/alerts/factory-ci.yaml`) match these exact strings and the fault strings of `FAULTS`.

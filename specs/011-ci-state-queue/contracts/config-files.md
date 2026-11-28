@@ -18,11 +18,11 @@ stdin: an `FCI1` artifact file. stdout: the tar. The key comes from `FACTORY_CI_
 
 ## Watch entry
 
-`state = true|false` (default false, needs `id`), `vault_items = ["opaque item name", ...]` (parsed and validated; nothing reads a vault). An entry with either key needs an explicit `secret_branches = ["main"]`. See data-model.md.
+`state = true|false` (default false, needs `id`), `vault_items = ["opaque item name", ...]` (parsed and validated from 0.4.0, read from 0.4.1). An entry with either key needs an explicit `secret_branches = ["main"]`. See data-model.md.
 
 ## Pipeline file
 
-`[state]`, `[artifacts]`, step key `state = true`, step key `vault = [{ item, field, env }]`. See data-model.md. A vault entry has exactly the three string keys. `field` is `username`, `password`, `uri` or the exact name of a custom field. A pipeline whose vault entries pass validation ends `[runner] vault unavailable`.
+`[state]`, `[artifacts]`, step key `state = true`, step key `vault = [{ item, field, env }]`. See data-model.md. A vault entry has exactly the three string keys. `field` is `username`, `password`, `uri` or the exact name of a custom field. In 0.4.0 a pipeline whose vault entries pass validation ends `[runner] vault unavailable`.
 
 ## Workflow shape
 
@@ -34,4 +34,4 @@ stdout adds `[runner] waiting for the queue`. stderr adds nine lines: `queue wai
 
 ## Files that do not change
 
-Nothing under `.github/` and no `rust-ci-runner/Dockerfile`. The tick path (`job`, `local`) runs a pipeline that declares `[state]` or `[artifacts]` as before 011 (no store call), and refuses a vault declaration with `vault unavailable`.
+Nothing under `.github/workflows/` or `.github/scripts/`. The tick path (`job`, `local`) runs a pipeline that declares `[state]` or `[artifacts]` as before 011 (no store call), and refuses a vault declaration with `vault unavailable`.
