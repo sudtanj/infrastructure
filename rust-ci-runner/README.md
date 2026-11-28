@@ -237,6 +237,22 @@ whose pipelines you trust.  Steps without
 `docker = true` run on a separate per-run network, with `--pids-limit 512` and
 `no-new-privileges`, and cannot reach the daemon.
 
+## Docker image projects
+
+A folder `docker/<name>/` with a `Dockerfile`, a `README.md` and a `.factory-ci.toml` is an image project (`<name>` is 2 to 64 characters, lower-case kebab case). Only the central `job` runs it, and only on `main`; the manual `ci` command refuses it. The contract is `specs/012-docker-images/contracts/image-project.md` and `docker/README.md` says how to add one.
+
+On `main` the `job` does this, in order:
+
+1. `image::check` reads the folder. A failure ends the item in `failure` with `check failed: <ids>` before any container starts. `step-template` requires the one `build` step of the contract, with the pinned `docker:27.5.1-cli` image, no `env` and exactly its five commands.
+2. The `build` step runs on the docker sidecar and saves `image-amd64.tar` and `image-arm64.tar`. A failing step or a timeout ends the item in `error`, which gets one retry.
+3. The runner removes the sidecar, then runs `image::check` again, because until then the sidecar could change the folder. It moves the two archives into a fresh read-only directory and checks that each config is the right `linux` platform, runs as a numeric non-root user and has no shell entrypoint.
+4. It reads the tip of `main`, logs in to Docker Hub, creates the public repository `sudtanj/<name>` when it is missing, and stops when the repository is private.
+5. A first `crane:debug` container, started with the token on standard input, pushes both archives by digest and the manifest list `sha-<12 hex>`. The runner checks that the list has exactly `linux/amd64` and `linux/arm64`. After a second tip read, a second container tags `latest`, only when the commit is still the tip of `main`; an older commit ends with `published sha-<12> not latest`.
+
+The pipeline never lists a secret. The token reaches only the Hub login request and the two publish containers, on standard input. It comes from the Bitwarden keys `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`, which the watch entry lists in `secrets` together with `allow_docker = true` and no `secret_branches`. The login name must equal the namespace `sudtanj`.
+
+The sidecar is privileged. Whoever controls a `main` build step can reach the host through it and is effectively a token holder. `main` is owner-merged, and the check is review help, not a barrier. Rootless BuildKit is the future fix and is out of scope. After a publish, pull the image without a login and confirm both tags list the two platforms (the post-publish check in the root `README.md`).
+
 ## Run a pipeline locally
 
 ```sh

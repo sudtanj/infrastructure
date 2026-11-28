@@ -1,0 +1,11 @@
+[steps.build]
+image = "docker:27.5.1-cli@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c"
+docker = true
+commands = [
+  "docker build --platform linux/amd64 -t image-amd64 .",
+  "docker save -o image-amd64.tar image-amd64",
+  "docker build --platform linux/arm64 -t image-arm64 .",
+  "docker save -o image-arm64.tar image-arm64",
+  "chmod 0644 image-amd64.tar image-arm64.tar",
+]
+timeout = 1800

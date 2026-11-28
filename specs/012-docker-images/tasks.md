@@ -112,6 +112,12 @@ Found by the reviewer and the security review of S6 at `7160f45`. Each behaviour
 - [x] T041 [US1] S6: `archive.rs` fails with `archive unreadable` on the tar typeflags `x`, `g`, `L` and `K`, and on a second `manifest.json`
 - [x] T042 [US1] S7: `job::job` and `job::status` start with `std::panic::set_hook(Box::new(|_| {}))`, so a panic message cannot carry a value
 
+Found by the S6b re-review at `f57240e`.
+
+- [ ] T043 [US1] M1: the panic hook moves from `job::job` and `job::status` to `main.rs`, set in the `job` and `status` arms only, because the unit tests call `job::job` in-process and the hook silenced their panic messages. The source-text test reads `main.rs`
+- [ ] T044 [US2] M2: `image::check` `step-template` also requires the step `image` to equal the one pinned `docker:27.5.1-cli` digest of `pins.md` (`image::STEP_IMAGE`) and an empty `env`; test cases for both. In `failed_check_pushes_nothing` the `secret-flag` case cannot trip `secret-flag` alone (the template pins every command), so it asserts that `step-template` fires too
+- [ ] T045 [US2] M3: `image::secret_file` also refuses names starting with `.env.`, `.npmrc`, `.netrc`, `id_dsa`, and names ending in `.p12` or `.pfx`; test cases
+
 ## Dependencies and order
 
 - Phase 1 first; T001 feeds T005 (`CRANE_IMAGE`) and T018; T002 feeds T005 (`CRANE_SH`, `CRANE_BIN`), T012 (login endpoint) and T019.

@@ -12,11 +12,11 @@ The runner creates the public Docker Hub repository `sudtanj/<image>` itself whe
 
 ## `.factory-ci.toml` (one step, no check step, no secrets)
 
-The runner runs the check itself before and inside publish, so the file only builds and saves, once per platform. The step image must be pinned (`step-image`).
+The runner runs the check itself before and inside publish, so the file only builds and saves, once per platform. The step image is the one pinned `docker:27.5.1-cli` digest of `pins.md` (`step-template`; `step-image` for the pin shape), and `env` is absent.
 
 ```toml
 [steps.build]
-image = "docker:27.5.1-cli@sha256:<64 hex>"
+image = "docker:27.5.1-cli@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c"
 docker = true
 commands = [
   "docker build --platform linux/amd64 -t image-amd64 .",

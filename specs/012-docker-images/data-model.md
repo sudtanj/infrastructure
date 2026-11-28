@@ -39,8 +39,8 @@ The parser works on instructions. It joins `\` continuations, strips `\r` and a 
 | `secret-flag` | a `RUN` has `--mount=type=secret` or `--mount=type=ssh`; or any `.factory-ci.toml` command contains `--secret`, `--ssh` or `--build-arg` | `--build-arg` has no safe use here |
 | `pipeline-secrets` | any step of `.factory-ci.toml` lists `secrets`, or `.factory-ci.toml` does not parse as a pipeline | |
 | `step-image` | any step of `.factory-ci.toml` has an `image` that does not end in `@sha256:` plus 64 hex digits | FR-029 |
-| `step-template` | `.factory-ci.toml` does not hold exactly one step, named `build`, with `docker = true` and exactly the five commands of `contracts/image-project.md` in that order | free shell could build another Dockerfile or `docker save` any image; `image`, `timeout` and `env` are judged by their own ids |
-| `secret-file` | a file of the folder walk is named `.env`, `id_rsa`, `id_ed25519`, `id_ecdsa`, or ends in `.pem` or `.key` (case-insensitive) | `Sub/Dir/TLS.PEM` fails; the name alone is enough |
+| `step-template` | `.factory-ci.toml` does not hold exactly one step, named `build`, with `docker = true`, `image` equal to the one pinned `STEP_IMAGE` digest of `pins.md`, an empty `env` and exactly the five commands of `contracts/image-project.md` in that order | free shell could build another Dockerfile or `docker save` any image; `timeout` is judged by no id |
+| `secret-file` | a file of the folder walk is named `.env`, starts with `.env.`, is named `.npmrc`, `.netrc`, `id_rsa`, `id_dsa`, `id_ed25519` or `id_ecdsa`, or ends in `.pem`, `.key`, `.p12` or `.pfx` (case-insensitive) | `Sub/Dir/TLS.PEM` and `.env.production` fail; the name alone is enough |
 
 ## Archive config (`rust-ci-runner/src/archive.rs`)
 

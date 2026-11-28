@@ -89,7 +89,8 @@ and stops agents from building what nobody specified.
 
 ## Repository Structure and Constraints
 
-- Top-level layout: `rust-ci-runner/` (the runner), `.github/` (workflows, scripts and the
+- Top-level layout: `rust-ci-runner/` (the runner), `docker/` (one folder per public image the runner
+  publishes, feature 012), `.github/` (workflows, scripts and the
   watched-repo list), `specs/` (Spec Kit feature specs), `.specify/` and `.claude/` (Spec Kit
   tooling and agent skills).
 - Repository secrets and variables are the only bootstrap channel (Principle II). The README
@@ -115,4 +116,4 @@ and stops agents from building what nobody specified.
 - Reviewers check pull requests against these principles; violations need either a fix or a
   justified exception recorded in the feature's `plan.md`.
 
-**Version**: 1.1.0 | **Ratified**: 2026-11-27 | **Last Amended**: 2026-11-27
+**Version**: 1.1.1 | **Ratified**: 2026-11-27 | **Last Amended**: 2026-11-28
