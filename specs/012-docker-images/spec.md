@@ -26,7 +26,7 @@ There is no place in the repo to build and publish an image, and the runner cann
 
 ## Announcement
 
-Add a folder `docker/<image>/` with a `Dockerfile`, a `README.md` and a `.factory-ci.toml`, merge it to `main`, and within one tick (about 5 minutes) plus the build time the runner builds the image, checks it, and pushes `sudtanj/<image>:latest` and `sudtanj/<image>:sha-<short commit>` to Docker Hub. The check fails any image that is not distroless or `scratch`, runs as root, has a shell, uses an unpinned base or holds a credential, and a failed check publishes nothing. The Docker Hub token never reaches a file in the repo, a step you write, or a branch other than `main`: the runner reads it from Bitwarden and does the push itself. The first image, `sudtanj/hello-static`, proves the path.
+Add a folder `docker/<image>/` with a `Dockerfile`, a `README.md` and a `.factory-ci.toml`, merge it to `main`, and within one tick (about 5 minutes) plus the build time the runner builds the image, checks it, and pushes `sudtanj/<image>:latest` and `sudtanj/<image>:sha-<short commit>` to Docker Hub, each one a manifest list with a native `linux/amd64` and a native `linux/arm64` image. The check fails any image that is not distroless or `scratch`, runs as root, has a shell, uses an unpinned base or holds a credential, and a failed check publishes nothing. The Docker Hub token never reaches a file in the repo, a step you write, or a branch other than `main`: the runner reads it from Bitwarden and does the push itself. The first image, `sudtanj/hello-static`, proves the path.
 
 ## Clarifications
 
@@ -35,11 +35,12 @@ Add a folder `docker/<image>/` with a `Dockerfile`, a `README.md` and a `.factor
 - Q: How does the Docker Hub token reach the automatic path without breaking feature 010's rule that the tick hands no secret to a step? → A: A new built-in publish step of `rust-ci-runner`. The runner reads the token from Bitwarden itself and pushes the built image. No step written in `docker/` ever receives the token, so 010 still holds.
 - Q: What may change in the repo? → A: No file under `.github/workflows/` and no file under `.github/scripts/`. Only Rust code in `rust-ci-runner/`, `.factory-ci.toml` files and other toml files (such as `.github/factory-ci-repos.toml`) change to carry the automation. See assumption A1 for what this means for docs and `docker/` content.
 - Q: Which Docker Hub namespace? → A: `sudtanj`. Images are public as `sudtanj/<folder-name>`.
+- Q (2026-11-28, owner change): Which platforms? → A: Every image supports both `linux/amd64` and `linux/arm64`, published as one multi-arch manifest list under each tag (`latest` and `sha-<short>`). arm64 is no longer out of scope. The build uses no emulation: the Dockerfile cross-compiles on the build platform.
 - Q: What does "automatically on push" mean? → A: The existing tick, which an outside scheduler dispatches about every 5 minutes, picks up a push to `main` within that interval. Nothing reacts to the push event itself, and the owner accepts that. Spec 011 (CI state queue) is amended separately to keep the tick; this spec relies on it.
 
 ### Defaults chosen by the lead
 
-Recorded as requirements or assumptions below: layout `docker/<image>/`; first image a small placeholder from a static binary; `linux/amd64` only; the safety rules as a check that fails the image; tags `latest` and `sha-<short commit>`; only `main` publishes; a deleted folder publishes nothing and leaves Docker Hub alone; no Docker Hub API calls.
+Recorded as requirements or assumptions below: layout `docker/<image>/`; first image a small placeholder from a static binary; `linux/amd64` and `linux/arm64` in one manifest list (owner change, see Clarifications); the safety rules as a check that fails the image; tags `latest` and `sha-<short commit>`; only `main` publishes; a deleted folder publishes nothing and leaves Docker Hub alone; no Docker Hub API calls.
 
 No question was left without a safe default, so `/speckit-clarify` raised none.
 
@@ -51,13 +52,15 @@ The owner adds `docker/hello-static/` with the three files, opens a pull request
 
 **Why this priority**: It is the reason for the feature.
 
-**Independent Test**: Merge the first image. After the next tick and build, `docker pull sudtanj/hello-static:latest` works on a machine with no Docker Hub login, and `sha-<short commit>` points to the same digest as `latest`.
+**Independent Test**: Merge the first image. After the next tick and build, `docker pull sudtanj/hello-static:latest` works on a machine with no Docker Hub login, on an amd64 host and on an arm64 host, each getting its native image, and `sha-<short commit>` points to the same manifest list digest as `latest`.
 
 **Acceptance Scenarios**:
 
 1. **Given** a valid `docker/hello-static/` lands on `main`, **When** the next tick runs, **Then** the runner builds it, the check passes, and both tags exist on `sudtanj/hello-static`.
 2. **Given** the Docker Hub repository does not exist yet, **When** the first push runs, **Then** the push creates it and no other call creates or edits it.
 3. **Given** a later commit changes files only outside `docker/hello-static/`, **When** the next tick runs, **Then** nothing is built or pushed for that image and its tags stay where they were.
+4. **Given** the image is published, **When** a host with `linux/arm64` and a host with `linux/amd64` each pull `sudtanj/hello-static:latest`, **Then** each gets the image for its own architecture, and the tag is one manifest list with exactly those two platforms.
+5. **Given** the arm64 image or the amd64 image fails to build, **When** the run ends, **Then** nothing is pushed and no tag points at a single-arch image.
 
 ---
 
@@ -113,6 +116,7 @@ Answers to the edge-case checklist for this change.
 - State. First run with no Docker Hub repository (FR-016). A restart mid-publish leaves at most the `sha-` tag; the retry pushes the same image again and is safe (FR-020). A run for an old commit on a repo that has moved on (FR-018).
 - Partial failure. `sha-` pushed and `latest` fails: the status is `error`, and the one retry the runner already gives finishes it (FR-020). A failed build, a failed check or a missing token pushes nothing (FR-011, FR-014).
 - Time and concurrency. Two jobs for one image run at once (FR-018). Docker Hub or Bitwarden slow or down: the item ends in `error`, retried once after 30 minutes by the existing rule. Pull limits on base images apply; a limit hit is an `error`, not a `failure`.
+- Multi-arch. A Dockerfile whose build must run target-architecture binaries (a `RUN` outside a `--platform=$BUILDPLATFORM` stage) needs emulation, which this feature does not provide: the check refuses it (FR-027). A base that is not multi-arch cannot build the other platform: that build fails and nothing is pushed. Pinning a base by its index digest, not a per-platform digest, lets one `FROM` serve both platforms (FR-028).
 - Resources. Builds run on GitHub-hosted VMs. An image larger than the runner's disk ends in `error` with a fixed line (FR-021). No logs or cache grow without bound; the runner keeps nothing between runs.
 - Permissions and trust. Who can start a publish: anyone who can merge to `main` of this repo, today only the owner. What the author of a Dockerfile cannot do: read the token, publish from a branch, publish an image the check refused (FR-013, FR-014, FR-010). The token is the one Docker Hub secret in the system; its scope is an assumption (A5).
 - UI. None. Surfaces are the commit status, fixed public lines and the Docker Hub page.
@@ -142,7 +146,7 @@ Each requirement is an acceptance criterion in the form WHEN trigger THE SYSTEM 
 - **FR-009** `[error]`: WHEN a `FROM` in the Dockerfile names an image without `@sha256:` followed by 64 hex digits THE SYSTEM SHALL fail the check. `FROM scratch` and `FROM <name of an earlier stage>` are exempt. WHEN a `FROM` reference contains an `ARG` expansion (`$X` or `${X}`) THE SYSTEM SHALL fail the check, whether or not the `ARG` has a default.
 - **FR-010** `[error]`: WHEN the final stage of the Dockerfile is not `scratch` and not a distroless base (`gcr.io/distroless/*`, no `debug` variant) THE SYSTEM SHALL fail the check. WHEN the final stage has a `RUN`, or adds a shell or package manager, THE SYSTEM SHALL fail the check. WHEN the final stage sets no `USER`, or sets a non-numeric user or UID 0 THE SYSTEM SHALL fail the check.
 - **FR-011** `[error]`: WHEN a Dockerfile in `docker/` holds an `ARG` or `ENV` whose name contains `TOKEN`, `PASSWORD`, `PASSWD`, `SECRET`, `CREDENTIAL` or `KEY` (any case), or a value that looks like a Docker Hub, GitHub or cloud token, or passes `--secret`, `--build-arg` or `--ssh` THE SYSTEM SHALL fail the check. WHEN the pipeline `env` table of a `docker/` project holds such a name or value THE SYSTEM SHALL fail the check. WHEN a pipeline under `docker/` lists `secrets` on any step THE SYSTEM SHALL fail the check. This is a name and pattern check, not a full secret scanner (see Non-goals).
-- **FR-012**: THE SYSTEM SHALL build `linux/amd64` only.
+- **FR-012**: THE SYSTEM SHALL build `linux/amd64` and `linux/arm64`, each natively and without emulation, and no other platform. Owner change 2026-11-28; see FR-026 to FR-028.
 
 **Publish**
 
@@ -150,11 +154,17 @@ Each requirement is an acceptance criterion in the form WHEN trigger THE SYSTEM 
 - **FR-014** `[error]`: WHEN a run on `main` passes the build and the check THE SYSTEM SHALL push the image it just built, and no other image, with the publish step built into the runner. WHEN the token is missing, empty or refused by Docker Hub THE SYSTEM SHALL end the item in `error` with a fixed line and push nothing.
 - **FR-015**: THE SYSTEM SHALL read the Docker Hub token from Bitwarden inside the runner and SHALL hand it to no step written in `docker/`, to no step container or docker sidecar, to no argv, to no image layer, and to no log line or status. The token is masked in every output path.
 - **FR-016**: WHEN the Docker Hub repository `sudtanj/<image>` does not exist THE SYSTEM SHALL let the first push create it. THE SYSTEM SHALL NOT call the Docker Hub API to create a repository or to sync README text.
-- **FR-017**: WHEN a publish succeeds THE SYSTEM SHALL tag the image `latest` and `sha-<first 7 hex digits of the commit>`, and no other tag.
+- **FR-017**: WHEN a publish succeeds THE SYSTEM SHALL tag the image `latest` and `sha-<first 7 hex digits of the commit>`, and no other tag. Each tag is a manifest list (FR-026).
 - **FR-018** `[error]` `[boundary]`: WHEN the commit being published is not the tip of `main` at the moment of the push THE SYSTEM SHALL push only `sha-<short>` and leave `latest` where it is. This holds when two jobs for one image run at once and when the older job finishes last. WHEN the tip of `main` cannot be read THE SYSTEM SHALL push nothing and end the item in `error`.
 - **FR-019**: WHEN a folder under `docker/` is deleted THE SYSTEM SHALL push nothing for it and leave its Docker Hub repository and tags alone.
 - **FR-020**: WHEN a publish runs again for a commit it already pushed (a retry or a repeat) THE SYSTEM SHALL end with the same tags on the same digest and no error.
 - **FR-021** `[error]`: WHEN a push fails for a reason other than the token (network, rate limit, size, disk) THE SYSTEM SHALL end the item in `error` with a fixed line, so the existing single retry applies.
+
+**Multi-arch** (owner change 2026-11-28)
+
+- **FR-026** `[error]`: WHEN a publish runs THE SYSTEM SHALL push the `linux/amd64` image and the `linux/arm64` image by digest only, then create the manifest list in one registry write, and tag the list. No tag SHALL ever point at a single-platform image, and the list SHALL hold exactly one `linux/amd64` and one `linux/arm64` entry. WHEN either platform image is missing, mislabeled or fails to push THE SYSTEM SHALL tag nothing and end the item in `error` (or `failure` when the build step failed).
+- **FR-027** `[error]`: WHEN a Dockerfile stage has a `RUN` and is not declared `FROM --platform=$BUILDPLATFORM` THE SYSTEM SHALL fail the check, because that stage would need emulation. The final stage already has no `RUN` (FR-010).
+- **FR-028**: WHEN a `FROM` names a multi-arch base THE SYSTEM SHALL require the pin to be the index digest (`@sha256:` of the manifest list), so one reference resolves natively on each platform. A pin that is a single-platform digest makes the other platform's build fail, and the run publishes nothing (FR-026).
 
 **Constraints**
 
@@ -167,9 +177,10 @@ Each requirement is an acceptance criterion in the form WHEN trigger THE SYSTEM 
 
 - **Image project**: a folder `docker/<image>/` with a `Dockerfile`, a `README.md` and a `.factory-ci.toml`. One runner project, one Docker Hub repository.
 - **Check**: the rules of FR-009 to FR-011, run before the build and inside the publish step.
-- **Publish step**: a built-in step of the runner. Reads the token, pushes the two tags, on `main` only.
+- **Publish step**: a built-in step of the runner. Reads the token, pushes the two platform images by digest, creates the manifest list, tags it twice, on `main` only.
 - **Docker Hub token**: the one credential. Lives in Bitwarden, read only by the publish step.
-- **Tags**: `latest` (the tip of `main`) and `sha-<short commit>`.
+- **Tags**: `latest` (the tip of `main`) and `sha-<short commit>`. Each is a manifest list.
+- **Manifest list**: one entry for `linux/amd64`, one for `linux/arm64`.
 
 ## Success Criteria *(mandatory)*
 
@@ -183,6 +194,7 @@ If an image is a folder of three files and the runner does check and push, the o
 - **SC-002**: A fixture Dockerfile per rule of FR-009 to FR-011 fails the check, and 100% of them leave zero pushes. Measured by the unit tests that count push calls.
 - **SC-003**: Across runs on a branch, zero reads of the Docker Hub token. Across runs on `main`, zero occurrences of a token canary in public lines, argv, step environments and image layers. Measured by a counting fake store and a canary search.
 - **SC-004**: The diff of the feature touches zero paths under `.github/workflows/` and `.github/scripts/`. Measured by the path check of FR-022.
+- **SC-006**: `docker buildx imagetools inspect sudtanj/hello-static:latest` and `...:sha-<short>` each list exactly `linux/amd64` and `linux/arm64`, and the two commands print the same digest; a pull on an arm64 host and on an amd64 host starts the image. Measured by the same command and a pull on each host. Unit tests cover the manifest list check with fixtures: both platforms, one missing, a duplicate, a single manifest, an extra platform.
 - **SC-005**: The second image, added one month after release, needs a change only inside `docker/<image>/`. Measured by that pull request's file list. This is the hypothesis test.
 
 ## Assumptions
@@ -195,13 +207,16 @@ If an image is a folder of three files and the runner does check and push, the o
 - **A6**: A "distroless base" means an image under `gcr.io/distroless/`, such as `static` or `base-nonroot`, pinned by digest. Other minimal bases (for example Chainguard) are not allowed until a later spec adds them.
 - **A7**: The runner is released through the existing tag-driven release workflow with no YAML change. The tick reads the runner digest from the repository variable `RUNNER_IMAGE_DIGEST`. The manual `factory-monorepo-ci` pin stays at its current version, which this feature does not need. If the runner image itself must change (its own `Dockerfile`), that is a change outside the allowed set and goes back to the owner.
 - **A8**: Spec 011 keeps the tick, so the tick is the trigger. If 011 removes it, this feature has no trigger.
+- **A10**: arm64 is built without emulation. The Dockerfile cross-compiles in a `--platform=$BUILDPLATFORM` stage, and the final stage only copies files (no `RUN`). Each platform is a separate `docker build --platform` with its own `docker save` archive. A Dockerfile that needs emulation is out of scope and refused by FR-027.
+- **A11**: On the tick, the runner's environment holds the Docker Hub token because the existing job wrapper fetches it from Bitwarden and hands it over (the names-file route in `plan.md`), not because the runner calls Bitwarden itself: the wrapper unsets the store token before the runner starts and cannot change under FR-022. The token still reaches no user step. The owner confirms this reading; see the plan's blocker B1.
+- **A12**: A folder under `docker/` with neither `.factory-ci.toml` nor `Dockerfile` is not a runner project and is ignored: there is no project to post a status on. A folder with either one is a project, and FR-002 fails it by name when the other required files are missing.
 - **A9**: Bumping a base image digest is a commit to the folder, so it rebuilds the image. No schedule rebuilds images when a base gets a security fix.
 
 ## Non-goals
 
 - Image signing, SBOM and vulnerability-scan gating.
 - Registries other than Docker Hub, and private images.
-- arm64 or multi-arch images.
+- Platforms other than `linux/amd64` and `linux/arm64` (`arm/v7`, `386`, Windows), and QEMU emulation of any kind.
 - Creating Docker Hub repositories, setting their visibility, or syncing README text through the Docker Hub API.
 - Reacting to the push event, or any new workflow, script or trigger. The tick is the only trigger.
 - Scheduled rebuilds, base image update bots, and deleting tags or repositories on Docker Hub.
@@ -217,6 +232,8 @@ If an image is a folder of three files and the runner does check and push, the o
 - **R4, latest race**: the tip check and the push are two steps. The plan must serialise publishes of one image so the older job cannot move `latest` back. FR-018 has a test for the case.
 - **R5, check is a heuristic**: the name and pattern rules of FR-011 miss an obfuscated credential. They stop the common mistake only.
 - **R6, base image supply**: a digest pin freezes a vulnerable base until someone bumps it, and nothing alerts. Accepted for now (A9).
+- **R10, no emulation**: a Dockerfile that must run target-arch code cannot publish until a later spec adds emulation (QEMU binfmt in the privileged sidecar). Cross-compilation covers static binaries in Go, Rust and C.
+- **R11, orphan platform manifests**: the two platform images are pushed by digest before the list exists, so a failed run leaves untagged manifests on Docker Hub. They hold no tag and Docker Hub removes them later.
 - **R7, Docker Hub limits**: anonymous pulls of base images and pushes are rate limited. A limit hit ends the item in `error`, with one retry.
 - **R8, public by default**: if Docker Hub creates the first repository as private, the first image would not be pullable. Covered by A5 and by SC-001.
 - **R9, A1 reading**: if the owner reads decision 2 more strictly than A1, scope shrinks to nothing shippable. Named in the report so the owner can correct it.
