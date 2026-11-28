@@ -61,7 +61,11 @@ fn member(path: &Path, name: &[u8]) -> Result<Vec<u8>, &'static str> {
         }
         let mut sum = 0u64;
         for (i, b) in h.iter().enumerate() {
-            sum += if (148..156).contains(&i) { 32 } else { *b as u64 };
+            sum += if (148..156).contains(&i) {
+                32
+            } else {
+                *b as u64
+            };
         }
         if octal(&h[148..156]) != Some(sum) {
             return Err(BAD);
@@ -91,13 +95,17 @@ pub fn read_config(path: &Path) -> Result<ImageConfig, &'static str> {
     let [entry] = manifest.as_slice() else {
         return Err(BAD);
     };
-    let c: Config = serde_json::from_slice(&member(path, entry.config.as_bytes())?).map_err(|_| BAD)?;
+    let c: Config =
+        serde_json::from_slice(&member(path, entry.config.as_bytes())?).map_err(|_| BAD)?;
     let i = c.config;
     Ok(ImageConfig {
         os: c.os.unwrap_or_default(),
         architecture: c.architecture.unwrap_or_default(),
         user: i.as_ref().and_then(|i| i.user.clone()).unwrap_or_default(),
-        entrypoint: i.as_ref().and_then(|i| i.entrypoint.clone()).unwrap_or_default(),
+        entrypoint: i
+            .as_ref()
+            .and_then(|i| i.entrypoint.clone())
+            .unwrap_or_default(),
         cmd: i.and_then(|i| i.cmd).unwrap_or_default(),
     })
 }

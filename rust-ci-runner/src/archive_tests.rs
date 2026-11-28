@@ -15,20 +15,6 @@ use std::path::PathBuf;
 const BAD: &str = "archive unreadable";
 const HEX: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
-/// `Result::unwrap_err` needs `ImageConfig: Debug`; the tests must not force that derive.
-trait UnwrapErr {
-    fn unwrap_err(self) -> &'static str;
-}
-
-impl UnwrapErr for Result<crate::archive::ImageConfig, &'static str> {
-    fn unwrap_err(self) -> &'static str {
-        match self {
-            Err(e) => e,
-            Ok(_) => panic!("expected an error, got Ok"),
-        }
-    }
-}
-
 struct Tmp(PathBuf);
 
 impl Tmp {

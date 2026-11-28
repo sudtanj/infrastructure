@@ -290,7 +290,11 @@ impl Engine {
     /// error counts as left.
     pub fn run_left(&self, run_id: &str) -> bool {
         let filter = format!("label={LABEL}={run_id}");
-        let kinds: [&[&str]; 3] = [&["ps", "-aq"], &["network", "ls", "-q"], &["volume", "ls", "-q"]];
+        let kinds: [&[&str]; 3] = [
+            &["ps", "-aq"],
+            &["network", "ls", "-q"],
+            &["volume", "ls", "-q"],
+        ];
         kinds.iter().any(|list| {
             let mut a: Vec<&str> = list.to_vec();
             a.extend(["--filter", &filter]);

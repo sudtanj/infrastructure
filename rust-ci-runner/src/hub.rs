@@ -64,11 +64,13 @@ fn probe(
         .get(&format!("{base}/v2/repositories/{namespace}/{name}/"))
         .set("Authorization", &format!("Bearer {jwt}"));
     match send(req, None).ok_or(API)? {
-        (200, text) => match serde_json::from_str::<Value>(&text).map(|v| v["is_private"].as_bool()) {
-            Ok(Some(false)) => Ok(Repo::Public),
-            Ok(Some(true)) => Ok(Repo::Private),
-            _ => Err(API),
-        },
+        (200, text) => {
+            match serde_json::from_str::<Value>(&text).map(|v| v["is_private"].as_bool()) {
+                Ok(Some(false)) => Ok(Repo::Public),
+                Ok(Some(true)) => Ok(Repo::Private),
+                _ => Err(API),
+            }
+        }
         (404, _) => Ok(Repo::Missing),
         (401 | 403, _) => Err(NO_ACCESS),
         _ => Err(API),

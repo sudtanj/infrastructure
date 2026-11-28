@@ -22,9 +22,9 @@ mod archive_tests;
 #[cfg(test)]
 mod ci_tests;
 #[cfg(test)]
-mod fake;
-#[cfg(test)]
 mod engine_tests;
+#[cfg(test)]
+mod fake;
 #[cfg(test)]
 mod github_tests;
 #[cfg(test)]
