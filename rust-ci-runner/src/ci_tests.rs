@@ -1863,7 +1863,7 @@ fn every_stderr_line_is_in_the_fixed_list() {
                 let w = W::new(
                     "[steps.a]\nimage = \"alpine\"\ncommands = [\"x\"]\nsecrets = [\"NPM_TOKEN\"]\n",
                 );
-                let entry = "[[watch]]\nrepo = \"o/r\"\nid = 42\nbranches = [\"main\"]\nsecrets = [\"NPM_TOKEN\"]\n";
+                let entry = "[[watch]]\nrepo = \"o/r\"\nid = 42\nbranches = [\"main\"]\nsecret_branches = [\"main\"]\nsecrets = [\"NPM_TOKEN\"]\n";
                 std::fs::write(&w.watch, entry).unwrap();
                 w
             },
