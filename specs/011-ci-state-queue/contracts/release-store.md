@@ -75,20 +75,20 @@ See [loki-lines.md](loki-lines.md).
 
 ## Ledger (claims)
 
-Release tag `ci-sched+<owner>_<name>` (the watched repo), prerelease, never `latest`, created by the run job (a 4xx means re-fetch by tag). One asset per claim:
+Release tag `ci-sched+<owner>_<name>` (the watched repo), prerelease, never `latest`, seeded once by the owner (the job never creates it; it re-fetches by tag 3 times, 1 s then 2 s, on a 404). One asset per claim:
 
 | Kind | Regex | Label |
 |---|---|---|
-| Claim | `^claim-[0-9a-f]{16}-[0-9]{1,12}-[01]$` | `^[rpfe]\.[0-9]+\.[0-9a-f]{16}$` |
+| Claim | `^claim-[0-9a-f]{16}-[0-9]{1,12}-[01]$` | `^[rpf]\.[0-9]+\.[0-9a-f]{16}$` |
 
 `<h16>` is the first 16 hex characters of SHA-256 over `project`, a NUL byte and `branch`. Body: 1 byte.
 
 | Purpose | Call |
 |---|---|
-| Plan read | `GET /repos/{store}` (`private: true`), `GET .../releases/tags/ci-sched+...` (404 on an existing private store means an empty ledger), `GET .../releases/{id}/assets?per_page=100&page=N`, at most 4 calls per repo and tick, more than 300 assets fails closed; `Date` header is `now` |
-| Claim | `POST` upload `claim-<h16>-<slot>-<n>` with label `r.<epoch>.<runid>`; any 4xx means list and decide (another run owns it) |
-| Finish | `PATCH .../assets/{id}` `{"label":"p.<epoch>.<runid>"}` or `f.`; 3 tries, 1 s apart |
+| Plan read | `GET /repos/{store}` (`private: true`), `GET .../releases/tags/ci-sched+...` (a 404 or 403 is a problem, not an empty ledger), `GET .../releases/{id}/assets?per_page=100&page=N`, at most 4 calls per repo and tick, more than 300 assets fails closed; `Date` header is `now` |
+| Claim | `POST` upload `claim-<h16>-<slot>-<n>` with label `r.<epoch>.<runid>`; any 4xx means list and decide (lost, ours, or delete a half-created asset over 360 s and retry once) |
+| Finish | `PATCH .../assets/{id}` `{"label":"p.<epoch>.<runid>"}` or `f.`, right after the pipeline returns; 3 tries, honouring the rate-limit pause |
 | Sweep | `DELETE` all but the 2 newest `uploaded` claims of the same `<h16>`, and any claim whose label epoch is over 90 days old; 404 counts as gone |
-| Cancel | `DELETE` the own claim, 5 s, no retry |
+| Cancel | `DELETE` the own claim only while it is `r` and no step has completed, else `PATCH` `f`; 5 s, no retry |
 
-Rules: only `uploaded` assets count; stale is label missing or malformed, epoch over 120 s ahead of the reader's `Date`, or `r` with the epoch 3600 s or more behind; a stale `n = 0` is followed by `n = 1`, a stale `n = 1` closes the slot (`e`, one `error` status). No shared document is read, modified and written; the creator is the only writer of its asset. Mutations are at least 1 s apart and the rate-limit pause of the table above applies to the job (renewals exempt).
+Rules: claims of one `<h16>` are ordered by the `(slot, n)` of the name; only `uploaded` assets count (a not-`uploaded` claim under 360 s counts as running, older is ignored by the plan and deleted by the job); a 4xx on the claim create is followed by a list: `uploaded` and not ours is lost, ours is created, not `uploaded` and over 360 s is deleted and the create retried once; the ledger release is seeded by the owner and a plan-side 404, 403 or unreadable store is a problem, never an empty ledger (the job re-fetches 3 times, 1 s then 2 s); stale is label missing or malformed, epoch over 120 s ahead of the reader's `Date`, or `r` with the epoch 3600 s or more behind; a stale `n = 0` is followed by `n = 1`, a stale `n = 1` closes the slot (one `error` status from the plan). No shared document is read, modified and written; the creator is the only writer of its asset. Mutations are at least 1 s apart and the rate-limit pause of the table above applies to the job (renewals exempt).

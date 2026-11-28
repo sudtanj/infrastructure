@@ -9,7 +9,7 @@ A table of a project's `.factory-ci.toml`, evaluated by `plan` and recomputed by
 | `every` | string, required | `^[1-9][0-9]{0,4}[mhd]$`, from 900 s (`15m`) to 2,678,400 s (`31d`) |
 | `offset` | string, optional | `^(0|[1-9][0-9]{0,4}[mhd])$`, smaller than `every`, default 0 |
 
-No other key. Time is UTC. `due(now) = now - ((now - offset) mod every)`, in seconds since the Unix epoch. Honoured only for `main` of a private repo whose entry has `allow_docker = false` and `secret_branches` exactly `["main"]`, for a project that is not `docker/<name>`.
+No other key. Time is UTC and slots are aligned to the Unix epoch, not to the day or week: `7d` lands on Thursday 00:00 UTC (1970-01-01 was a Thursday), so a Monday 09:00 UTC weekly run is `every = "7d"`, `offset = "4d9h"`.  `due(now) = now - ((now - offset) mod every)`, in seconds since the Unix epoch. Honoured only for `main` of a private repo whose entry has `allow_docker = false` and `secret_branches` exactly `["main"]`, for a project that is not `docker/<name>`.
 
 ## Claim
 
@@ -18,12 +18,13 @@ One 1-byte asset per claim in release `ci-sched+<owner>_<name>` of `<owner>/fact
 | Field | Rule |
 |---|---|
 | name | `claim-<h16>-<slot>-<n>`, `^claim-[0-9a-f]{16}-[0-9]{1,12}-[01]$`; `<h16>` is the first 16 hex characters of SHA-256 over `project`, a NUL byte and `branch`; `<slot>` is the decimal epoch of the slot; `<n>` is 0, or 1 for the retry of a stale claim |
-| label | `<o>.<epoch>.<runid>`, `^[rpfe]\.[0-9]+\.[0-9a-f]{16}$`; `r` running, `p` passed, `f` failed, `e` closed with an error; `<runid>` is the row's run id |
+| label | `<o>.<epoch>.<runid>`, `^[rpf]\.[0-9]+\.[0-9a-f]{16}$`; `r` running, `p` passed, `f` failed (the pipeline outcome); `<runid>` is the row's run id |
 | writer | its creator only (create, then `PATCH` of the label); `plan` only lists |
 | stale | label missing or malformed, epoch more than 120 s ahead of the reader's `Date`, or `r` with the epoch 3600 s or more behind |
-| count | only `uploaded` assets; at most 2 per `<h16>` after a claim ends; any claim older than 90 days is swept; more than 300 assets in the release fails closed |
+| order | by the `(slot, n)` parsed from the name, never by asset id |
+| count | only `uploaded` assets (a not-`uploaded` claim younger than 360 s counts as running; an older one is ignored by `plan` and deleted by the job); at most 2 per `<h16>` after a claim ends; any claim older than 90 days is swept; more than 300 assets in the release fails closed |
 
-State machine: absent -> `r` -> `p` or `f` (the creator's label write) -> swept. A stale `r` with `n = 0` is followed by a new claim `n = 1`; a stale `n = 1` closes the slot with an `error` status.
+State machine: absent -> `r` (after the queue turn, before restore) -> `p` or `f` (the creator's label write, right after the pipeline returns) -> swept. A cancel deletes the claim only while it is `r` and no step has completed, else it sets `f`. A stale `r` with `n = 0` is followed by a new claim `n = 1`; a stale `n = 1` closes the slot (the plan posts one `error` status). There is no `e` label.
 
 ## Watch entry
 

@@ -44,3 +44,5 @@ Shipped by the run job as step `ci`, and by `plan` through its heartbeat line wh
 | `schedule due <n> rows` (plan) | rows planned this tick |
 | `schedule ledger unreadable` (plan) | the ledger read failed, no scheduled row |
 | `schedule ignored <n>` (plan) | schedules ignored by the gate, counts only |
+
+Added by the critic review: `claim marked failed on cancel` (a cancel after a step completed), `claim half-created deleted`, `schedule silent exit <reason>` (the job found nothing due or lost the claim; the alert counts more than 3 in a row for one project without a `claim created`), and plan heartbeat `schedule backoff <n>`. The alert rules also fire on a tick longer than 20 minutes (no plan heartbeat for 20 minutes, no data is Alerting).

@@ -104,3 +104,13 @@ Dropped by the owner rule of 2026-11-28: a `cron` line is a workflow edit. The e
 ## R-E update
 
 Schedule: not a workflow matter after all. The tick already runs about every 5 minutes, so a toml-declared slot evaluated by `plan` replaces cron lines (R-I). The earlier evidence that GitHub delays and disables scheduled workflows no longer applies: the outside dispatcher runs the tick.
+
+## R-M The frozen status fallback (critic review, B1)
+
+**Decision**: `job::status` routes by the latest own status of the push context (`pending` means a push row), not by a marker file.
+
+**Evidence**: `factory-ci-tick.yml:203-209` runs the fallback on any failed `job` step; `factory-ci-status.sh:18-23` passes only repo, sha, project, run id, state, description and the retry flag; `job::post` writes `projects::context(project)`; `walk.rs:104` retries an `error` older than 30 minutes. Refusals before the runner starts (`factory-ci-job.sh:30-45`) cannot leave a marker, and `plan.rs:414-450` posts `pending` for every push row before it keeps the row, so a push row always has `pending` on its push context when the fallback runs.
+
+## R-N Failure before the claim (critic review, M1)
+
+A claim cannot exist before a usable store token. The backoff therefore lives in the schedule-context `error` status (written by `job` or by the fallback) and the plan reads it from the status cache the walk already fills. Window `min(every, 3600 s)`; statuses stay under the 1000 cap because an `error` posts at most once per window.

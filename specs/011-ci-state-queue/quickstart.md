@@ -20,17 +20,18 @@ The owner rule bans any change to a file under `.github/workflows/` or `.github/
 
 ## 3. Watch entry (T030, after section 2)
 
-Open the pull request that adds `secret_branches = ["main"]` to the `sudtanj/factory-monorepo` entry and updates the comment block. Check: `plan --repos .github/factory-ci-repos.toml --check` passes with the 0.4.x runner and with 0.3.0; the next tick still posts the same statuses.
+Open the pull request that adds `secret_branches = ["main"]` to the `sudtanj/factory-monorepo` entry and updates the comment block. The pull request text says the key also lets the frozen manual `ci` give declared step secrets on `main` (010), and enables the tick store features only from 0.4.x. Check: `plan --repos .github/factory-ci-repos.toml --check` passes with the 0.4.x runner and with 0.3.0; the next tick still posts the same statuses.
 
 ## 4. Release canary on the real store (T029; owner, before any state exists)
 
-Run against `<owner>/factory-ci-state` with the real state token, in scratch releases `ci-queue+canary+x+y` and `ci-sched+canary_x`. Expected result on each line:
+Seed the ledger release `ci-sched+<owner>_<name>` first (owner action 1). Run against `<owner>/factory-ci-state` with the real state token, in scratch releases `ci-queue+canary+x+y` and `ci-sched+canary_x`. Expected result on each line:
 
 | Check | How | Expect |
 |---|---|---|
 | Store repo private, immutable releases off, initial README commit, no tag ruleset blocking creation | repo settings and `GET /repos/<store>` | `private: true`, setting off |
 | `FACTORY_CI_TOKEN` reads the store | `GET` the release with that token | 200 |
-| Release create | `gh api -X POST` on `releases` | 201 |
+| Release create and tag lookup lag | `gh api -X POST` on `releases`, then `GET releases/tags/<tag>` at once, 200 trials | 201; the lookup finds the tag every time (the owner seeds the ledger release, the job re-fetches 3 times) |
+| Token without contents scope on the store | `GET releases/tags/<tag>` with a fine-grained token that lacks it | record 403 or 404; the plan reads both as a problem |
 | Upload `t-<16 hex>-1-0` then a second | upload to `uploads.github.com` | both 201, the second `id` greater |
 | Duplicate name (a claim name too) | upload the same name again | a 4xx |
 | Label update | `PATCH` the asset label, then `GET` | label changed |
@@ -55,6 +56,7 @@ Loki query: `{service_name="factory-ci", repo="sudtanj/factory-monorepo"}`, filt
 
 1. Add `[schedule]` with `every = "15m"` to a fixture project first. Expect one `claim created` per slot, none twice, `claim passed`, and a status only on the first run.
 2. Kill a run job mid-run. Expect `claim stale break` after 3600 s, one retry, and no third run.
+   Refuse a scheduled row on purpose (remove the store key for one tick): expect `error` on `factory-ci-schedule[/<project>]`, the push context of that sha unchanged, and no new row for the project until the `error` is older than `min(every, 1 h)`. Cancel a tick mid-run after a step finished: expect the claim set to `f`, not deleted.
 3. Run the Playwright project. Expect `restore none`, a pass, `state saved`; the next slot `restore ok` and no login.
 4. Fail a fixture on purpose. Expect an artifact asset, a Loki line with release and asset names, nothing in the Actions log. Open it with `rust-ci-runner/scripts/open-artifact.sh`.
 5. 0.4.1: seed a throwaway vault password in a canary item, echo it in a failing step. Expect `artifact upload refused` or a masked log and no asset holding it. Rotate the throwaway.
