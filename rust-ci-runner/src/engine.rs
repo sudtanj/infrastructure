@@ -899,18 +899,22 @@ mod tests {
         }
     }
 
-    // Text made of the value's own prefix, repeated for more than one chunk, with the value at the cut. The
-    // cut moves back, and back again while the text keeps looking like a prefix, and it must still end
-    // before the occurrence. `cut_point` falls back to the plain cut when the walk reaches the start of the
-    // chunk, and that cuts through the value: a defect, reported in test-map.md.
+    // D1 in test-map.md. The base64 of `ke-site-value-Q7x1` starts with `a`, so a run of `a` is a prefix of a form
+    // at every byte. `cut_point` walks back one byte at a time to the start of the chunk, then falls back to
+    // the plain cut, which is in the middle of the value. Same with a text that repeats the value's own prefix.
     #[test]
-    #[ignore = "defect: cut_point falls back to the plain cut on a periodic prefix, see test-map.md"]
-    fn pump_masks_a_value_that_follows_its_own_prefix_repeated() {
-        let v = "abcabcabcabcabcabc-Z9";
-        let red = Redactor::new([v.to_string()]);
-        let input = format!("{}{v}tail\n", "abc".repeat(21845));
-        let got = pieces(input.as_bytes(), &red.forms());
-        assert_eq!(got.concat(), input);
-        assert_eq!(shown(&red, &got), format!("{}***tail", "abc".repeat(21845)));
+    #[ignore = "defect D1: cut_point walks to the chunk start on a run of a form's first character, see test-map.md"]
+    fn pump_masks_a_value_after_a_run_of_a_forms_first_character() {
+        let cases = [
+            ("a".repeat(CUT - 6), "fake-site-value-Q7x1"),
+            ("abc".repeat(21845), "abcabcabcabcabcabc-Z9"),
+        ];
+        for (fill, v) in cases {
+            let red = Redactor::new([v.to_string()]);
+            let input = format!("{fill}{v}tail\n");
+            let got = pieces(input.as_bytes(), &red.forms());
+            assert_eq!(got.concat(), input);
+            assert_eq!(shown(&red, &got), format!("{fill}***tail"), "{v}");
+        }
     }
 }
