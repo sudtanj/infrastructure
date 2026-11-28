@@ -1,6 +1,7 @@
 pub mod ci;
 pub mod engine;
 pub mod github;
+pub mod image;
 pub mod job;
 pub mod log;
 pub mod pipeline;
@@ -20,6 +21,8 @@ mod ci_tests;
 mod fake;
 #[cfg(test)]
 mod github_tests;
+#[cfg(test)]
+mod image_tests;
 #[cfg(test)]
 mod job_tests;
 #[cfg(test)]

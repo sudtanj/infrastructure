@@ -89,14 +89,12 @@ fn expect_has(got: Vec<&'static str>, id: &str, case: &str) {
 // ---- baseline, constants, name and path helpers ----
 
 #[test]
-#[ignore = "test-first"]
 fn the_passing_fixture_returns_empty() {
     // 012 T006; S1 "Passing fixture returns empty"
     assert_eq!(ids(DF), Vec::<&str>::new());
 }
 
 #[test]
-#[ignore = "test-first"]
 fn the_fixture_dir_on_disk_passes_too() {
     // 012 T004: the committed fixture folder, not the in-memory copy
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/image/pass");
@@ -112,7 +110,6 @@ fn the_real_hello_static_passes() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn constants_match_the_data_model() {
     // 012 T005; data-model.md "Constants"
     assert_eq!(NAMESPACE, "sudtanj");
@@ -133,7 +130,6 @@ fn constants_match_the_data_model() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn name_ok_boundaries_2_and_64_pass_1_and_65_fail() {
     // 012 T006; data-model.md Image project.name; FR-002
     assert!(!name_ok("a"), "length 1");
@@ -144,7 +140,6 @@ fn name_ok_boundaries_2_and_64_pass_1_and_65_fail() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn name_ok_follows_the_dash_rule() {
     // 012 T006; `^[a-z0-9]+(-[a-z0-9]+)*$`
     for good in ["hello-static", "a-b", "00", "a1-b2-c3", "x9"] {
@@ -159,7 +154,6 @@ fn name_ok_follows_the_dash_rule() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn publishes_needs_docker_prefix_and_main() {
     // 012 T005; data-model.md `publishes`; FR-005, FR-023
     assert!(publishes("docker/x", "main"));
@@ -177,7 +171,6 @@ fn publishes_needs_docker_prefix_and_main() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn image_project_is_only_the_docker_prefix() {
     // 012 T005
     assert!(image_project("docker/x"));
@@ -192,7 +185,6 @@ fn image_project_is_only_the_docker_prefix() {
 // ---- layout ----
 
 #[test]
-#[ignore = "test-first"]
 fn layout_fails_for_each_missing_required_file() {
     // 012 T006; Image project.required files
     for gone in ["Dockerfile", "README.md", ".factory-ci.toml"] {
@@ -203,7 +195,6 @@ fn layout_fails_for_each_missing_required_file() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn layout_fails_for_an_empty_folder_and_a_missing_folder() {
     // 012 T006
     let t = Tmp::new();
@@ -212,7 +203,6 @@ fn layout_fails_for_an_empty_folder_and_a_missing_folder() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn layout_fails_for_a_symlink_or_directory_in_place_of_a_file() {
     // 012 T006; each required file must be a regular file, not a symlink (read with symlink_metadata)
     use std::os::unix::fs::symlink;
@@ -234,7 +224,6 @@ fn layout_fails_for_a_symlink_or_directory_in_place_of_a_file() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn layout_fails_for_a_dockerfile_over_256_kib() {
     // 012 T006; S1 "capped at 256 KB"; a 1 MB file too
     for size in [256 * 1024 + 1, 1 << 20] {
@@ -244,7 +233,6 @@ fn layout_fails_for_a_dockerfile_over_256_kib() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn layout_fails_for_nul_and_invalid_utf8_and_never_panics() {
     // 012 T006; S1 "NUL and invalid UTF-8 return layout, never panic"
     let nul = format!("{DF}\0");
@@ -264,7 +252,6 @@ fn layout_fails_for_nul_and_invalid_utf8_and_never_panics() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn check_never_panics_on_junk() {
     // 012 T006 (I2): 1 MB, NUL, invalid UTF-8, pseudo-random bytes; output stays sorted and unique
     let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
@@ -305,7 +292,6 @@ fn check_never_panics_on_junk() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn output_is_sorted_and_each_id_once() {
     // 012 T006; "returns the ids that fail, sorted, once each"
     let df = format!("# syntax=x\n# escape=`\n{DF}ADD a b\nADD c d\nONBUILD RUN x\nVOLUME /v\n");
@@ -321,7 +307,6 @@ fn output_is_sorted_and_each_id_once() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn crlf_bom_and_both_are_not_a_layout_problem() {
     // 012 T006; edge answers of `layout`
     let crlf = DF.replace('\n', "\r\n");
@@ -335,7 +320,6 @@ fn crlf_bom_and_both_are_not_a_layout_problem() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn crlf_and_bom_do_not_hide_a_bad_instruction() {
     // 012 T006: the strip must not drop the rule
     let bad = format!("\u{feff}{}", in_build("ADD a b")).replace('\n', "\r\n");
@@ -345,7 +329,6 @@ fn crlf_and_bom_do_not_hide_a_bad_instruction() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn keywords_are_case_insensitive_both_ways() {
     // 012 T006; "Instruction keywords are case-insensitive"
     let lower: String = DF
@@ -373,7 +356,6 @@ fn keywords_are_case_insensitive_both_ways() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_commented_out_instruction_is_not_an_instruction() {
     // 012 T006; comment-FROM edge
     let df = format!("# FROM alpine\n# ADD a b\n    # ENV TOKEN=1\n{DF}\n# RUN true\n");
@@ -381,7 +363,6 @@ fn a_commented_out_instruction_is_not_an_instruction() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn continuations_join_and_comments_inside_them_are_skipped() {
     // 012 T006; "joins `\` continuations"
     let df = df_with(
@@ -401,7 +382,6 @@ fn continuations_join_and_comments_inside_them_are_skipped() {
 // ---- directive ----
 
 #[test]
-#[ignore = "test-first"]
 fn directive_fails_for_each_spelling() {
     // 012 T006; data-model.md `directive`; S1 five spellings
     for line in [
@@ -419,7 +399,6 @@ fn directive_fails_for_each_spelling() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn directive_fails_anywhere_in_the_file_and_in_a_heredoc_body() {
     // 012 T006; "anywhere in the file"
     let mid = in_build("# syntax=x");
@@ -431,7 +410,6 @@ fn directive_fails_anywhere_in_the_file_and_in_a_heredoc_body() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_comment_that_only_mentions_syntax_is_fine() {
     // 012 T006: the rule needs `=`
     let df = format!("# syntax is pinned elsewhere\n# the escape hatch\n{DF}");
@@ -441,7 +419,6 @@ fn a_comment_that_only_mentions_syntax_is_fine() {
 // ---- instruction ----
 
 #[test]
-#[ignore = "test-first"]
 fn instruction_fails_for_each_disallowed_keyword() {
     // 012 T006; S1 bypasses `ADD`, `ONBUILD`, `SHELL`, `HEALTHCHECK`, `VOLUME`; plus the table's others
     for line in [
@@ -460,7 +437,6 @@ fn instruction_fails_for_each_disallowed_keyword() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn the_allowlist_instructions_pass() {
     // 012 T006: FROM ARG ENV WORKDIR COPY RUN USER ENTRYPOINT CMD LABEL EXPOSE are not `instruction`
     let df =
@@ -471,7 +447,6 @@ fn the_allowlist_instructions_pass() {
 // ---- heredoc ----
 
 #[test]
-#[ignore = "test-first"]
 fn heredoc_fails_in_env_arg_label_and_from() {
     // 012 T006; S1 `<<` in `ENV`, `ARG`, `LABEL`, `FROM`
     for line in [
@@ -491,7 +466,6 @@ fn heredoc_fails_in_env_arg_label_and_from() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn run_and_copy_heredoc_bodies_are_skipped() {
     // 012 T006; S1: bodies are not instructions, a `FROM`/`ADD` inside is ignored
     for opener in ["RUN <<EOF", "RUN <<-EOF", "RUN <<\"EOF\"", "RUN <<'EOF'"] {
@@ -510,7 +484,6 @@ fn run_and_copy_heredoc_bodies_are_skipped() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn code_after_a_heredoc_terminator_is_checked_again() {
     // 012 T006: the skip ends at the terminator line
     let df = in_build("RUN <<EOF\necho hi\nEOF\nADD x y");
@@ -520,7 +493,6 @@ fn code_after_a_heredoc_terminator_is_checked_again() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn heredoc_skip_survives_crlf() {
     // 012 T006
     let df = in_build("RUN <<EOF\nADD x y\nEOF").replace('\n', "\r\n");
@@ -530,7 +502,6 @@ fn heredoc_skip_survives_crlf() {
 // ---- external-source ----
 
 #[test]
-#[ignore = "test-first"]
 fn external_source_fails_for_a_from_that_is_not_an_earlier_stage() {
     // 012 T006; S1 `COPY --from=alpine`, `--from=docker.io/x`, `--from=5`, `RUN --mount=...from=alpine`
     let cases = [
@@ -550,7 +521,6 @@ fn external_source_fails_for_a_from_that_is_not_an_earlier_stage() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn external_source_passes_for_earlier_stage_names_and_numbers() {
     // 012 T006; `--from=build` and `--from=0` pass; names are case-insensitive
     assert_eq!(ids(DF), Vec::<&str>::new(), "--from=build");
@@ -571,7 +541,6 @@ fn external_source_passes_for_earlier_stage_names_and_numbers() {
 // ---- from-unpinned, from-arg ----
 
 #[test]
-#[ignore = "test-first"]
 fn from_unpinned_fails_without_a_full_digest() {
     // 012 T006; data-model.md `from-unpinned`; tag only, short, 63 and 65 hex
     let a = hex('a');
@@ -590,7 +559,6 @@ fn from_unpinned_fails_without_a_full_digest() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn from_unpinned_a_stage_name_counts_only_after_its_own_line() {
     // 012 T006; `FROM alpine AS alpine`
     let df = format!(
@@ -601,7 +569,6 @@ fn from_unpinned_a_stage_name_counts_only_after_its_own_line() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn from_unpinned_passes_scratch_stage_names_and_the_platform_flag() {
     // 012 T006; scratch, an earlier stage as the reference, flag is not the reference
     let df = "FROM scratch AS base\nCOPY hello /hello\nFROM base AS mid\nUSER 65532\nFROM mid\nENTRYPOINT [\"/hello\"]\n";
@@ -614,7 +581,6 @@ fn from_unpinned_passes_scratch_stage_names_and_the_platform_flag() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn from_arg_fails_with_and_without_an_arg_default() {
     // 012 T006; data-model.md `from-arg`
     let a = hex('a');
@@ -640,7 +606,6 @@ fn from_arg_fails_with_and_without_an_arg_default() {
 // ---- emulation ----
 
 #[test]
-#[ignore = "test-first"]
 fn emulation_fails_when_a_run_stage_lacks_the_buildplatform_flag() {
     // 012 T006; FR-027
     let no_flag = df_with("FROM --platform=$BUILDPLATFORM ", "FROM ");
@@ -654,7 +619,6 @@ fn emulation_fails_when_a_run_stage_lacks_the_buildplatform_flag() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn emulation_passes_with_either_spelling_and_for_stages_without_run() {
     // 012 T006
     let braces = df_with("--platform=$BUILDPLATFORM", "--platform=${BUILDPLATFORM}");
@@ -664,7 +628,6 @@ fn emulation_passes_with_either_spelling_and_for_stages_without_run() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn emulation_applies_to_a_middle_stage() {
     // 012 T006
     let df = df_with(
@@ -680,7 +643,6 @@ fn emulation_applies_to_a_middle_stage() {
 // ---- final-base, final-run, final-shell, final-user ----
 
 #[test]
-#[ignore = "test-first"]
 fn final_base_fails_for_debug_and_non_distroless_bases() {
     // 012 T006; data-model.md `final-base`
     let b = hex('b');
@@ -700,7 +662,6 @@ fn final_base_fails_for_debug_and_non_distroless_bases() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn final_base_passes_scratch_and_distroless() {
     // 012 T006
     let b = hex('b');
@@ -733,7 +694,6 @@ fn chain(n: usize) -> String {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn final_base_follows_stage_links_up_to_20() {
     // 012 T006; "chain depth limit 20". The ends of the range are the plan's words: a short chain ending
     // at scratch passes, a chain past the limit cannot be proved safe and fails (ambiguity reported to the lead).
@@ -751,7 +711,6 @@ fn final_base_follows_stage_links_up_to_20() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn final_run_fails_for_a_run_anywhere_on_the_final_chain() {
     // 012 T006; data-model.md `final-run`
     expect_has(
@@ -768,7 +727,6 @@ fn final_run_fails_for_a_run_anywhere_on_the_final_chain() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn a_run_in_a_stage_off_the_final_chain_is_not_final_run() {
     // 012 T006: the build stage of the fixture has a RUN and the final stage copies from it
     let got = ids(DF);
@@ -776,7 +734,6 @@ fn a_run_in_a_stage_off_the_final_chain_is_not_final_run() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn final_shell_fails_for_shell_form_cmd_and_entrypoint() {
     // 012 T006; data-model.md `final-shell`
     let shell_entry = df_with("ENTRYPOINT [\"/hello\"]", "ENTRYPOINT /hello");
@@ -798,7 +755,6 @@ fn final_shell_fails_for_shell_form_cmd_and_entrypoint() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn final_shell_fails_for_a_copy_of_a_shell_or_package_manager() {
     // 012 T006; the basename list of data-model.md
     for n in [
@@ -827,7 +783,6 @@ fn final_shell_fails_for_a_copy_of_a_shell_or_package_manager() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn final_user_fails_when_absent_non_numeric_or_root() {
     // 012 T006; data-model.md `final-user`; `USER $X` fails as non-numeric
     for u in [
@@ -853,7 +808,6 @@ fn final_user_fails_when_absent_non_numeric_or_root() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn final_user_passes_numeric_non_root_and_the_last_user_wins() {
     // 012 T006; `USER 1000:0` passes
     for u in [
@@ -876,7 +830,6 @@ fn final_user_passes_numeric_non_root_and_the_last_user_wins() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn final_user_follows_the_chain_back() {
     // 012 T006: a USER set in a stage the final stage extends counts
     assert_eq!(ids(&chain(3)), Vec::<&str>::new());
@@ -891,7 +844,6 @@ fn final_user_follows_the_chain_back() {
 // ---- secret-name ----
 
 #[test]
-#[ignore = "test-first"]
 fn secret_name_fails_for_credential_like_arg_and_env_names() {
     // 012 T006; data-model.md `secret-name`; both `ENV A=1 B=2` and `ENV KEY value` forms
     for line in [
@@ -916,7 +868,6 @@ fn secret_name_fails_for_credential_like_arg_and_env_names() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn secret_name_passes_for_plain_names_and_names_in_values() {
     // 012 T006; `ARG TARGETARCH` passes
     for line in [
@@ -936,7 +887,6 @@ fn secret_name_passes_for_plain_names_and_names_in_values() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn secret_name_fails_for_a_toml_env_key() {
     // 012 T006; "or a `.factory-ci.toml` `env` key does"
     for k in ["API_TOKEN", "MY_PASSWORD", "SSH_KEY", "client_secret"] {
@@ -960,7 +910,6 @@ fn tok(prefix: &str, n: usize, c: char) -> String {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn secret_value_fails_at_each_threshold_and_passes_one_below() {
     // 012 T006; data-model.md `secret-value`; synthetic strings only
     let cases: [(&str, usize, char); 9] = [
@@ -987,7 +936,6 @@ fn secret_value_fails_at_each_threshold_and_passes_one_below() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn secret_value_scans_the_toml_and_comments_and_private_key_headers() {
     // 012 T006; "scans comments too"; `-----BEGIN ... PRIVATE KEY-----`
     let hit = tok("dckr_pat_", 24, 'A');
@@ -1017,7 +965,6 @@ fn secret_value_scans_the_toml_and_comments_and_private_key_headers() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn secret_value_matches_the_class_not_just_the_prefix() {
     // 012 T006: `dckr_pat_` takes [A-Za-z0-9_-]; `AKIA` takes [0-9A-Z]
     let dash = format!(
@@ -1048,7 +995,6 @@ fn secret_value_matches_the_class_not_just_the_prefix() {
 // ---- secret-flag ----
 
 #[test]
-#[ignore = "test-first"]
 fn secret_flag_fails_for_secret_and_ssh_mounts() {
     // 012 T006; data-model.md `secret-flag`
     for line in [
@@ -1063,7 +1009,6 @@ fn secret_flag_fails_for_secret_and_ssh_mounts() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn secret_flag_fails_for_toml_commands() {
     // 012 T006: `--secret`, `--ssh`, `--build-arg` in any command
     for flag in ["--secret id=x", "--ssh default", "--build-arg X=1"] {
@@ -1075,7 +1020,6 @@ fn secret_flag_fails_for_toml_commands() {
 // ---- pipeline-secrets, step-image ----
 
 #[test]
-#[ignore = "test-first"]
 fn pipeline_secrets_fails_for_a_step_with_secrets_or_a_broken_file() {
     // 012 T006; data-model.md `pipeline-secrets`
     let listed = toml_with(
@@ -1109,7 +1053,6 @@ fn pipeline_secrets_fails_for_a_step_with_secrets_or_a_broken_file() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn step_image_fails_for_unpinned_images_on_any_step() {
     // 012 T006; S1 `image = "alpine"`, `image = "alpine:3.23"`; FR-029
     let pinned = format!("image = \"docker:27.5.1-cli@sha256:{}\"", hex('c'));
