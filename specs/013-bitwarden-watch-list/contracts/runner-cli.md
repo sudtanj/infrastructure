@@ -24,19 +24,22 @@ Same keys and limits as before (`repo`, `id`, `branches`, `secret_branches`, `se
 | `entry N: secret is reserved or malformed` / `secret is listed twice` | secrets |
 | `entry N: allow_docker must be true or false` | type |
 
-`watch::check_owner(entries, owner)` returns `entry N: repo owner differs from the repository owner` per mismatch (case-insensitive); an empty `owner` returns `file: repository owner is not known`.
+`watch::check_owner(entries, owner)` returns `entry N: repo owner differs from the repository owner` per mismatch (case-insensitive); an empty `owner` returns `file: repository owner is not known`. It is a pure function of its arguments. It never reads the environment.
+
+Who supplies `owner`: `main.rs` reads `GITHUB_REPOSITORY_OWNER` once and passes it to `plan_a`; `ci` takes it from its `env` closure; `plan --check` takes it only from `--owner NAME`. Tests: unit tests pass the owner; CLI tests set the variable in the child process (to the fixture owner), clear it, and set a different value; no test reads the ambient variable (the selftest and CI always set it to the account name).
 
 ## `plan`
 
-- `plan --repos FILE|- --check`: validates with `parse`; `FILE` or stdin (at most 64 KiB + 1 byte, `-` only with `--check`). Prints `N entries ok` on stdout; errors on stderr, exit 1. Zero entries is an error. No network. `check_owner` runs only when `GITHUB_REPOSITORY_OWNER` is set.
-- Phase A (`--repos FILE --rows-out CAND`): `parse`, then `check_owner` (unset owner refuses), then the plan. Summary and problem lines use `entry N` and `item N`. The line for an `allow_docker` entry without a docker token is `entry N: FACTORY_CI_TOKEN_DOCKER is not set`. An id mismatch says `id differs from the list`.
+- `plan --repos FILE|- --check [--owner NAME]`: validates with `parse`; `FILE` or stdin (at most 64 KiB + 1 byte, `-` only with `--check`). Prints `N entries ok` on stdout; errors on stderr, exit 1. Zero entries is an error. No network. It never reads `GITHUB_REPOSITORY_OWNER`; `check_owner` runs only with `--owner`.
+- Phase A (`--repos FILE --rows-out CAND`): `parse`, then `check_owner` with the owner `main.rs` read (unset or empty refuses), then the plan. Summary and problem lines use `entry N` and `item N`. The line for an `allow_docker` entry without a docker token is `entry N: FACTORY_CI_TOKEN_DOCKER is not set`. An id mismatch says `id differs from the list`.
 - `B_PRIVATE` is private only when it equals `true`.
 - Phase C reads only candidates; its redactor is seeded from the repos in the candidate rows.
 
 ## `ci`
 
-- Without `--repos`: the list comes from the one `bws secret list` call, scoped by `FACTORY_CI_BWS_PROJECT` when set; `watch_text`, `parse`, `check_owner` (with `GITHUB_REPOSITORY_OWNER`).
-- With `--repos FILE`: the file path as before (development and tests; the production workflow never passes it).
+- Arguments: `--entry N` (a positive integer from 1 to 100) or `--repo OWNER/NAME`, never both and never neither; `--ref`, `--project`, `--work`, `--allow-docker` as before; `--repos FILE` optional. The manual workflow passes `--entry` only, so no repo name enters the dispatch input, the step `env:`, the step header or the log. `--entry` without the store source (with `--repos FILE`) resolves entry N of the file the same way.
+- Without `--repos`: the list comes from the one `bws secret list` call, scoped by `FACTORY_CI_BWS_PROJECT` when set; `watch_text`, `parse`, `check_owner` (owner from the `env` closure). With `--entry N` the repo is entry N's `repo`; an entry past the end or without `id` prints the unlisted line. The branch check (`branches` against `--ref`) and the docker check run as today.
+- With `--repos FILE`: the file path as before (development and tests; the production workflow never passes it; the owner rule is skipped).
 - Fault lines (`[runner] ` prefix): `repository or ref not in the watch list` (also for an empty token) and `watch list unusable`. `BWS_ACCESS_TOKEN is not set` leaves `FAULTS`.
 - One `bws` call per run.
 

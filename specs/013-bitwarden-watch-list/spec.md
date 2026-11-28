@@ -19,7 +19,7 @@ The owner, who keeps private repositories under the factory CI and does not want
 ## Problem
 
 - The list of watched repositories sits in `.github/factory-ci-repos.toml`, in a public repo. Anyone can read the name of every repo the owner watches, private ones included.
-- Other files name `PRIVATE_REPO` too: the root README, the default of the manual workflow's `repo` input, the file names of the manual workflow and its test, older specs.
+- Other files name `PRIVATE_REPO` too: the root README, the default of the manual workflow's `ref` and `project` inputs (the `entry` number names nothing), the file names of the manual workflow and its test, older specs.
 - The tick only runs when something dispatches it. The owner wants GitHub to start it every 5 minutes.
 - Public output prints list content today: the plan summary (`- item N: <repo>`, `<repo>: <why>`, the rate-limit list), `main.rs` (`<repo>: FACTORY_CI_TOKEN_DOCKER is not set`), `plan.rs` (`id N in the list, but the API says M`), and `watch::parse` messages (entry labels are repo names; some quote globs, secret names and values).
 - Under a `schedule` event `github.event.repository` is empty, so `B_PRIVATE` is empty and `main.rs` treats an empty value as "the runner repo is private" (`!= "false"`), which turns off the private-repo log-store guard. That is unsafe once a cron runs the tick.
@@ -65,10 +65,20 @@ The list of watched repositories lives in the Bitwarden secret `FACTORY_CI_REPOS
 
 - The Bitwarden value size limit is unverified. The only source found is the SDK's input validation (read through DeepWiki), which caps a value at 25,000 characters; the docs give no number. The owner confirms it (T002). The earlier guess of 3,500 is dropped. The parser's own 64 KiB and 100-entry caps stay.
 - The cutover is split: first the fetch lands with the committed file still present and the owner compares rows; the file is deleted later in its own pull request, after the owner re-checks that the Bitwarden value equals the committed file (feature 012's follow-up adds `allow_docker` and the Docker Hub secret names to the infrastructure entry).
-- T016 records the previous `RUNNER_IMAGE_DIGEST` before overwriting it. Rolling it back below 0.5.0 makes the public summary print repo names again and drops the M1 to M4 rules; it is allowed only together with `gh workflow disable factory-ci-tick`.
+- T015 records the previous `RUNNER_IMAGE_DIGEST` before overwriting it. Rolling it back below 0.5.0 makes the public summary print repo names again and drops the M1 to M4 rules; it is allowed only together with `gh workflow disable factory-ci-tick`.
 - Schedule monitoring counts Canceled runs (concurrency replacements) apart from Failed runs. The README documents the failure email per tick and the stop command `gh workflow disable factory-ci-tick`. The account that merges the cron line is the owner's, because GitHub notifies that account.
 - `plan --check` and phase A agree: both refuse a list with zero entries.
 - Feature 011 contradicts this spec in several places (no cron line, tick unchanged, a second `bws` call in `ci`); its documents are reconciled in the same session.
+
+### Session 2026-11-28 (critic review of revision 2: four majors and two notes, all accepted)
+
+- Q: The manual workflow prints `inputs.repo` in the step `env:`, and a public repo shows every `workflow_dispatch` input on the run page. How does a private repo get run by hand without its name appearing? -> A: The input no longer carries a name. The `repo` input is replaced by `entry`, the 1-based number of the entry in `FACTORY_CI_REPOS`. The workflow passes `ENTRY` through `env:` and `--entry "$ENTRY"` to `ci`, which resolves the repo in-process from the list it already fetched (the entry needs an `id`, as `ci` always required). The concurrency group names `inputs.entry`, `inputs.ref` and `inputs.project`. The number is public and names nothing; masking would not help, because the run page is built from the dispatch payload, not from the log. `ref` and `project` stay inputs: they are the owner's own typing and show on the run page, so the README tells the owner to use `main` and `.` or names that are not private (accepted leak L5). Old manual runs, whose inputs and logs carry the name, are deleted by the owner (T031).
+- Q: `GITHUB_REPOSITORY_OWNER` is always set (to the owner account) in the selftest and in CI, while test fixtures use other owners; how do tests and the selftest provide the owner? -> A: The owner rule runs in exactly two places: `plan` phase A and `ci` with the store source. Each takes the owner as an argument from one environment read at the edge (`main.rs` for `plan_a`, the `env` closure for `ci`). `plan --check` never reads the environment; it checks the owner only when the owner passes `--owner NAME`. Unit tests pass the owner explicitly. CLI tests set or clear `GITHUB_REPOSITORY_OWNER` in the child process explicitly (set to the fixture owner, unset, and a different value), and no test reads the ambient value. Fixtures that go through `plan_a` or the store source use the owner they set. The selftest `list` step runs `plan --repos <fixture> --check --owner sudtanj` and the fixture entries use `sudtanj/` names that are fake repos. Tests that use `--repos FILE` with `ci` skip the owner rule (file source is the development path).
+- Q: Which shell-test assertions change? -> A: Listed one by one in `contracts/script-changes.md` "Shell test changes" and in T017.
+- Q: Can the history rewrite miss refs, greps, signatures or a running tick? -> A: The runbook is rewritten: a mirror clone is rewritten, so every branch, tag and note ref is covered; `refs/pull/*` cannot be pushed and only GitHub Support purges it; verification scans every object (case and separator variants, tag messages, notes, identities); a pre-push check compares refs, counts and tip diffs; signed commits and tags lose their signatures; the tick and the release workflow are disabled and no run may be queued or in progress before the force-push.
+- Accepted risk: every tick now needs a working Bitwarden. An outage makes every 5-minute tick fail, which is up to 12 failure emails an hour, and the heartbeat goes silent (the tick is red and sends no ping). Mitigation: the README names the stop command `gh workflow disable factory-ci-tick`; the owner can lower the noise by disabling the workflow during a known outage; the `3-58/5` offset and a longer `FACTORY_CI_FETCH_WINDOW` are options, not taken.
+- Unverified: whether a `schedule` event payload has a `repository` object (decision D8 treats only the value `true` as private, which is safe whether the value is empty or present); the Bitwarden value size limit (T002).
+- Limit alignment: `watch.rs` refuses text longer than 65,536 bytes (`text.len() > MAX_BYTES`). The plan script writes the value with `printf '%s'` (no trailing newline) and refuses a value longer than 65,536 bytes, so script and parser fail at the same boundary: 65,536 passes both, 65,537 fails the script first.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -130,7 +140,7 @@ The plan summary and the plan's error lines drop repo names. An entry is `entry 
 
 ### User Story 4 - The manual `ci` command takes the list from Bitwarden (Priority: P2)
 
-`ci` reads `FACTORY_CI_REPOS` in the one `bws` call that already brings its four settings, scoped by `FACTORY_CI_BWS_PROJECT`, and checks the repo and ref against it. A repo that is not listed gets the old fixed line.
+`ci` reads `FACTORY_CI_REPOS` in the one `bws` call that already brings its four settings, scoped by `FACTORY_CI_BWS_PROJECT`. The manual workflow names the repo by `entry`, the 1-based number of its entry in the list, so no repo name enters the dispatch input, the step `env:` or the run page. A number that names no entry, or an entry without `id`, gets the old fixed line.
 
 **Why this priority**: the manual workflow stays usable; the tick does not depend on it.
 
@@ -138,8 +148,9 @@ The plan summary and the plan's error lines drop repo names. An entry is `entry 
 
 **Acceptance Scenarios**:
 
-1. **Given** a listed repo and ref, **When** `ci` runs without `--repos`, **Then** it proceeds as before with one `bws` call.
-2. **Given** an unlisted repo, **When** `ci` runs, **Then** it exits 1 and prints only `[runner] repository or ref not in the watch list`.
+1. **Given** `--entry N` for a listed entry with an `id` and a ref its `branches` match, **When** `ci` runs without `--repos`, **Then** it proceeds as before with one `bws` call.
+2. **Given** an entry number past the end of the list, an entry without `id`, or a ref no `branches` pattern matches, **When** `ci` runs, **Then** it exits 1 and prints only `[runner] repository or ref not in the watch list`.
+2a. **Given** a manual dispatch, **When** the run page and the step header are read, **Then** they show an entry number, a ref and a project, and no repo name; `--entry` and `--repo` together, or neither without `--repos`, are a usage error.
 3. **Given** no token (the release smoke test), **When** `ci` runs, **Then** it prints exactly that line and exits 1.
 4. **Given** the key is missing, duplicate, empty or malformed, **When** `ci` runs, **Then** it exits 1 with `[runner] watch list unusable`.
 5. **Given** an entry whose owner differs from `GITHUB_REPOSITORY_OWNER`, **When** `ci` runs, **Then** the list is unusable.
@@ -191,7 +202,7 @@ The owner pipes the list into `plan --repos - --check` on their own machine and 
 
 1. **Given** a valid list on stdin, **When** the command runs, **Then** it prints `N entries ok` and exits 0.
 2. **Given** an invalid list, **When** the command runs, **Then** it prints `entry N: ...` lines and exits 1.
-3. **Given** the owner's rules (owner, id, `secret_branches`), **When** the list breaks one, **Then** the line names the entry and the rule.
+3. **Given** the owner's rules (id, `secret_branches`; the owner rule only with `--owner NAME`), **When** the list breaks one, **Then** the line names the entry and the rule.
 
 ---
 
@@ -217,7 +228,9 @@ The current tree is scrubbed in a normal commit, old run logs that print names a
 - Bitwarden answers 401 or 403, times out, or returns something that is not a JSON list.
 - Two ticks overlap (cron, the outside dispatcher, a by-hand dispatch); the cron doubles the cadence while the outside dispatcher still runs.
 - GitHub delays or skips a scheduled run, or disables the schedule after 60 days without repo activity.
-- A repo owner differs from `GITHUB_REPOSITORY_OWNER`; `allow_docker` without `id`; `secret_branches = ["*"]`.
+- A repo owner differs from the repository owner; `allow_docker` without `id`; `secret_branches = ["*"]`.
+- A manual dispatch with an entry number of 0, a negative number, a word, 101, or an entry without `id`.
+- A value of exactly 65,536 bytes passes; 65,537 fails.
 - A value contains Unicode, CRLF line endings or a NUL.
 - `B_PRIVATE` empty, `true`, `false` or garbage.
 - A repo is removed from the list: its old statuses stay; nothing is posted again.
@@ -232,15 +245,15 @@ The current tree is scrubbed in a normal commit, old run logs that print names a
 - **FR-003**: The plan script MUST fail closed (exit 1, no phase A, no status, no output) when the token or project is missing, the store cannot be read, the key is missing, appears more than once, is empty, or is over 64 KiB. The text it writes to the summary MUST be fixed.
 - **FR-004**: Any text produced about the list (stdout, stderr, the summary, a candidates file, a status, a job output, an artifact, a panic message) MUST NOT contain a repo name, id, branch, glob, secret name or any other list content. It MAY contain `FACTORY_CI_REPOS`, `entry N`, `item N`, `line N`, a fixed field name, a count and a fixed reason. `watch::parse` itself MUST produce only such messages.
 - **FR-005**: The plan summary and problem lines MUST name entries as `entry N` and items as `item N`; the rate-limit list MUST list entry numbers; every `format!` that touches `e.repo`, `e.id` or `e.branches` in `main.rs`, `plan.rs`, `walk.rs` and `projects.rs` MUST be checked and fixed. A permanent hostile-list test MUST cover `plan --check`, phase A (including an `allow_docker` entry with no docker token), phase C and `ci`, and MUST be named in feature 011's tasks as a gate.
-- **FR-006**: `watch::parse` MUST refuse: a repo owner that differs from `GITHUB_REPOSITORY_OWNER` (checked by `plan` phase A and by `ci` with the store source, case-insensitive; an unset variable refuses); `allow_docker = true` or a non-empty `secrets` without `id`; a `secret_branches` item that is `*` or `**`; a list with zero entries.
+- **FR-006**: `watch::parse` MUST refuse: `allow_docker = true` or a non-empty `secrets` without `id`; a `secret_branches` item that is `*` or `**`; a list with zero entries. `watch::check_owner(entries, owner)` MUST refuse a repo owner that differs from `owner` (case-insensitive). It runs in `plan` phase A and in `ci` with the store source, each given the owner as an argument read once from `GITHUB_REPOSITORY_OWNER` at the edge (an unset or empty variable refuses), and in `plan --check` only when `--owner NAME` is passed. No test reads the ambient variable: unit tests pass the owner, CLI tests set or clear the variable in the child process.
 - **FR-007**: The Bitwarden token MUST NOT reach the plan runner, phase C, a run job or a step. The `ci` command reads it once and removes it from its environment.
 - **FR-008**: Every file that holds list text MUST be created exclusively at mode 0600 and removed on every exit path. The plan script MUST discard every row of the secret list except `FACTORY_CI_REPOS` before running the runner.
-- **FR-009**: `ci` MUST read the list from the same `bws` call as its four settings, scoped by `FACTORY_CI_BWS_PROJECT`. An unlisted repo or ref, and an empty token, MUST print only `[runner] repository or ref not in the watch list`; a missing, duplicate, empty, malformed or rule-breaking list MUST print only `[runner] watch list unusable`; one `bws` call per run.
+- **FR-009**: `ci` MUST read the list from the same `bws` call as its four settings, scoped by `FACTORY_CI_BWS_PROJECT`. `ci` takes `--entry N` (a positive integer up to 100) instead of `--repo` when the source is Bitwarden and resolves the repo from entry N. An unlisted entry, a ref that no `branches` pattern matches, and an empty token MUST print only `[runner] repository or ref not in the watch list`; a missing, duplicate, empty, malformed or rule-breaking list MUST print only `[runner] watch list unusable`; one `bws` call per run.
 - **FR-010**: `B_PRIVATE` MUST count as private only when it equals `true`.
 - **FR-011**: The tick MUST gain `schedule:` with exactly one `- cron: "*/5 * * * *"`, keep `workflow_dispatch:`, and its heartbeat step MUST run only when the plan succeeded and `fail_tick` is not 1 (no `if: always()` on that step). The lint MUST allow exactly that cron line, reject any other schedule content and require the heartbeat condition. The selftest MUST assert that the `plan` step has no `continue-on-error` and no `if:`.
-- **FR-012**: `plan --repos FILE --check` and `plan --repos - --check` MUST validate with the same parser and the same rules (owner rule excepted when `GITHUB_REPOSITORY_OWNER` is unset), print `N entries ok`, refuse zero entries, and make no network call.
+- **FR-012**: `plan --repos FILE --check` and `plan --repos - --check` MUST validate with the same parser and the same rules (the owner rule only when `--owner NAME` is given; the command never reads `GITHUB_REPOSITORY_OWNER`), print `N entries ok`, refuse zero entries, and make no network call.
 - **FR-013**: `.github/factory-ci-repos.toml` MUST be deleted, and a test MUST fail if it exists or if another committed `.toml` outside the test fixtures holds a `[[watch]]` table.
-- **FR-014**: The manual workflow MUST be renamed to `factory-ci-manual` (file, `name:`, its shell test, every pin and reference), lose the `--repos` argument and the mount, drop the default of its `repo` input, and receive `FACTORY_CI_BWS_PROJECT` and `GITHUB_REPOSITORY_OWNER`.
+- **FR-014**: The manual workflow MUST be renamed to `factory-ci-manual` (file, `name:`, its shell test, every pin and reference), lose the `--repos` argument and the mount, replace its `repo` input by a required `entry` input (the entry number, no default), pass `ENTRY` through `env:` and `--entry "$ENTRY"` to `ci`, name `inputs.entry` in its concurrency group, and receive `FACTORY_CI_BWS_PROJECT` and `GITHUB_REPOSITORY_OWNER`. No repo name may appear in any input, `env:` value, step name or log of the workflow.
 - **FR-015**: The current tree MUST be scrubbed of the private names in a normal commit before the history rewrite. The rewrite MUST follow `contracts/history-rewrite.md` and MUST NOT run without a fresh explicit owner go.
 - **FR-016**: The constitution line naming the committed file MUST change, with a MINOR bump and a Sync Impact note. The root README and `rust-ci-runner/README.md` MUST describe the new source, the schedule and its limits, the heartbeat rule, the stop command, the accepted public leaks (L3, L4) and the rollback caution; the README update and the GitHub repo description are the last task before the rewrite.
 - **FR-017**: The rollout MUST be: key in Bitwarden; runner release and digest (previous digest recorded); script, lint and heartbeat change with the committed file still present, rows compared; file deletion and manual workflow cutover in their own pull request after the owner re-checks the value; cron in its own pull request; tree scrub; docs; rewrite. At no step does the tick watch nothing.
@@ -255,7 +268,7 @@ The current tree is scrubbed in a normal commit, old run logs that print names a
 
 ### Measurable Outcomes
 
-- **SC-001**: Before the rewrite: after the file is deleted and the tree is scrubbed, a case-insensitive search of the working tree for every scrub string finds zero hits, and the next 20 tick runs and manual runs show none in their logs and summaries. After the rewrite: the same search over a fresh mirror clone of every branch and tag, over all commit messages and over all paths finds zero hits, and the old run logs that printed names are deleted.
+- **SC-001**: Before the rewrite: after the file is deleted and the tree is scrubbed, a case-insensitive search of the working tree for every scrub string finds zero hits, and the next 20 tick runs and the next manual runs (started with an entry number) show none in their logs, summaries, inputs and step headers, and every manual run made before the cutover, whose input and log carry the name, is deleted. After the rewrite: the same search over a fresh mirror clone of every branch and tag, over all commit messages and over all paths finds zero hits, and the old run logs that printed names are deleted.
 - **SC-002**: The first tick that reads the list from Bitwarden plans the same rows as the committed file did.
 - **SC-003**: For each failure case of FR-003, FR-006 and FR-009 a test shows exit 1, no output file, no status posted and no marker string in any output.
 - **SC-004**: After one week the Actions history shows a successful tick at least every 15 minutes in a 24-hour window; Canceled runs are counted apart from Failed.
@@ -270,7 +283,9 @@ The current tree is scrubbed in a normal commit, old run logs that print names a
 - The Bitwarden value limit is unverified (25,000 characters is the only figure found, from SDK validation); the parser's caps are tighter.
 - The `allow_docker` repos are listed in the same value; the Docker project token never reads it.
 - Feature 012 merges first. Feature 011 is docs only and is reconciled with this spec (plan.md "Merge order and conflicts").
-- The manual workflow input `repo` is typed by the owner and shows on the public run page.
+- The manual workflow inputs `ref` and `project` are typed by the owner and show on the public run page; the `entry` number names nothing. The README tells the owner to keep `ref` and `project` free of private names (accepted leak L5).
+- Every tick needs a working Bitwarden (accepted risk): an outage means up to 12 failure emails an hour and no heartbeat; the stop command is `gh workflow disable factory-ci-tick`.
+- Whether a `schedule` payload has a `repository` object is unverified; `B_PRIVATE == "true"` is safe whether the value is empty or present.
 - Write access to the Bitwarden project equals full CI compromise; the owner controls it.
 
 ## Out of Scope

@@ -8,7 +8,7 @@
 | Value | UTF-8 TOML, at most 64 KiB, at least one `[[watch]]` table, comments allowed |
 | Format | `repo` (required, `owner/name`), `id`, `branches`, `secret_branches`, `secrets`, `allow_docker`; unknown keys refused |
 | Limits | 100 entries, 20 items per list (`watch.rs`); Bitwarden's own value limit is unverified (T002) |
-| Rules added here | owner equals `GITHUB_REPOSITORY_OWNER`; `id` required with `allow_docker` or non-empty `secrets`; `*` and `**` refused in `secret_branches`; zero entries refused |
+| Rules added here | owner equals the repository owner (`check_owner`, given the owner as an argument; the environment is read once at the edge); `id` required with `allow_docker` or non-empty `secrets`; `*` and `**` refused in `secret_branches`; zero entries refused |
 | Reserved | `FACTORY_CI*` names are refused in `secrets` (`pipeline::valid_secret_name`), so no step can request this key |
 
 ## WatchEntry
