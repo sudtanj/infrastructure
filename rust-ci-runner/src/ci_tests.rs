@@ -759,6 +759,23 @@ fn project_table() {
 }
 
 #[test]
+fn ci_still_refuses_an_image_project_path() {
+    // 012 T014; S2: `docker/<name>` is a tick project only. The manual `ci` command keeps its one-folder rule
+    // (`ci.rs` stays unchanged), so a `docker/x` project is refused before the Bitwarden call and any container.
+    let w = W::new(&pipe(&["a"]));
+    for bad in ["docker/x", "docker/hello-static", "docker/x/Dockerfile"] {
+        assert_eq!(w.go(&set(w.args(), "--project", Some(bad))), 1, "{bad:?}");
+    }
+    assert!(
+        w.stderr().lines().all(|l| l == "[runner] bad arguments"),
+        "{}",
+        w.stderr()
+    );
+    assert_eq!(w.bws_calls(), 0);
+    assert_eq!(w.started_containers(), 0);
+}
+
+#[test]
 fn work_table() {
     let w = W::new(&pipe(&["a"]));
     std::fs::create_dir_all(w.root.join("a:b")).unwrap();
@@ -2889,6 +2906,25 @@ echo "$SITE_API_KEY" | base64 -w 0
         let w = world(&req(&[KEY]), &entry(extra, &[KEY]), &[(KEY, VAL)]);
         assert_eq!(w.go(&w.args()), 1);
         refused(&w, "repository or ref not in the watch list");
+    }
+
+    /// 012 T022; FR-023, 010 FR-010: the `sudtanj/infrastructure` entry shape (`branches = ["main"]`,
+    /// `allow_docker`, both Docker Hub names in `secrets`, no `secret_branches`) unlocks nothing for a manual
+    /// `ci` run on any ref. The names are only for the tick's built-in publish.
+    #[test]
+    fn entry_secrets_without_secret_branches_unlock_nothing() {
+        let both = ["DOCKERHUB_USERNAME", "DOCKERHUB_TOKEN"];
+        let extra = "branches = [\"main\"]\nallow_docker = true\n";
+        for git_ref in ["main", "release/1"] {
+            let w = world(
+                &req(&["DOCKERHUB_TOKEN"]),
+                &entry(extra, &both),
+                &[("DOCKERHUB_TOKEN", VAL), ("DOCKERHUB_USERNAME", "sudtanj")],
+            );
+            assert_eq!(w.go(&set(w.args(), "--ref", Some(git_ref))), 1, "{git_ref}");
+            refused(&w, "repository or ref not in the watch list");
+            assert!(!w.hub.bodies().contains(VAL), "{git_ref}");
+        }
     }
 
     // ---- QA, after T017a: masking proven through a step that does ship ----
