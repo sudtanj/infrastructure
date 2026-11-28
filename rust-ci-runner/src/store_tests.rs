@@ -7,9 +7,17 @@
 //! and its `Display` is exactly the fault text of plan.md (`secret store unreachable`, `secret store rejected
 //! the access token`, `secret <KEY>: expected 1, found <N>`, `secret <KEY>: unusable value`). Garbage output
 //! and a refused server URL display as `secret store unreachable`.
+//!
+//! 010 T001 (test-first, each new test is `#[ignore = "test-first"]`): the keyed lookup. Planned shapes
+//! (plan.md "Lookup interface v1", data-model.md): `parse_list_with(&str, &[String]) -> Result<Fetched,
+//! StoreError>`, `fetch_with(&str, &str, Option<&str>, Duration, &[String]) -> Result<Fetched, StoreError>`,
+//! `Fetched { secrets: Secrets, held: Held }`, `Held::take(&self, &[String]) -> Result<StepSecrets, NamedError>`,
+//! `StepSecrets(pub(crate) BTreeMap<String, String>)` (`Debug` prints names only), `NamedError::{Count {
+//! index, found }, Unusable { index }}` (`Debug` and `Display`, no `PartialEq` needed), `REQUIRED_KEYS`.
+//! FR-001, FR-003, FR-005 to FR-007, FR-018.
 
 use crate::engine::Engine;
-use crate::store::{fetch, parse_list};
+use crate::store::{fetch, fetch_with, parse_list, parse_list_with, Held, NamedError};
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -500,4 +508,460 @@ fn a_backgrounded_child_holding_stdout_does_not_block_run_capped() {
         "{:?}",
         start.elapsed()
     );
+}
+
+// ---- 010 T001: the keyed lookup (FR-001, FR-003, FR-005 to FR-007, FR-018; I10) ----
+
+fn strs(v: &[&str]) -> Vec<String> {
+    v.iter().map(|s| s.to_string()).collect()
+}
+
+/// The held rows of a list that has the four runner keys plus `rows`, for the allowlist `allowed`.
+fn held(rows: &[(&str, &str)], allowed: &[&str]) -> Held {
+    let mut all = GOOD.to_vec();
+    all.extend_from_slice(rows);
+    parse_list_with(&list(&all), &strs(allowed))
+        .ok()
+        .expect("a valid list")
+        .held
+}
+
+/// Takes `SITE_API_KEY` alone from a list where it holds `value`.
+fn one(value: &str) -> Result<std::collections::BTreeMap<String, String>, NamedError> {
+    held(&[("SITE_API_KEY", value)], &["SITE_API_KEY"])
+        .take(&strs(&["SITE_API_KEY"]))
+        .map(|s| s.0)
+}
+
+fn shown_with(r: Result<crate::store::Fetched, crate::store::StoreError>) -> String {
+    format!("{}", r.err().expect("expected an error"))
+}
+
+#[test]
+#[ignore = "test-first"]
+fn held_take_returns_values_by_exact_key() {
+    let h = held(
+        &[
+            ("SITE_API_KEY", "fake-site-value-1111"),
+            ("OTHER_KEY", "fake-other-value-2222"),
+        ],
+        &["SITE_API_KEY", "OTHER_KEY"],
+    );
+    let got = h.take(&strs(&["SITE_API_KEY"])).ok().expect("one name").0;
+    assert_eq!(got.len(), 1);
+    assert_eq!(got["SITE_API_KEY"], "fake-site-value-1111");
+    let both = h
+        .take(&strs(&["OTHER_KEY", "SITE_API_KEY"]))
+        .ok()
+        .expect("two names")
+        .0;
+    assert_eq!(both.keys().collect::<Vec<_>>(), ["OTHER_KEY", "SITE_API_KEY"]);
+    assert_eq!(both["OTHER_KEY"], "fake-other-value-2222");
+    // an empty request is an empty map
+    assert!(h.take(&[]).ok().expect("no names").0.is_empty());
+}
+
+#[test]
+#[ignore = "test-first"]
+fn held_take_missing_key_is_found_0() {
+    let h = held(&[], &["SITE_API_KEY"]);
+    let e = h.take(&strs(&["SITE_API_KEY"])).err().expect("missing key");
+    assert!(matches!(e, NamedError::Count { index: 0, found: 0 }), "{e:?}");
+    assert_eq!(format!("{e}"), "secret #0: expected 1, found 0");
+    // a name outside the allowlist is found 0 although the store holds the key
+    let h = held(&[("NOT_LISTED", "fake-unlisted-3333")], &["SITE_API_KEY"]);
+    let e = h.take(&strs(&["NOT_LISTED"])).err().expect("not allowlisted");
+    assert!(matches!(e, NamedError::Count { index: 0, found: 0 }), "{e:?}");
+    // the four runner values are never reachable through take (I5)
+    let e = h.take(&strs(&["FACTORY_CI_TOKEN"])).err().expect("runner key");
+    assert!(matches!(e, NamedError::Count { index: 0, found: 0 }), "{e:?}");
+}
+
+#[test]
+#[ignore = "test-first"]
+fn held_take_duplicate_key_is_found_2() {
+    let h = held(
+        &[
+            ("B_KEY", "fake-b-value-1111"),
+            ("A_KEY", "fake-a1-value-2222"),
+            ("A_KEY", "fake-a2-value-3333"),
+        ],
+        &["A_KEY", "B_KEY"],
+    );
+    let e = h.take(&strs(&["B_KEY", "A_KEY"])).err().expect("duplicate");
+    assert!(matches!(e, NamedError::Count { index: 1, found: 2 }), "{e:?}");
+    assert_eq!(format!("{e}"), "secret #1: expected 1, found 2");
+    let text = format!("{e} {e:?}");
+    assert!(!text.contains("fake-"), "{text}");
+    // three rows
+    let h = held(
+        &[
+            ("A_KEY", "fake-1-1111"),
+            ("A_KEY", "fake-2-2222"),
+            ("A_KEY", "fake-3-3333"),
+        ],
+        &["A_KEY"],
+    );
+    let e = h.take(&strs(&["A_KEY"])).err().expect("triplicate");
+    assert!(matches!(e, NamedError::Count { index: 0, found: 3 }), "{e:?}");
+}
+
+#[test]
+#[ignore = "test-first"]
+fn held_take_key_differing_in_case_does_not_match() {
+    for key in [
+        "site_api_key",
+        "Site_Api_Key",
+        "SITE_API_KEY_2",
+        "XSITE_API_KEY",
+        "SITE_API_KEY ",
+        " SITE_API_KEY",
+    ] {
+        let h = held(&[(key, "fake-site-value-1111")], &["SITE_API_KEY"]);
+        let e = h.take(&strs(&["SITE_API_KEY"])).err().expect(key);
+        assert!(
+            matches!(e, NamedError::Count { index: 0, found: 0 }),
+            "{key:?}: {e:?}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "test-first"]
+fn held_take_refuses_empty_blank_and_each_control_character() {
+    for v in [
+        "",
+        "   ",
+        "\n",
+        "abcd\0efgh",
+        "abcd\tefgh",
+        "abcd\refgh",
+        "abcd\x0befgh",
+        "abcd\x0cefgh",
+        "abcd\u{85}efgh",
+        "abcd\u{2028}efgh",
+        "abcd\u{2029}efgh",
+    ] {
+        let e = one(v).err().unwrap_or_else(|| panic!("{v:?} was accepted"));
+        assert!(matches!(e, NamedError::Unusable { index: 0 }), "{v:?}: {e:?}");
+        assert_eq!(format!("{e}"), "secret #0: unusable value", "{v:?}");
+    }
+    // a value that is not a string is unusable too
+    let mut rows: Vec<serde_json::Value> = serde_json::from_str(&list(&GOOD)).unwrap();
+    rows.push(serde_json::json!({"key": "SITE_API_KEY", "value": 12345}));
+    rows.push(serde_json::json!({"key": "NULL_KEY", "value": null}));
+    let h = parse_list_with(
+        &serde_json::Value::Array(rows).to_string(),
+        &strs(&["SITE_API_KEY", "NULL_KEY"]),
+    )
+    .ok()
+    .expect("the list parses")
+    .held;
+    for n in ["SITE_API_KEY", "NULL_KEY"] {
+        let e = h.take(&strs(&[n])).err().expect(n);
+        assert!(matches!(e, NamedError::Unusable { index: 0 }), "{n}: {e:?}");
+    }
+}
+
+#[test]
+#[ignore = "test-first"]
+fn held_take_line_boundary() {
+    // multi-line: every non-blank trimmed line has 4 or more characters; blank inner lines, CRLF and a
+    // trailing newline pass; the value comes back unchanged
+    for v in [
+        "good-line\nabcd",
+        "good-line\n\nabcd",
+        "good-line\r\nabcd",
+        "good-line\nabcd\n",
+        "good-line\r\nabcd\r\n",
+        "good-line\n  abcd  \nlast-line",
+        "-----BEGIN KEY-----\n\nbody-1234\n\n-----END KEY-----\n",
+    ] {
+        let got = one(v).ok().unwrap_or_else(|| panic!("{v:?} was refused"));
+        assert_eq!(got["SITE_API_KEY"], v);
+    }
+    for v in [
+        "good-line\nabc",
+        "good-line\n  abc  \nlast-line",
+        "abc\ngood-line",
+        "good-line\nabcd\nxy\n",
+        "good-line\n\n\nab\n\nlast-line",
+    ] {
+        let e = one(v).err().unwrap_or_else(|| panic!("{v:?} was accepted"));
+        assert!(matches!(e, NamedError::Unusable { index: 0 }), "{v:?}: {e:?}");
+    }
+    // a single line of 4 characters passes
+    assert_eq!(one("abcd").ok().unwrap()["SITE_API_KEY"], "abcd");
+}
+
+#[test]
+#[ignore = "test-first"]
+fn held_take_refuses_surrounding_whitespace_on_a_single_line() {
+    for v in [" abcd", "abcd ", "abcd\n", "abcd\r\n", "  abcd  ", "\nabcd"] {
+        let e = one(v).err().unwrap_or_else(|| panic!("{v:?} was accepted"));
+        assert!(matches!(e, NamedError::Unusable { index: 0 }), "{v:?}: {e:?}");
+    }
+    assert_eq!(one("abcd efgh").ok().unwrap()["SITE_API_KEY"], "abcd efgh");
+}
+
+#[test]
+#[ignore = "test-first"]
+fn held_take_size_cap() {
+    let at = "a".repeat(32768);
+    assert_eq!(one(&at).ok().expect("32768 bytes")["SITE_API_KEY"], at);
+    let e = one(&"a".repeat(32769)).err().expect("32769 bytes");
+    assert!(matches!(e, NamedError::Unusable { index: 0 }), "{e:?}");
+}
+
+#[test]
+#[ignore = "test-first"]
+fn held_take_passes_unicode_and_equals_untouched() {
+    for v in [
+        "pä€漢字=x==",
+        "====",
+        "key=value=more",
+        "emoji-😀-ok",
+        "a'b\"c\\d$e`f",
+    ] {
+        let got = one(v).ok().unwrap_or_else(|| panic!("{v:?}"));
+        assert_eq!(got["SITE_API_KEY"], v);
+    }
+}
+
+#[test]
+#[ignore = "test-first"]
+fn held_take_validates_only_the_names_taken() {
+    let h = held(
+        &[
+            ("GOOD_KEY", "fake-good-value-1111"),
+            ("BAD_KEY", "bad\0value-2222"),
+            ("DUP_KEY", "fake-dup1-value-3333"),
+            ("DUP_KEY", "fake-dup2-value-4444"),
+        ],
+        &["GOOD_KEY", "BAD_KEY", "DUP_KEY", "MISSING_KEY"],
+    );
+    let got = h.take(&strs(&["GOOD_KEY"])).ok().expect("only the good key").0;
+    assert_eq!(got.keys().collect::<Vec<_>>(), ["GOOD_KEY"]);
+    // asking for the bad one fails the whole call, with the position of the bad name
+    let e = h.take(&strs(&["GOOD_KEY", "BAD_KEY"])).err().expect("bad value");
+    assert!(matches!(e, NamedError::Unusable { index: 1 }), "{e:?}");
+    // and fetch_with does not fail on such a list either
+    let sb = Sandbox::new();
+    let mut rows = GOOD.to_vec();
+    rows.push(("BAD_KEY", "bad\0value-2222"));
+    rows.push(("DUP_KEY", "fake-dup1-value-3333"));
+    rows.push(("DUP_KEY", "fake-dup2-value-4444"));
+    let bws = sb.bws(&list(&rows), "cat \"$d/out\"");
+    let allowed = strs(&["BAD_KEY", "DUP_KEY", "MISSING_KEY"]);
+    assert!(fetch_with(&bws, ACCESS, None, LONG, &allowed).is_ok());
+}
+
+#[test]
+#[ignore = "test-first"]
+fn held_take_looks_up_a_repeated_name_once() {
+    let h = held(
+        &[
+            ("SITE_API_KEY", "fake-site-value-1111"),
+            ("DUP_KEY", "fake-d1-1111"),
+            ("DUP_KEY", "fake-d2-2222"),
+        ],
+        &["SITE_API_KEY", "DUP_KEY"],
+    );
+    let got = h
+        .take(&strs(&["SITE_API_KEY", "SITE_API_KEY"]))
+        .ok()
+        .expect("a repeated name")
+        .0;
+    assert_eq!(got.len(), 1);
+    assert_eq!(got["SITE_API_KEY"], "fake-site-value-1111");
+    let e = h.take(&strs(&["DUP_KEY", "DUP_KEY"])).err().expect("duplicate key");
+    assert!(matches!(e, NamedError::Count { index: 0, found: 2 }), "{e:?}");
+}
+
+#[test]
+#[ignore = "test-first"]
+fn fetch_with_keeps_only_allowlisted_rows_and_still_needs_the_four_runner_keys() {
+    let mut rows = GOOD.to_vec();
+    rows.push(("SITE_API_KEY", "fake-site-value-1111"));
+    rows.push(("NOT_LISTED", "fake-unlisted-3333"));
+    let sb = Sandbox::new();
+    let bws = sb.bws(&list(&rows), "cat \"$d/out\"");
+    let got = fetch_with(&bws, ACCESS, None, LONG, &strs(&["SITE_API_KEY"]))
+        .ok()
+        .expect("fetch_with");
+    assert_eq!(got.secrets.token, GOOD[0].1);
+    assert_eq!(got.secrets.log_url, GOOD[1].1);
+    assert_eq!(got.secrets.log_user, GOOD[2].1);
+    assert_eq!(got.secrets.log_token, GOOD[3].1);
+    assert_eq!(sb.calls(), 1, "one bws call");
+    assert_eq!(sb.argv(1), "secret\nlist\n-o\njson\n");
+    let ok = got.held.take(&strs(&["SITE_API_KEY"])).ok().expect("allowlisted").0;
+    assert_eq!(ok["SITE_API_KEY"], "fake-site-value-1111");
+    // a row that is not on the allowlist was dropped
+    let e = got.held.take(&strs(&["NOT_LISTED"])).err().expect("dropped row");
+    assert!(matches!(e, NamedError::Count { index: 0, found: 0 }), "{e:?}");
+    // the four runner keys stay required, with the errors of `fetch`
+    for k in KEYS {
+        let without: Vec<_> = rows.iter().filter(|(n, _)| *n != k).cloned().collect();
+        let sb = Sandbox::new();
+        let bws = sb.bws(&list(&without), "cat \"$d/out\"");
+        let r = fetch_with(&bws, ACCESS, None, LONG, &strs(&["SITE_API_KEY"]));
+        assert_eq!(shown_with(r), format!("secret {k}: expected 1, found 0"));
+    }
+}
+
+#[test]
+#[ignore = "test-first"]
+fn fetch_with_empty_allowlist_equals_fetch() {
+    let (sa, sb) = (Sandbox::new(), Sandbox::new());
+    let eu = Some("https://vault.bitwarden.eu");
+    let a = fetch(&sa.ok(), ACCESS, eu, LONG).ok().expect("fetch");
+    let b = fetch_with(&sb.ok(), ACCESS, eu, LONG, &[])
+        .ok()
+        .expect("fetch_with");
+    assert_eq!(
+        (&a.token, &a.log_url, &a.log_user, &a.log_token),
+        (
+            &b.secrets.token,
+            &b.secrets.log_url,
+            &b.secrets.log_user,
+            &b.secrets.log_token
+        )
+    );
+    assert_eq!(sa.argv(1), sb.argv(1));
+    let (mut ea, mut eb) = (names(&sa.env(1)), names(&sb.env(1)));
+    ea.sort();
+    eb.sort();
+    assert_eq!(ea, eb);
+    assert_eq!((sa.calls(), sb.calls()), (1, 1));
+    // nothing is held
+    let e = b.held.take(&strs(&["ANY_KEY"])).err().expect("empty allowlist");
+    assert!(matches!(e, NamedError::Count { index: 0, found: 0 }), "{e:?}");
+    // the same errors and the same number of calls for the same failures
+    let missing: Vec<_> = GOOD.iter().filter(|(n, _)| *n != KEYS[2]).cloned().collect();
+    let cases = [
+        (list(&missing), "cat \"$d/out\""),
+        ("not json".to_string(), "cat \"$d/out\""),
+        (String::new(), "echo 'Error: 401 Unauthorized' >&2; exit 1"),
+        (String::new(), "echo 'connection refused' >&2; exit 1"),
+    ];
+    for (out, body) in cases {
+        let (x, y) = (Sandbox::new(), Sandbox::new());
+        let (bx, by) = (x.bws(&out, body), y.bws(&out, body));
+        let ex = format!("{}", fetch(&bx, ACCESS, None, LONG).err().expect("fails"));
+        let ey = shown_with(fetch_with(&by, ACCESS, None, LONG, &[]));
+        assert_eq!(ex, ey, "{body}");
+        assert_eq!(x.calls(), y.calls(), "{body}");
+    }
+}
+
+#[test]
+#[ignore = "test-first"]
+fn fetch_with_retries_once_and_a_rejected_token_is_final() {
+    let allowed = strs(&["SITE_API_KEY"]);
+    let sb = Sandbox::new();
+    let bws = sb.bws("", "echo 'Error: 403 Forbidden' >&2; exit 1");
+    assert_eq!(
+        shown_with(fetch_with(&bws, ACCESS, None, LONG, &allowed)),
+        "secret store rejected the access token"
+    );
+    assert_eq!(sb.calls(), 1, "a rejected token is not retried");
+    let sb = Sandbox::new();
+    let bws = sb.bws("", "echo 'Error: connection refused' >&2; exit 1");
+    assert_eq!(
+        shown_with(fetch_with(&bws, ACCESS, None, LONG, &allowed)),
+        "secret store unreachable"
+    );
+    assert_eq!(sb.calls(), 2, "one retry");
+    // the second attempt can succeed
+    let sb = Sandbox::new();
+    let bws = sb.bws(
+        &list(&GOOD),
+        "[ \"$n\" = 1 ] && { echo 'Error: timed out' >&2; exit 1; }\ncat \"$d/out\"",
+    );
+    assert!(fetch_with(&bws, ACCESS, None, LONG, &allowed).is_ok());
+    assert_eq!(sb.calls(), 2);
+    // a row without a string key is unreadable output
+    let sb = Sandbox::new();
+    let bws = sb.bws("[{\"nokey\": 1}]", "cat \"$d/out\"");
+    assert_eq!(
+        shown_with(fetch_with(&bws, ACCESS, None, LONG, &allowed)),
+        "secret store unreachable"
+    );
+}
+
+#[test]
+#[ignore = "test-first"]
+fn fetch_with_refuses_a_foreign_server_url() {
+    let allowed = strs(&["SITE_API_KEY"]);
+    for bad in [
+        "http://vault.bitwarden.com",
+        "https://vault.bitwarden.com.evil.example",
+        "https://evil.example",
+        "https://vault.bitwarden.com@evil.example",
+    ] {
+        let sb = Sandbox::new();
+        assert_eq!(
+            shown_with(fetch_with(&sb.ok(), ACCESS, Some(bad), LONG, &allowed)),
+            "secret store unreachable",
+            "{bad}"
+        );
+        assert_eq!(sb.calls(), 0, "{bad}: bws was called");
+    }
+}
+
+#[test]
+#[ignore = "test-first"]
+fn fetch_with_child_env_is_cleared() {
+    let sb = Sandbox::new();
+    let com = Some("https://vault.bitwarden.com");
+    fetch_with(&sb.ok(), ACCESS, com, LONG, &strs(&["SITE_API_KEY"]))
+        .ok()
+        .expect("fetch_with");
+    assert!(!sb.argv(1).contains(ACCESS), "token in argv");
+    let env = sb.env(1);
+    let want = format!("BWS_ACCESS_TOKEN={ACCESS}");
+    assert!(env.lines().any(|l| l == want), "{env}");
+    assert!(!env.contains("CARGO_PKG_NAME"), "{env}");
+    let allowed = [
+        "PATH",
+        "HOME",
+        "BWS_ACCESS_TOKEN",
+        "BWS_SERVER_URL",
+        "PWD",
+        "OLDPWD",
+        "SHLVL",
+        "_",
+    ];
+    for n in names(&env) {
+        assert!(allowed.contains(&n.as_str()), "{n} is not on the allowlist");
+    }
+}
+
+#[test]
+#[ignore = "test-first"]
+fn debug_and_display_of_held_results_and_errors_hold_no_value_and_no_name() {
+    let h = held(
+        &[
+            ("SITE_API_KEY", "fake-held-value-4444"),
+            ("DUP_KEY", "fake-dup1-value-5555"),
+            ("DUP_KEY", "fake-dup2-value-6666"),
+            ("BAD_KEY", "bad\0value-7777"),
+        ],
+        &["SITE_API_KEY", "DUP_KEY", "BAD_KEY"],
+    );
+    let no_leak = |what: &str, text: &str| {
+        for needle in ["fake-", "value-", "SITE_API_KEY", "DUP_KEY", "BAD_KEY"] {
+            assert!(!text.contains(needle), "{what} holds {needle}: {text}");
+        }
+    };
+    no_leak("Held", &format!("{h:?}"));
+    for n in ["DUP_KEY", "BAD_KEY"] {
+        let e = h.take(&strs(&[n])).err().expect(n);
+        no_leak("NamedError", &format!("{e} {e:?}"));
+    }
+    // the map prints no value; it may print names
+    let s = h.take(&strs(&["SITE_API_KEY"])).ok().expect("one name");
+    let text = format!("{s:?}");
+    assert!(!text.contains("fake-held-value-4444"), "{text}");
 }

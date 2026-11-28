@@ -600,3 +600,216 @@ pub fn execute(ctx: &RunCtx, p: &Pipeline) -> Result<Outcome, String> {
         timed_out,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::pump;
+    use crate::redact::Redactor;
+    use crate::util::base64;
+    use std::io::{Cursor, Read};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    // 010 T006 (test-first, each test is `#[ignore = "test-first"]`). FR-013; I9.
+    // Planned: `fn pump(r: impl Read, carry: usize, f: impl FnMut(&str))`. `carry` is `Log::longest_secret()`:
+    // the pump holds back the last `carry` bytes of a chunk that was cut at 64 KB, puts them in front of the
+    // next chunk, flushes what is left at the end of the stream and never cuts inside a UTF-8 character.
+    // `carry` 0 is today's behaviour. `Redactor::forms` is planned too (T004).
+    const V: &str = "canary-Zq81-value-key-0123456789";
+    const CUT: usize = 65536;
+
+    fn pieces(input: &[u8], carry: usize) -> Vec<String> {
+        let mut got = Vec::new();
+        pump(Cursor::new(input.to_vec()), carry, |p| got.push(p.to_string()));
+        got
+    }
+
+    /// What `Log::write` makes of the pieces: each is redacted alone, then they are read as one line.
+    fn shown(red: &Redactor, got: &[String]) -> String {
+        got.iter()
+            .map(|p| red.apply(p.trim_end_matches('\n')))
+            .collect()
+    }
+
+    fn carry_of(red: &Redactor) -> usize {
+        red.forms().iter().map(String::len).max().unwrap_or(0)
+    }
+
+    /// A reader that returns at most `step` bytes per call.
+    struct Drip<'a> {
+        data: &'a [u8],
+        step: usize,
+    }
+
+    impl Read for Drip<'_> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let n = self.step.min(buf.len()).min(self.data.len());
+            buf[..n].copy_from_slice(&self.data[..n]);
+            self.data = &self.data[n..];
+            Ok(n)
+        }
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn pump_masks_a_value_across_the_64k_cut() {
+        let red = Redactor::new([V.to_string()]);
+        let carry = carry_of(&red);
+        assert!(carry >= V.len() && carry < CUT, "{carry}");
+        for form in [V.to_string(), base64(V.as_bytes())] {
+            let starts = [
+                CUT - form.len(),
+                CUT - form.len() + 1,
+                CUT - form.len() / 2,
+                CUT - 1,
+                CUT,
+            ];
+            for start in starts {
+                let line = format!("{}{form}{}", "a".repeat(start), "b".repeat(200));
+                let got = pieces(format!("{line}\n").as_bytes(), carry);
+                assert!(
+                    !got.iter().any(|p| p.contains(&form)),
+                    "{form} at {start} reached a piece whole"
+                );
+                let want = format!("{}***{}", "a".repeat(start), "b".repeat(200));
+                assert_eq!(shown(&red, &got), want, "{form} at {start}");
+            }
+        }
+        // the same with a reader that gives a few bytes at a time
+        let line = format!("{}{V}{}\n", "a".repeat(CUT - 10), "b".repeat(200));
+        let mut got = Vec::new();
+        let r = Drip { data: line.as_bytes(), step: 7 };
+        pump(r, carry, |p| got.push(p.to_string()));
+        let want = format!("{}***{}", "a".repeat(CUT - 10), "b".repeat(200));
+        assert_eq!(shown(&red, &got), want);
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn pump_masks_a_32_kib_value_across_the_cut() {
+        let v: String = (0..32768).map(|i| (b'a' + (i % 26) as u8) as char).collect();
+        let red = Redactor::new([v.clone()]);
+        let carry = carry_of(&red);
+        assert!((32768..=48 * 1024).contains(&carry), "{carry}");
+        for start in [CUT - 32767, CUT - 16384, CUT - 1] {
+            let line = format!("{}{v}{}", "x".repeat(start), "y".repeat(100));
+            let got = pieces(format!("{line}\n").as_bytes(), carry);
+            assert!(!got.iter().any(|p| p.contains(&v)), "whole value at {start}");
+            let want = format!("{}***{}", "x".repeat(start), "y".repeat(100));
+            assert_eq!(shown(&red, &got), want, "start {start}");
+        }
+    }
+
+    // `Held::take` refuses a value over 32 KiB (store_tests `held_take_size_cap`), so the pump never sees a
+    // form built from one. This is the pump side: with a value one byte over, the forms stay under the
+    // 48 KiB cap, below the 64 KiB chunk, and nothing waits forever or is lost; a carry that is too big
+    // does not stall it either.
+    #[test]
+    #[ignore = "test-first"]
+    fn pump_with_a_value_one_byte_over_the_cap_is_never_given_to_it() {
+        let v = "k".repeat(32769);
+        let red = Redactor::new([v]);
+        let carry = carry_of(&red);
+        assert!(carry <= 48 * 1024 && carry < CUT, "{carry}");
+        let input: Vec<u8> = (0..200_000u32).map(|i| b'a' + (i % 23) as u8).collect();
+        for c in [carry, CUT - 1, CUT, CUT + 1, 3 * CUT] {
+            let got = pieces(&input, c);
+            assert_eq!(got.concat().as_bytes(), &input[..], "carry {c}");
+        }
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn pump_keeps_order_and_flushes_the_tail() {
+        for carry in [0, 1, 5, 100, 49152] {
+            // no newline at the end: the last text still arrives
+            let got = pieces(b"one\ntwo\nthree", carry);
+            assert_eq!(got.concat(), "one\ntwo\nthree", "carry {carry}");
+            assert!(got.last().unwrap().ends_with("three"), "carry {carry}: {got:?}");
+            assert!(got.iter().all(|p| !p.is_empty()), "carry {carry}: {got:?}");
+            // lines keep their order
+            let text: String = (0..500).map(|i| format!("line {i}\n")).collect();
+            assert_eq!(pieces(text.as_bytes(), carry).concat(), text, "carry {carry}");
+            assert!(pieces(b"", carry).is_empty(), "carry {carry}");
+            assert_eq!(pieces(b"\n\n", carry).concat(), "\n\n", "carry {carry}");
+            // a long stream without a newline, cut at 64 KB several times
+            let long: Vec<u8> = (0..3 * CUT + 17).map(|i| b'a' + (i % 26) as u8).collect();
+            assert_eq!(pieces(&long, carry).concat().as_bytes(), &long[..], "carry {carry}");
+        }
+        // carry 0 is what `pump` does today: pieces of at most 64 KB, a newline ends a piece
+        let line = format!("{}\n", "a".repeat(70_000));
+        let sizes: Vec<usize> = pieces(line.as_bytes(), 0).iter().map(String::len).collect();
+        assert_eq!(sizes, [CUT, 70_001 - CUT]);
+        assert_eq!(pieces(b"one\ntwo\nthree", 0), ["one\n", "two\n", "three"]);
+    }
+
+    // A line that has arrived whole is handed over at once, not held until the stream ends.
+    #[test]
+    #[ignore = "test-first"]
+    fn pump_does_not_hold_back_a_complete_line() {
+        struct Probe {
+            step: u8,
+            seen: Arc<AtomicUsize>,
+            ok: Arc<AtomicBool>,
+        }
+        impl Read for Probe {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                self.step += 1;
+                if self.step == 1 {
+                    buf[..6].copy_from_slice(b"line1\n");
+                    return Ok(6);
+                }
+                if self.step == 2 {
+                    self.ok.store(self.seen.load(Ordering::SeqCst) >= 1, Ordering::SeqCst);
+                }
+                Ok(0)
+            }
+        }
+        let (seen, ok) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicBool::new(false)));
+        let r = Probe { step: 0, seen: seen.clone(), ok: ok.clone() };
+        let s2 = seen.clone();
+        pump(r, 4096, move |_| {
+            s2.fetch_add(1, Ordering::SeqCst);
+        });
+        assert!(ok.load(Ordering::SeqCst), "line1 was held back");
+        assert_eq!(seen.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn pump_never_cuts_a_utf8_char() {
+        for ch in ["é", "漢", "😀"] {
+            for prefix in 0..4 {
+                let line = format!("{}{}", "a".repeat(prefix), ch.repeat(40_000));
+                for carry in [0, 1, 2, 3, 5, 7, 1000] {
+                    for tail in ["\n", ""] {
+                        let input = format!("{line}{tail}");
+                        let got = pieces(input.as_bytes(), carry);
+                        let joined = got.concat();
+                        assert!(!joined.contains('\u{fffd}'), "{ch} prefix {prefix} carry {carry}");
+                        assert_eq!(joined, input, "{ch} prefix {prefix} carry {carry}");
+                    }
+                }
+            }
+        }
+        // bytes that are not UTF-8 at all still come out, one replacement character each
+        assert_eq!(pieces(b"ab\xffcd\n", 4).concat(), "ab\u{fffd}cd\n");
+    }
+
+    // The plan holds back `carry` bytes of a cut chunk, so the piece ends `carry` bytes before the 64 KB cut.
+    // A value that starts one byte before that end is still split between two pieces, and `Log::write`
+    // redacts each piece alone. I9 ("whatever the cuts") cannot hold with disjoint pieces and a length
+    // alone: the pump would have to see the forms, or `Log` would have to carry text across pieces.
+    // Decide that, then drop the marker; the plan's own cases are in the tests above.
+    #[test]
+    #[ignore = "test-first: fails by plan design, decide before enabling"]
+    fn pump_does_not_split_a_value_at_its_own_emit_boundary() {
+        let red = Redactor::new([V.to_string()]);
+        let carry = carry_of(&red);
+        let start = CUT - carry - 1;
+        let line = format!("{}{V}{}\n", "a".repeat(start), "b".repeat(500));
+        let got = pieces(line.as_bytes(), carry);
+        let want = format!("{}***{}", "a".repeat(start), "b".repeat(500));
+        assert_eq!(shown(&red, &got), want);
+    }
+}

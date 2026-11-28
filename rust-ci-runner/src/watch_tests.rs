@@ -333,3 +333,105 @@ fn entries_without_branches_match_every_ref() {
             && !v[0].matches_branch("feat/main")
     );
 }
+
+// ---- 010 T003 (test-first, `#[ignore = "test-first"]`): FR-004, FR-010 ----
+// Planned: `WatchEntry::secrets_allowed_on(&self, git_ref: &str) -> bool`. `secret_branches` set: the ref
+// matches one of them. Unset: no `branches` pattern is made only of `*` and `?`, and the ref matches
+// `branches`. The default `branches` is `["*"]`, so the default refuses.
+
+fn gate(body: &str, git_ref: &str) -> bool {
+    parse(&one(body)).unwrap()[0].secrets_allowed_on(git_ref)
+}
+
+#[test]
+#[ignore = "test-first"]
+fn each_runner_setting_in_secrets_refuses_the_file() {
+    for n in [
+        "FACTORY_CI_TOKEN",
+        "FACTORY_CI_LOG_URL",
+        "FACTORY_CI_LOG_USER",
+        "FACTORY_CI_LOG_TOKEN",
+        "BW_X",
+        "bw_x",
+        "BITWARDEN",
+        "bitwarden_x",
+    ] {
+        let p = problems(&one(&format!("branches = [\"main\"]\nsecrets = [{n:?}]")));
+        assert!(mentions(&p, n), "{n}: {p:?}");
+    }
+    // one such name refuses the whole file, valid names next to it do not save it
+    let p = problems(&one("secrets = [\"SITE_API_KEY\", \"BW_X\"]"));
+    assert!(mentions(&p, "BW_X"), "{p:?}");
+    assert!(parse(&one("secrets = [\"SITE_API_KEY\"]")).is_ok());
+}
+
+#[test]
+#[ignore = "test-first"]
+fn secrets_allowed_on_refuses_branches_omitted() {
+    for r in ["main", "dev", "release/1", "feat/x/y"] {
+        assert!(!gate("", r), "{r}");
+        assert!(!gate("secrets = [\"SITE_API_KEY\"]", r), "{r}");
+    }
+}
+
+#[test]
+#[ignore = "test-first"]
+fn secrets_allowed_on_refuses_every_pattern_made_only_of_star_and_question_mark() {
+    for pat in ["*", "?*", "*?", "**", "?", "??", "*?*"] {
+        for r in ["main", "dev", "release/1"] {
+            assert!(!gate(&format!("branches = [{pat:?}]"), r), "{pat} {r}");
+        }
+    }
+    // one wild pattern spoils the list, even next to an explicit one
+    assert!(!gate("branches = [\"main\", \"*\"]", "main"));
+    assert!(!gate("branches = [\"?*\", \"main\"]", "main"));
+}
+
+#[test]
+#[ignore = "test-first"]
+fn secrets_allowed_on_explicit_branches_main() {
+    assert!(gate("branches = [\"main\"]", "main"));
+    assert!(!gate("branches = [\"main\"]", "dev"));
+    assert!(!gate("branches = [\"main\"]", "main2"));
+    assert!(!gate("branches = [\"main\"]", "feat/main"));
+}
+
+#[test]
+#[ignore = "test-first"]
+fn secrets_allowed_on_explicit_release_glob() {
+    let b = "branches = [\"release/*\"]";
+    assert!(gate(b, "release/1.0"));
+    assert!(gate(b, "release/1.0/rc"));
+    assert!(!gate(b, "main"));
+    assert!(!gate(b, "release"));
+    let b = "branches = [\"main\", \"release/*\", \"v?.0\"]";
+    for r in ["main", "release/9", "v1.0"] {
+        assert!(gate(b, r), "{r}");
+    }
+    assert!(!gate(b, "dev"));
+}
+
+#[test]
+#[ignore = "test-first"]
+fn secrets_allowed_on_follows_secret_branches_when_set() {
+    // matching and not matching, with `branches` left at its default
+    assert!(gate("secret_branches = [\"main\"]", "main"));
+    assert!(!gate("secret_branches = [\"main\"]", "dev"));
+    assert!(gate("secret_branches = [\"main\", \"release/*\"]", "release/2"));
+    assert!(!gate("secret_branches = [\"main\", \"release/*\"]", "feature"));
+    // set but empty matches nothing
+    assert!(!gate("secret_branches = []", "main"));
+    // with `branches` explicit too, the two lists agree on `main` and differ on `dev`
+    let b = "branches = [\"main\", \"dev\"]\nsecret_branches = [\"main\"]";
+    assert!(gate(b, "main"));
+    assert!(!gate(b, "dev"));
+}
+
+#[test]
+#[ignore = "test-first"]
+fn secrets_allowed_on_secret_branches_star_opens_it_on_purpose() {
+    for r in ["main", "dev", "release/1", "feat/x/y"] {
+        assert!(gate("secret_branches = [\"*\"]", r), "{r}");
+    }
+    assert!(gate("branches = [\"main\"]\nsecret_branches = [\"*\"]", "main"));
+}

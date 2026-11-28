@@ -1416,15 +1416,18 @@ fn allow_docker_needs_the_entry_and_a_pinned_dind_image() {
     );
 }
 
+// 010 T005 (test-first): a declared name that the watch entry does not list is `step secret not allowed`
+// (it was `pipeline file refused`, spec R6). The entry of `o/r` in `WATCH` has no `secrets`.
 #[test]
+#[ignore = "test-first"]
 fn declared_secret_fails_before_any_container() {
     let mut w =
         W::new("[steps.a]\nimage = \"alpine\"\ncommands = [\"x\"]\nsecrets = [\"NPM_TOKEN\"]\n");
-    // even a defined value is never looked up
+    // even a defined value is never put in a container
     w.env
         .push(("NPM_TOKEN".to_string(), "npm-secret-77".to_string()));
     assert_eq!(w.ok(), 1);
-    assert_eq!(w.stderr(), "[runner] pipeline file refused\n");
+    assert_eq!(w.stderr(), "[runner] step secret not allowed\n");
     assert_eq!(w.started_containers(), 0);
     assert!(
         !w.text("docker.calls").contains("npm-secret-77")
@@ -1715,7 +1718,9 @@ fn panic_prints_internal_error_only() {
     assert_public(&w);
 }
 
+// 010 T005 (test-first): two rows added, `step secret not allowed` and `step secret unavailable`.
 #[test]
+#[ignore = "test-first"]
 fn every_stderr_line_is_in_the_fixed_list() {
     type Case = (
         &'static str,
@@ -1841,6 +1846,28 @@ fn every_stderr_line_is_in_the_fixed_list() {
             "docker",
             "docker steps are refused",
             || W::new(DOCKER_STEP),
+            keep,
+        ),
+        (
+            "step secret not allowed",
+            "step secret not allowed",
+            || {
+                W::new("[steps.a]\nimage = \"alpine\"\ncommands = [\"x\"]\nsecrets = [\"NPM_TOKEN\"]\n")
+            },
+            keep,
+        ),
+        (
+            "step secret unavailable",
+            "step secret unavailable",
+            || {
+                // allowed on `main`, but the store has no such key
+                let w = W::new(
+                    "[steps.a]\nimage = \"alpine\"\ncommands = [\"x\"]\nsecrets = [\"NPM_TOKEN\"]\n",
+                );
+                let entry = "[[watch]]\nrepo = \"o/r\"\nid = 42\nbranches = [\"main\"]\nsecrets = [\"NPM_TOKEN\"]\n";
+                std::fs::write(&w.watch, entry).unwrap();
+                w
+            },
             keep,
         ),
         (
@@ -2031,4 +2058,595 @@ fn production_seams_are_fixed_and_ignore_the_environment() {
         !src.contains("FACTORY_CI_BWS\"") && !src.contains("FACTORY_CI_ENGINE"),
         "ci.rs reads a variable that R06 removed"
     );
+}
+
+// ---- 010 T005 (test-first, each test is `#[ignore = "test-first"]`): step secrets through `ci::run` ----
+//
+// FR-001 to FR-013, US1 to US4, SC-002, SC-003; I1 to I3, I5, I6, I8. Planned behaviour (plan.md "Order inside
+// `run_checkout`"): after the one `bws` call and the clone, load the pipeline (`pipeline file refused`), docker
+// rules (`docker steps are refused`), allowlist (`step secret not allowed`), ref gate (`repository or ref not
+// in the watch list`), lookup (`step secret unavailable`), one batch to the redactor, then the run. The
+// `WATCH` entry of `o/r` has `branches = ["*"]`, which the gate refuses for secrets, so these tests overwrite
+// the watch file with an entry that has `branches = ["main"]`; the fake API answers id 42. The stub `docker`
+// runs its `docker_body` with the step's `-e NAME` values in its environment, so a hostile step is a shell
+// snippet there. Fake values only.
+mod step_secrets {
+    use super::*;
+
+    const KEY: &str = "SITE_API_KEY";
+    const VAL: &str = "fake-site-value-Q7x1";
+    const MAIN: &str = "branches = [\"main\"]\n";
+    const RUNNER_NAMES: [&str; 6] = [
+        "FACTORY_CI_TOKEN",
+        "FACTORY_CI_LOG_URL",
+        "FACTORY_CI_LOG_USER",
+        "FACTORY_CI_LOG_TOKEN",
+        "BW_X",
+        "BITWARDEN",
+    ];
+
+    fn toml_list(names: &[&str]) -> String {
+        names
+            .iter()
+            .map(|n| format!("{n:?}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// The watch entry of `o/r`: `extra` is more entry lines, each ending in a newline.
+    fn entry(extra: &str, secrets: &[&str]) -> String {
+        format!(
+            "[[watch]]\nrepo = \"o/r\"\nid = 42\n{extra}secrets = [{}]\n",
+            toml_list(secrets)
+        )
+    }
+
+    fn one_step(name: &str, secrets: &[&str]) -> String {
+        let s = if secrets.is_empty() {
+            String::new()
+        } else {
+            format!("secrets = [{}]\n", toml_list(secrets))
+        };
+        format!("[steps.{name}]\nimage = \"alpine\"\ncommands = [\"echo {name}\"]\n{s}")
+    }
+
+    fn req(names: &[&str]) -> String {
+        one_step("a", names)
+    }
+
+    /// A step that lists a secret next to a separate step that needs docker.
+    fn docker_and_secrets() -> String {
+        format!(
+            "{}[steps.d]\nimage = \"alpine\"\ncommands = [\"x\"]\ndocker = true\n",
+            one_step("s", &[KEY])
+        )
+    }
+
+    /// A world with `watch` as the watch file and `store` as extra rows in the secret store.
+    fn world(pipeline: &str, watch: &str, store: &[(&str, &str)]) -> W {
+        let mut w = W::new(pipeline);
+        std::fs::write(&w.watch, watch).unwrap();
+        w.secrets
+            .extend(store.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+        w
+    }
+
+    /// The `docker run` call of a step, as an index into `w.docker()` and `docker.envs`.
+    fn run_idx(w: &W, step: &str) -> usize {
+        let name = format!("factory-ci-{RUN}-{step}");
+        w.docker()
+            .iter()
+            .position(|c| c[0] == "run" && pair(c, "--name", &name))
+            .unwrap_or_else(|| panic!("no run call for {step}: {:?}", w.docker()))
+    }
+
+    fn step_call(w: &W, step: &str) -> Vec<String> {
+        w.docker()[run_idx(w, step)].clone()
+    }
+
+    fn step_env(w: &W, step: &str) -> Vec<String> {
+        env_block(w, "docker.envs", run_idx(w, step))
+    }
+
+    /// The run ended with exactly `line` on stderr and no container.
+    fn refused(w: &W, line: &str) {
+        assert_eq!(w.stderr(), format!("[runner] {line}\n"));
+        assert_eq!(w.started_containers(), 0, "{:?}", w.docker());
+        assert!(!w.stdout().contains("pipeline passed"), "{}", w.stdout());
+        assert_public(w);
+    }
+
+    fn assert_no_name_or_count(w: &W) {
+        let all = format!("{}{}", w.stdout(), w.stderr());
+        for bad in [KEY, "OTHER_KEY", "expected", "found", "unusable", "#0"] {
+            assert!(!all.contains(bad), "{bad} in a public line: {all}");
+        }
+    }
+
+    fn detail(w: &W) -> Vec<String> {
+        [w.hub.lines("ci", "stderr"), w.hub.lines("ci", "stdout")].concat()
+    }
+
+    /// A docker stub body: the step prints its secret.
+    fn print_secret() -> String {
+        "case \"$1\" in run) printf '%s\\n' \"$SITE_API_KEY\";; esac".to_string()
+    }
+
+    fn hex(b: &[u8]) -> String {
+        b.iter().map(|x| format!("{x:02x}")).collect()
+    }
+
+    fn pct(s: &str) -> String {
+        s.bytes()
+            .map(|b| {
+                if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
+                    (b as char).to_string()
+                } else {
+                    format!("%{b:02X}")
+                }
+            })
+            .collect()
+    }
+
+    // ---- US1: a step gets its secret ----
+
+    #[test]
+    #[ignore = "test-first"]
+    fn step_secrets_reach_only_the_step_that_lists_them() {
+        let pl = [one_step("one", &[KEY]), one_step("two", &[])].concat();
+        let w = world(&pl, &entry(MAIN, &[KEY]), &[(KEY, VAL)]);
+        assert_eq!(w.ok(), 0, "{}", w.stderr());
+        assert_eq!(w.bws_calls(), 1);
+        let one = step_call(&w, "one");
+        assert!(pair(&one, "-e", KEY), "{one:?}");
+        assert!(!one.iter().any(|a| a.contains(VAL)), "value in argv: {one:?}");
+        let two = step_call(&w, "two");
+        assert!(!two.iter().any(|a| a == KEY || a.contains(VAL)), "{two:?}");
+        assert!(step_env(&w, "one").contains(&format!("{KEY}={VAL}")));
+        assert!(!step_env(&w, "two")
+            .iter()
+            .any(|l| l.starts_with(&format!("{KEY}=")) || l.contains(VAL)));
+        // the four runner values never reach a step (I5)
+        let envs = w.text("docker.envs");
+        for n in ["FACTORY_CI_", "BWS_"] {
+            assert!(!envs.contains(n), "{n} in an engine child env");
+        }
+        for (_, v) in w.secrets.iter().filter(|(k, _)| k != KEY) {
+            assert!(!envs.contains(v.as_str()), "a runner value reached a step");
+        }
+        assert_eq!(w.stderr(), "");
+        assert_public(&w);
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn two_steps_listing_one_name_get_one_value() {
+        let pl = [one_step("one", &[KEY]), one_step("two", &[KEY])].concat();
+        let w = world(&pl, &entry(MAIN, &[KEY]), &[(KEY, VAL)]);
+        assert_eq!(w.ok(), 0, "{}", w.stderr());
+        for s in ["one", "two"] {
+            let c = step_call(&w, s);
+            assert_eq!(c.iter().filter(|a| *a == KEY).count(), 1, "{s}: {c:?}");
+            assert!(pair(&c, "-e", KEY), "{s}");
+            assert!(step_env(&w, s).contains(&format!("{KEY}={VAL}")), "{s}");
+        }
+        assert_eq!(w.bws_calls(), 1);
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn single_allowed_name_runs() {
+        let w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, VAL)]);
+        assert_eq!(w.ok(), 0, "{}", w.stderr());
+        assert_eq!(
+            norm(&w.stdout()),
+            [
+                "[runner] log store answered HTTP 204",
+                "[a] started",
+                "[a] success in Ns",
+                "[runner] pipeline passed"
+            ]
+        );
+        assert_eq!(w.stderr(), "");
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn four_char_value_runs() {
+        let mut w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, "abcd")]);
+        w.docker_body = print_secret();
+        assert_eq!(w.ok(), 0, "{}", w.stderr());
+        assert!(step_env(&w, "a").contains(&format!("{KEY}=abcd")));
+        let lines = w.hub.lines("a", "stdout");
+        assert!(lines.contains(&"***".to_string()), "{lines:?}");
+        assert!(!lines.iter().any(|l| l.contains("abcd")), "{lines:?}");
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn blank_inner_line_value_runs_and_masks_each_line() {
+        let v = "-----BEGIN FAKE KEY-----\n\nbody-line-1234\n-----END FAKE KEY-----";
+        let mut w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, v)]);
+        w.docker_body = print_secret();
+        assert_eq!(w.ok(), 0, "{}", w.stderr());
+        assert!(w.text("docker.envs").contains("body-line-1234"), "delivered whole");
+        let bodies = w.hub.bodies();
+        for part in ["BEGIN FAKE", "body-line-1234", "END FAKE"] {
+            assert!(!bodies.contains(part), "{part} in Loki");
+        }
+        let lines = w.hub.lines("a", "stdout");
+        assert!(lines.iter().filter(|l| *l == "***").count() >= 3, "{lines:?}");
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn an_allowlisted_key_with_a_bad_value_does_not_fail_a_run_that_does_not_request_it() {
+        let store = [
+            (KEY, VAL),
+            ("BAD_KEY", "bad\0value-1"),
+            ("DUP_KEY", "fake-d1-1111"),
+            ("DUP_KEY", "fake-d2-2222"),
+        ];
+        let allowed = [KEY, "BAD_KEY", "DUP_KEY", "MISSING_KEY"];
+        let w = world(&req(&[KEY]), &entry(MAIN, &allowed), &store);
+        assert_eq!(w.ok(), 0, "{}", w.stderr());
+        assert_eq!(w.stderr(), "");
+    }
+
+    // ---- US2: allowlist ----
+
+    #[test]
+    #[ignore = "test-first"]
+    fn unlisted_name_fails_before_any_container() {
+        let store = [(KEY, VAL), ("OTHER_KEY", "fake-other-value-9")];
+        let w = world(&req(&["OTHER_KEY"]), &entry(MAIN, &[KEY]), &store);
+        assert_eq!(w.ok(), 1);
+        refused(&w, "step secret not allowed");
+        assert!(w.docker().iter().all(|c| c[0] == "version"), "{:?}", w.docker());
+        // the name goes to Loki, never to a public line; no value anywhere
+        assert!(w.hub.bodies().contains("OTHER_KEY"), "the name is in Loki");
+        assert!(!format!("{}{}", w.stdout(), w.stderr()).contains("OTHER_KEY"));
+        for v in [VAL, "fake-other-value-9"] {
+            assert!(!w.hub.bodies().contains(v), "{v} in Loki");
+            assert!(!w.text("docker.calls").contains(v));
+        }
+        assert_no_name_or_count(&w);
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn entry_without_secrets_key_refuses_a_requested_name() {
+        let watch = format!("[[watch]]\nrepo = \"o/r\"\nid = 42\n{MAIN}");
+        let w = world(&req(&[KEY]), &watch, &[(KEY, VAL)]);
+        assert_eq!(w.ok(), 1);
+        refused(&w, "step secret not allowed");
+        // an empty list is the same
+        let w = world(&req(&[KEY]), &entry(MAIN, &[]), &[(KEY, VAL)]);
+        assert_eq!(w.ok(), 1);
+        refused(&w, "step secret not allowed");
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn name_differing_in_case_is_not_allowed() {
+        let store = [(KEY, VAL), ("site_api_key", "fake-lower-value-3")];
+        let w = world(&req(&["site_api_key"]), &entry(MAIN, &[KEY]), &store);
+        assert_eq!(w.ok(), 1);
+        refused(&w, "step secret not allowed");
+        assert!(!w.hub.bodies().contains("fake-lower-value-3"));
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn runner_setting_in_the_pipeline_is_refused() {
+        for n in RUNNER_NAMES {
+            let w = world(&req(&[n]), &entry(MAIN, &[]), &[]);
+            assert_eq!(w.ok(), 1, "{n}");
+            refused(&w, "pipeline file refused");
+            assert_no_marker(&w);
+            assert_eq!(w.bws_calls(), 1, "{n}");
+        }
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn runner_setting_in_the_entry_refuses_the_watch_file() {
+        for n in RUNNER_NAMES {
+            let w = world(&req(&[KEY]), &entry(MAIN, &[n]), &[(KEY, VAL)]);
+            assert_eq!(w.ok(), 1, "{n}");
+            assert_eq!(w.stderr(), "[runner] repository or ref not in the watch list\n");
+            assert_eq!(w.bws_calls(), 0, "{n}");
+            assert_eq!(w.docker().len() + w.gits().len(), 0, "{n}");
+            assert!(w.hub.pushes().is_empty() && w.hub.api_calls().is_empty(), "{n}");
+        }
+    }
+
+    // ---- US2: ref gate and docker ----
+
+    #[test]
+    #[ignore = "test-first"]
+    fn docker_step_in_a_pipeline_with_secrets_is_refused() {
+        // no flag, entry does not allow docker
+        let w = world(&docker_and_secrets(), &entry(MAIN, &[KEY]), &[(KEY, VAL)]);
+        assert_eq!(w.ok(), 1);
+        refused(&w, "docker steps are refused");
+        // flag, entry and a pinned image: a docker step alone would run, with secrets in the pipeline it does not
+        let allow = format!("{MAIN}allow_docker = true\n");
+        let mut w = world(&docker_and_secrets(), &entry(&allow, &[KEY]), &[(KEY, VAL)]);
+        w.env
+            .push(("FACTORY_CI_DIND_IMAGE".to_string(), PIN.to_string()));
+        let mut a = w.args();
+        a.push("--allow-docker".to_string());
+        assert_eq!(w.go(&a), 1);
+        refused(&w, "docker steps are refused");
+        assert!(!w.docker().iter().any(|c| c.contains(&PIN.to_string())), "no sidecar");
+        // the docker rule comes before the allowlist
+        let w = world(&docker_and_secrets(), &entry(MAIN, &[]), &[]);
+        assert_eq!(w.ok(), 1);
+        refused(&w, "docker steps are refused");
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn secrets_with_branches_omitted_or_star_are_refused() {
+        for (label, extra) in [
+            ("omitted", ""),
+            ("star", "branches = [\"*\"]\n"),
+            ("question star", "branches = [\"?*\"]\n"),
+            ("star question", "branches = [\"*?\"]\n"),
+        ] {
+            let w = world(&req(&[KEY]), &entry(extra, &[KEY]), &[(KEY, VAL)]);
+            assert_eq!(w.ok(), 1, "{label}");
+            refused(&w, "repository or ref not in the watch list");
+            assert_eq!(w.bws_calls(), 1, "{label}");
+            assert!(!w.hub.bodies().contains(VAL), "{label}");
+        }
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn secret_branches_must_match_the_ref() {
+        // the ref is `main`
+        let w = world(
+            &req(&[KEY]),
+            &entry("secret_branches = [\"release/*\"]\n", &[KEY]),
+            &[(KEY, VAL)],
+        );
+        assert_eq!(w.ok(), 1);
+        refused(&w, "repository or ref not in the watch list");
+        for sb in ["[\"main\"]", "[\"*\"]"] {
+            let w = world(
+                &req(&[KEY]),
+                &entry(&format!("secret_branches = {sb}\n"), &[KEY]),
+                &[(KEY, VAL)],
+            );
+            assert_eq!(w.ok(), 0, "{sb}: {}", w.stderr());
+            assert!(step_env(&w, "a").contains(&format!("{KEY}={VAL}")), "{sb}");
+        }
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn explicit_branches_main_gets_secrets() {
+        let w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, VAL)]);
+        assert_eq!(w.ok(), 0, "{}", w.stderr());
+        assert!(step_env(&w, "a").contains(&format!("{KEY}={VAL}")));
+        // another ref is not in `branches`: the watch gate, before the store
+        let w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, VAL)]);
+        assert_eq!(w.go(&set(w.args(), "--ref", Some("dev"))), 1);
+        assert_eq!(w.stderr(), "[runner] repository or ref not in the watch list\n");
+        assert_eq!(w.bws_calls(), 0);
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn a_pipeline_without_secrets_runs_on_branches_star() {
+        // the gate is for pipelines that ask for secrets
+        let w = W::new(&pipe(&["a"]));
+        assert_eq!(w.ok(), 0, "{}", w.stderr());
+        let w = world(&pipe(&["a"]), &entry("", &[KEY]), &[(KEY, VAL)]);
+        assert_eq!(w.ok(), 0, "{}", w.stderr());
+        assert!(!w.text("docker.calls").contains(KEY), "an unrequested name is not passed on");
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn rules_are_checked_in_the_documented_order() {
+        // unlisted name and a refused ref: the allowlist comes first
+        let w = world(&req(&["OTHER_KEY"]), &entry("", &[KEY]), &[(KEY, VAL)]);
+        assert_eq!(w.ok(), 1);
+        refused(&w, "step secret not allowed");
+        // refused ref and a missing value: the gate comes before the lookup
+        let w = world(&req(&[KEY]), &entry("", &[KEY]), &[]);
+        assert_eq!(w.ok(), 1);
+        refused(&w, "repository or ref not in the watch list");
+        // a runner setting and docker: the pipeline is refused first
+        let both = format!(
+            "{}[steps.d]\nimage = \"alpine\"\ncommands = [\"x\"]\ndocker = true\n",
+            one_step("s", &["FACTORY_CI_TOKEN"])
+        );
+        let w = world(&both, &entry(MAIN, &[]), &[]);
+        assert_eq!(w.ok(), 1);
+        refused(&w, "pipeline file refused");
+    }
+
+    // ---- US3: a missing or bad value stops early ----
+
+    #[test]
+    #[ignore = "test-first"]
+    fn unavailable_value_ends_the_run_before_any_container() {
+        let big = "a".repeat(32769);
+        let none = format!("secret {KEY}: expected 1, found 0");
+        let twice = format!("secret {KEY}: expected 1, found 2");
+        let bad = format!("secret {KEY}: unusable value");
+        let rows: Vec<(&str, Vec<&str>, &str, &str)> = vec![
+            ("missing", vec![], none.as_str(), ""),
+            ("duplicate", vec!["fake-dup-1111", "fake-dup-2222"], twice.as_str(), "fake-dup-1111"),
+            ("empty", vec![""], bad.as_str(), ""),
+            ("blank", vec!["   "], bad.as_str(), ""),
+            ("NUL", vec!["fake\0nul-7777"], bad.as_str(), "nul-7777"),
+            ("3-character line", vec!["good-line-1111\nabc"], bad.as_str(), "good-line-1111"),
+            ("trailing newline", vec!["fake-trail-5555\n"], bad.as_str(), "fake-trail-5555"),
+            ("over 32 KiB", vec![big.as_str()], bad.as_str(), ""),
+        ];
+        for (label, vals, want, leak) in rows {
+            let store: Vec<(&str, &str)> = vals.iter().map(|v| (KEY, *v)).collect();
+            let w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &store);
+            assert_eq!(w.ok(), 1, "{label}");
+            refused(&w, "step secret unavailable");
+            assert_eq!(w.bws_calls(), 1, "{label}");
+            assert!(
+                detail(&w).iter().any(|l| l == want),
+                "{label}: Loki has {:?}",
+                detail(&w)
+            );
+            if !leak.is_empty() {
+                assert!(!w.hub.bodies().contains(leak), "{label}: value in Loki");
+            }
+            assert_no_name_or_count(&w);
+        }
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn every_run_makes_one_bws_call() {
+        let cases: Vec<(&str, W, i32)> = vec![
+            ("no secrets", W::new(&pipe(&["a"])), 0),
+            (
+                "a secret",
+                world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, VAL)]),
+                0,
+            ),
+            (
+                "not allowed",
+                world(&req(&[KEY]), &entry(MAIN, &[]), &[(KEY, VAL)]),
+                1,
+            ),
+            ("missing", world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[]), 1),
+            (
+                "ref gate",
+                world(&req(&[KEY]), &entry("", &[KEY]), &[(KEY, VAL)]),
+                1,
+            ),
+            (
+                "docker",
+                world(&docker_and_secrets(), &entry(MAIN, &[KEY]), &[(KEY, VAL)]),
+                1,
+            ),
+            (
+                "runner setting",
+                world(&req(&["FACTORY_CI_TOKEN"]), &entry(MAIN, &[]), &[]),
+                1,
+            ),
+        ];
+        for (label, w, code) in cases {
+            assert_eq!(w.ok(), code, "{label}: {}", w.stderr());
+            assert_eq!(w.bws_calls(), 1, "{label}");
+        }
+    }
+
+    // ---- US4: nothing leaks ----
+
+    #[test]
+    #[ignore = "test-first"]
+    fn hostile_step_cannot_print_a_secret_anywhere() {
+        let v = "fake hostile/Zq81=key+1";
+        let (pv, hv) = (pct(v), hex(v.as_bytes()));
+        let mut w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, v)]);
+        w.docker_body = format!(
+            "case \"$1\" in run)\n\
+             echo \"$SITE_API_KEY\"\n\
+             echo \"$SITE_API_KEY\" | base64\n\
+             printf 'x%s' \"$SITE_API_KEY\" | base64\n\
+             printf '%s\\n' '{pv}' '{hv}'\n\
+             echo \"line prefix-$SITE_API_KEY-suffix\"\n\
+             ;; esac"
+        );
+        assert_eq!(w.ok(), 0, "{}", w.stderr());
+        let needles = [
+            v.to_string(),
+            base64(format!("{v}\n").as_bytes()),
+            base64(format!("x{v}").as_bytes()),
+            base64(v.as_bytes()),
+            pv,
+            hv,
+        ];
+        let hay = [
+            ("stdout", w.stdout()),
+            ("stderr", w.stderr()),
+            ("docker argv", w.text("docker.calls")),
+            ("bws argv", w.text("bws.calls")),
+            ("git argv", w.text("git.calls")),
+            ("loki", w.hub.bodies()),
+        ];
+        for n in &needles {
+            for (label, text) in &hay {
+                assert!(!text.contains(n.as_str()), "{n} found in {label}");
+            }
+        }
+        let lines = w.hub.lines("a", "stdout");
+        assert!(lines.contains(&"line prefix-***-suffix".to_string()), "{lines:?}");
+        // plain, both base64 lines, percent and hex: five short lines that hold `***`
+        let short = lines.iter().filter(|l| l.contains("***") && l.len() <= 12).count();
+        assert!(short >= 5, "{short} short masked lines in {lines:?}");
+        assert_public(&w);
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn a_secret_named_pass_keeps_pipeline_passed_on_stdout() {
+        for v in ["pass", "started", "success", "failed", "pipeline"] {
+            let w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, v)]);
+            assert_eq!(w.ok(), 0, "{v}: {}", w.stderr());
+            assert_eq!(
+                norm(&w.stdout()),
+                [
+                    "[runner] log store answered HTTP 204",
+                    "[a] started",
+                    "[a] success in Ns",
+                    "[runner] pipeline passed"
+                ],
+                "{v}"
+            );
+            assert_eq!(w.stderr(), "", "{v}");
+            assert_public(&w);
+        }
+        // Loki holds the redacted text
+        let w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, "pass")]);
+        assert_eq!(w.ok(), 0);
+        let runner = w.hub.lines("runner", "stdout");
+        assert!(runner.iter().any(|l| l == "pipeline ***ed"), "{runner:?}");
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn no_public_line_holds_a_secret_name_or_count() {
+        let big = "a".repeat(32769);
+        let store = [(KEY, VAL), ("OTHER_KEY", "fake-other-value-9")];
+        let worlds: Vec<(&str, W)> = vec![
+            ("not allowed", world(&req(&["OTHER_KEY"]), &entry(MAIN, &[KEY]), &store)),
+            ("missing", world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[])),
+            (
+                "duplicate",
+                world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, "fake-d1-1111"), (KEY, "fake-d2-2222")]),
+            ),
+            (
+                "unusable",
+                world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, big.as_str())]),
+            ),
+            ("ref gate", world(&req(&[KEY]), &entry("", &[KEY]), &store)),
+            (
+                "docker",
+                world(&docker_and_secrets(), &entry(MAIN, &[KEY]), &store),
+            ),
+            ("success", world(&req(&[KEY]), &entry(MAIN, &[KEY]), &store)),
+        ];
+        for (label, w) in worlds {
+            w.ok();
+            assert!(w.stderr().lines().count() <= 1, "{label}: {}", w.stderr());
+            assert_no_name_or_count(&w);
+            assert_public(&w);
+            assert!(!w.text("docker.calls").contains(VAL), "{label}");
+        }
+    }
 }

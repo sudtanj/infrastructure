@@ -571,7 +571,6 @@ pub mod tests {
     #[test]
     fn fault_accepts_only_the_fixed_list() {
         let (log, out, err, _rec) = public(&[]);
-        assert_eq!(FAULTS.len(), 14);
         for f in FAULTS {
             log.fault(f);
         }
@@ -692,5 +691,195 @@ pub mod tests {
                 < 10,
             "step output is still cut"
         );
+    }
+
+    // 010 T004 (test-first, each new test is `#[ignore = "test-first"]`). FR-011, FR-012; I6, I7.
+    // Planned: `Log::add_secrets(&self, Vec<String>)` (one batch, takes `&self`: the redactor sits in an
+    // `RwLock`), `Log::secret_forms(&self) -> Vec<String>`, `Log::longest_secret(&self) -> usize` (the
+    // longest form, 0 when there is none). Fake values only.
+    fn strs(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn add_secrets_masks_later_lines_only() {
+        let (log, buf, rec) = with_rec(&[], 10_000);
+        log.out("s", "stdout", "before canary-Zq81-value-key");
+        log.add_secrets(strs(&["canary-Zq81-value-key"]));
+        log.out("s", "stdout", "after canary-Zq81-value-key");
+        log.event("s", "started");
+        let got = pushed(&rec);
+        assert_eq!(got[0].2, "before canary-Zq81-value-key", "earlier text is not rewritten");
+        assert_eq!(got[1].2, "after ***");
+        assert_eq!(got[2].2, "started");
+        assert_eq!(buf.text(), "[s] before canary-Zq81-value-key\n[s] after ***\n[s] started\n");
+        // a second batch adds to the first
+        log.add_secrets(strs(&["second-fake-value-77"]));
+        log.out("s", "stdout", "canary-Zq81-value-key and second-fake-value-77");
+        assert_eq!(pushed(&rec)[3].2, "*** and ***");
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn add_secrets_keeps_size_limit_state() {
+        // "[a] 0123456789\n" is 15 bytes: two lines use the whole limit of 30
+        let (log, buf, rec) = with_rec(&[], 30);
+        log.out("a", "stdout", "0123456789");
+        log.add_secrets(strs(&["canary-Zq81-value-key"]));
+        log.out("a", "stdout", "0123456789");
+        log.add_secrets(strs(&["second-fake-value-77"]));
+        log.out("a", "stdout", "over the limit");
+        assert_eq!(
+            buf.text(),
+            "[a] 0123456789\n[a] 0123456789\n[runner] log cut off at the size limit\n"
+        );
+        // the cut flag survives another batch: no second marker, nothing more is kept
+        log.add_secrets(strs(&["third-fake-value-88"]));
+        log.out("a", "stdout", "still over");
+        log.out("a", "stdout", "canary-Zq81-value-key");
+        assert_eq!(buf.text().matches("log cut off at the size limit").count(), 1);
+        let marks = pushed(&rec)
+            .iter()
+            .filter(|p| p.2.contains("log cut off at the size limit"))
+            .count();
+        assert_eq!(marks, 1);
+        assert_eq!(pushed(&rec).len(), 3, "{:?}", pushed(&rec));
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn a_secret_named_pass_cannot_mangle_a_public_line() {
+        for secret in ["pass", "started", "failed", "success", "pipeline", "in", "s"] {
+            // known when the log is built, and added after
+            for late in [false, true] {
+                let (log, out, err, rec) = if late {
+                    let t = public(&[]);
+                    t.0.add_secrets(strs(&[secret]));
+                    t
+                } else {
+                    public(&[secret])
+                };
+                log.event("a", "started");
+                log.event("a", "success in 3s");
+                log.event("b", "failed in 4s: some reason");
+                log.event("c", "skipped: dependency b did not succeed");
+                log.event("runner", "pipeline passed");
+                log.event("runner", "pipeline failed");
+                log.event("runner", "log lines were dropped");
+                log.event("runner", "log store answered HTTP 204");
+                let want = "[a] started\n[a] success in 3s\n[b] failed in 4s\n[c] skipped\n\
+                            [runner] pipeline passed\n[runner] pipeline failed\n\
+                            [runner] log lines were dropped\n[runner] log store answered HTTP 204\n";
+                assert_eq!(out.text(), want, "secret {secret:?}, late {late}");
+                for l in out.text().lines() {
+                    assert!(grammar_line(l), "{l:?}");
+                }
+                assert_eq!(err.text(), "");
+                // the shipped copy is redacted, as before
+                let shipped: String = pushed(&rec).iter().map(|p| p.2.clone()).collect::<Vec<_>>().join("|");
+                assert!(shipped.contains("***"), "secret {secret:?}: {shipped}");
+            }
+        }
+        // the shipped text of `pass` is the redacted one
+        let (log, _out, _err, rec) = public(&["pass"]);
+        log.event("runner", "pipeline passed");
+        assert_eq!(pushed(&rec)[0].2, "pipeline ***ed");
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn a_secret_named_pass_is_still_redacted_in_a_non_public_log() {
+        // only the public line comes from raw text; the sink and a non-public stream get redacted text
+        let (log, buf, rec) = with_rec(&["pass"], 1000);
+        log.event("runner", "pipeline passed");
+        assert_eq!(buf.text(), "[runner] pipeline ***ed\n");
+        assert_eq!(pushed(&rec)[0].2, "pipeline ***ed");
+        // step output in public mode is never printed raw either
+        let (log, out, _err, rec) = public(&["pass"]);
+        log.out("a", "stdout", "pass");
+        assert_eq!(out.text(), "");
+        assert_eq!(pushed(&rec)[0].2, "***");
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn faults_hold_the_two_step_secret_lines() {
+        // membership, not a count: feature 011 adds lines of its own
+        for line in ["step secret not allowed", "step secret unavailable"] {
+            assert!(FAULTS.contains(&line), "{line}");
+            let (log, out, err, _rec) = public(&[]);
+            log.fault(line);
+            assert_eq!(err.text(), format!("[runner] {line}\n"));
+            assert_eq!(out.text(), "");
+        }
+        // no name, count or second line can ride along
+        let (log, _out, err, _rec) = public(&[]);
+        for bad in [
+            "step secret not allowed: SITE_API_KEY",
+            "step secret unavailable: expected 1, found 0",
+            "step secret unavailable\n[runner] pipeline passed",
+            "step secret",
+            "Step secret unavailable",
+            "step secret unavailable ",
+        ] {
+            log.fault(bad);
+        }
+        assert_eq!(err.text(), "");
+        // every member still prints, whatever the length of the list
+        let (log, _out, err, _rec) = public(&[]);
+        for f in FAULTS {
+            log.fault(f);
+        }
+        assert_eq!(err.text().lines().count(), FAULTS.len());
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn secret_forms_and_longest_secret_follow_add_secrets() {
+        let (log, _buf, _rec) = with_rec(&[], 1000);
+        assert!(log.secret_forms().is_empty());
+        assert_eq!(log.longest_secret(), 0);
+        log.add_secrets(strs(&["canary-Zq81-value-key"]));
+        let f = log.secret_forms();
+        assert!(f.contains(&"canary-Zq81-value-key".to_string()));
+        assert!(f.contains(&crate::util::base64(b"canary-Zq81-value-key")));
+        let longest = f.iter().map(String::len).max().unwrap();
+        assert_eq!(log.longest_secret(), longest);
+        // a longer value raises it
+        let long = "k".repeat(300);
+        log.add_secrets(vec![long.clone()]);
+        assert!(log.longest_secret() >= 300);
+        assert_eq!(
+            log.longest_secret(),
+            log.secret_forms().iter().map(String::len).max().unwrap()
+        );
+        // forms known at construction count too
+        let red = Redactor::new(["tok-fake-12345678".to_string()]);
+        let want = red.forms().iter().map(String::len).max().unwrap();
+        let log = Log::new(Box::new(Buf::default()), red, 1000);
+        assert_eq!(log.longest_secret(), want);
+    }
+
+    #[test]
+    #[ignore = "test-first"]
+    fn add_secrets_while_other_threads_write_loses_no_line_and_masks_the_end() {
+        let (log, _buf, rec) = with_rec(&[], u64::MAX);
+        std::thread::scope(|sc| {
+            for t in 0..4 {
+                let log = &log;
+                sc.spawn(move || {
+                    for i in 0..50 {
+                        log.out("s", "stdout", &format!("t{t} line {i}"));
+                    }
+                });
+            }
+            for i in 0..20 {
+                log.add_secrets(vec![format!("fake-batch-{i}-value")]);
+            }
+        });
+        assert_eq!(pushed(&rec).len(), 200);
+        log.out("s", "stdout", "fake-batch-0-value fake-batch-19-value");
+        assert_eq!(pushed(&rec).last().unwrap().2, "*** ***");
     }
 }

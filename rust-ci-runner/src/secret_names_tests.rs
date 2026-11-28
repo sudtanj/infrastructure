@@ -122,3 +122,22 @@ fn phase_a_makes_no_write_and_never_names_a_store() {
     assert_eq!(cand.rows.len(), 1);
     assert_eq!(api.writes(), 0);
 }
+
+// ---- 010 T003 (test-first, `#[ignore = "test-first"]`): FR-004. `BW_` and `BITWARDEN` are reserved. ----
+
+#[test]
+#[ignore = "test-first"]
+fn bw_and_bitwarden_names_are_refused_in_an_entry_and_a_pipeline() {
+    for n in ["BW_X", "BW_", "bw_x", "BITWARDEN", "bitwarden_x", "Bitwarden", "BITWARDENX"] {
+        let p = parse(&entry(&format!("secrets = [{n:?}]"))).unwrap_err();
+        assert!(p.iter().any(|l| l.contains(n)), "{n} in an entry: {p:?}");
+        let t = format!("[steps.a]\nimage = \"x\"\ncommands = [\"y\"]\nsecrets = [{n:?}]\n");
+        let v = crate::pipeline::parse(&t).unwrap_err();
+        assert!(v.iter().any(|l| l.contains(n)), "{n} in a pipeline: {v:?}");
+        assert!(!crate::pipeline::valid_secret_name(n), "{n}");
+    }
+    for n in ["BWX", "MY_BW_KEY", "SITE_API_KEY"] {
+        assert!(parse(&entry(&format!("secrets = [{n:?}]"))).is_ok(), "{n}");
+        assert!(crate::pipeline::valid_secret_name(n), "{n}");
+    }
+}
