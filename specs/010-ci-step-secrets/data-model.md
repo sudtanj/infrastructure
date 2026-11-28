@@ -39,7 +39,7 @@ Store failures (no answer, rejected token, bad JSON, over 16 MiB) are the existi
 
 ## Redactor
 
-`Redactor` holds the strings to mask. `add(batch)` appends, for each non-empty value: the value, its plain base64, the base64 of `x-access-token:<value>` and each trimmed line of 4 or more characters (all unconditional); and, for forms of 8 to 49152 characters, the stable middle of base64 at three alignments (standard, URL-safe, unpadded), percent-encoding, JSON-string escape and lowercase hex. Then it sorts longest first and removes duplicates, once per batch. `forms()` returns them all. `Log` owns it behind an `RwLock` and exposes `add_secrets`, `secret_forms` and `longest_secret` (the output pump's carry).
+`Redactor` holds the strings to mask. `add(batch)` appends, for each non-empty value: the value, its plain base64, the base64 of `x-access-token:<value>` and each trimmed line of 4 or more characters (all unconditional); and, for forms of 8 to 49152 characters, the stable middle of base64 at three alignments (standard, URL-safe, unpadded), percent-encoding, JSON-string escape, lowercase hex and, when the standard base64 form is longer than 76 characters, each of its 76-column lines. Then it sorts longest first and removes duplicates, once per batch. `forms()` returns them all. `Log` owns it behind an `RwLock` and exposes `add_secrets`, `secret_forms` and `longest_secret`; the output pump takes `secret_forms` and cuts before any form that would straddle its cut.
 
 ## Required runner keys
 

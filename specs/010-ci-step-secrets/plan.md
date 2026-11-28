@@ -108,7 +108,7 @@ A value is usable when all hold: at most 32 KiB; not blank; no control character
 
 ### Redactor forms and bounds
 
-`Redactor::add(values)` takes a batch, sorts and dedups once. For each value it always adds: the value, its plain base64 and the base64 of `x-access-token:<value>` (both as today, whatever the length, so `new(["pw"])` still masks) and each trimmed line of 4 or more characters. It adds these derived forms only when the form is 8 or more characters and at most 48 KiB: the stable middle of base64 at the three alignments (`k` in 0..3, `base64(v[k..k + 3 * ((n - k) / 3)])`, so a prefix, a trailing newline or wrapping does not hide the value), each also URL-safe and unpadded; percent-encoding of every non-unreserved byte; the JSON-string escape; lowercase hex. `Redactor::forms()` returns every form, and `Log::secret_forms()` exposes it (011 scans them). `Log::longest_secret()` is the longest form. Residual limits are in spec R2.
+`Redactor::add(values)` takes a batch, sorts and dedups once. For each value it always adds: the value, its plain base64 and the base64 of `x-access-token:<value>` (both as today, whatever the length, so `new(["pw"])` still masks) and each trimmed line of 4 or more characters. It adds these derived forms only when the form is 8 or more characters and at most 48 KiB: the stable middle of base64 at the three alignments (`k` in 0..3, `base64(v[k..k + 3 * ((n - k) / 3)])`, so a prefix or a trailing newline does not hide the value), each also URL-safe and unpadded; percent-encoding of every non-unreserved byte; the JSON-string escape; lowercase hex; and, when the standard base64 form of the value is longer than 76 characters, each of its 76-column lines, because `Log::write` redacts one line at a time (pieces under 8 characters are not added, and every piece counts against the 48 KiB cap). `Redactor::forms()` returns every form, and `Log::secret_forms()` exposes it (011 scans them). `Log::longest_secret()` is the longest form. Residual limits are in spec R2.
 
 ### Public line from fixed grammar
 
@@ -116,7 +116,7 @@ A value is usable when all hold: at most 32 KiB; not blank; no control character
 
 ### Pump boundary
 
-`engine.rs` `pump` reads `take(65536).read_until(b'\n')`, and `Log::write` redacts each chunk alone, so a value across byte 65536 of one line escapes. Fix in `pump`: hold back the last `carry` bytes of each cut chunk and prepend them to the next, flush the remainder at end of stream, never cut inside a UTF-8 character. `carry` equals the longest form (`Log::longest_secret()`), at most 48 KiB for derived forms and 32 KiB for the value, so it is always below the 64 KiB chunk. Tests at the 32 KiB cap and one byte over.
+`engine.rs` `pump` reads up to 65536 bytes with `read_until(b'\n')`, and `Log::write` redacts each piece alone, so a value across byte 65536 of one line would escape. Fix in `pump`, which takes `forms: &[String]` (`Log::secret_forms()`, read once when the step starts) instead of a carry length: a piece cut with no newline is cut back to a character boundary and then to before the start of any occurrence of a form that the chunk ends in the middle of, repeated until none is left, and the cut-off text opens the next piece. If that would leave an empty piece, the character boundary alone is used. The output of `pump` is its input in order, the tail is flushed at end of stream, and no UTF-8 character is cut. Tests at the 32 KiB cap and one byte over.
 
 ### Required runner keys
 
@@ -133,7 +133,7 @@ A value is usable when all hold: at most 32 KiB; not blank; no control character
 | `rust-ci-runner/src/watch.rs` | `WatchEntry::secrets_allowed_on`. Parsing and defaults unchanged. No `bws` or `bitwarden` in the text. |
 | `rust-ci-runner/src/redact.rs` | `Redactor::add` (batch), `forms`; `new` calls `add`. No `bws` or `bitwarden`. |
 | `rust-ci-runner/src/log.rs` | `RwLock<Redactor>`, `add_secrets`, `secret_forms`, `longest_secret`; public line from raw event text; `FAULTS` gains `step secret not allowed` and `step secret unavailable`; `is_fault` uses `REQUIRED_KEYS`. |
-| `rust-ci-runner/src/engine.rs` | `pump` carries the boundary tail. |
+| `rust-ci-runner/src/engine.rs` | `pump(r, forms, f)` cuts back before a form that straddles the 64 KB cut. |
 | `rust-ci-runner/src/job.rs` | `load_pipeline` becomes `pub(crate)`. |
 | `rust-ci-runner/src/ci.rs` | `Args` gains `id`, `allowed`, `held`, `ref_may_hold_secrets`; `job()` finds the entry first, calls `fetch_with`, fills `Args`; `steps` and `run_checkout` follow the order above. |
 | `rust-ci-runner/src/ci_tests.rs` | New `mod step_secrets` at the end. Change `declared_secret_fails_before_any_container` and the case table of `every_stderr_line_is_in_the_fixed_list`. |
@@ -190,10 +190,10 @@ Ordering. T001 to T007 (tests) run in parallel; T005 is one file. In Phase 2, T0
 - Constraints: no `bws` or `bitwarden` in `redact.rs`. A poisoned lock recovers with `into_inner`. No new crate.
 
 ### T012 Pump boundary (FR-013)
-- Goal: a value across the 64 KB read cut is masked, and the carry stays bounded.
+- Goal: a value across the 64 KB read cut is masked.
 - Files: `rust-ci-runner/src/engine.rs` (after T011).
-- Acceptance: `carry` = `Log::longest_secret()`; a line with the value across byte 65536 reaches the log masked; ordinary output keeps content and order; the tail is flushed at end of stream; a UTF-8 character is never cut; with a 32 KiB value and its derived forms no chunk is held back forever.
-- Constraints: `pump` stays generic over `Read`; the carry comes from the caller.
+- Acceptance: `pump(r, forms, f)` with `forms` from `Log::secret_forms()`; a line with the value across byte 65536, or starting just before any other emit boundary, reaches the log masked; ordinary output keeps content and order; the tail is flushed at end of stream; a UTF-8 character is never cut; a form longer than a chunk does not stall it.
+- Constraints: `pump` stays generic over `Read`; the forms come from the caller.
 
 ### T013 Selftest runs the lib tests (S1)
 - Goal: lib tests run before code reaches `main`.
@@ -326,7 +326,7 @@ Unit tests sit in the modules named. `ci::run` integration tests sit in `mod ste
 | | | `a_secret_named_pass_keeps_pipeline_passed_on_stdout` | FR-012 |
 | | | `no_public_line_holds_a_secret_name_or_count` | FR-012 |
 | | `ci_tests.rs` (existing group) | change `declared_secret_fails_before_any_container` to expect `step secret not allowed`; add two rows to `every_stderr_line_is_in_the_fixed_list` | FR-012 |
-| T006 | `engine.rs` tests | `pump_masks_a_value_across_the_64k_cut`; `pump_masks_a_32_kib_value_across_the_cut` and `pump_with_a_value_one_byte_over_the_cap_is_never_given_to_it`; `pump_keeps_order_and_flushes_the_tail`; `pump_never_cuts_a_utf8_char` | FR-013 |
+| T006 | `engine.rs` tests | `pump_masks_a_value_across_the_64k_cut`; `pump_masks_a_32_kib_value_across_the_cut` and `pump_with_a_value_one_byte_over_the_cap_is_never_given_to_it`; `pump_keeps_order_and_flushes_the_tail`; `pump_never_cuts_a_utf8_char`; `pump_does_not_split_a_value_at_its_own_emit_boundary` | FR-013 |
 | T007 | `tests/repo_files.rs` | `no_secret_name_in_two_committed_entries`; `infrastructure_entry_has_no_secrets`; `cargo_toml_and_lock_versions_match` | FR-014, FR-016 |
 
 SC-003 is the `started_containers()` assert in the refusal tests. SC-001, SC-004, FR-019 are manual (Principle V exception). `tests/no_vendor.rs` must pass: `bws` and `bitwarden` stay in `store.rs`, `ci.rs`, `pipeline.rs`, `log.rs`, `engine.rs`, `main.rs`, not in `redact.rs` or `watch.rs`.
@@ -357,7 +357,7 @@ SC-003 is the `started_containers()` assert in the refusal tests. SC-001, SC-004
 
 Assume it shipped and broke. The five likeliest causes:
 
-1. A value reaches Loki or stdout through a form the redactor missed or a boundary. Prevented: the FR-011 forms, the pump tail bounded below the chunk, one batch before `run_pipeline`, the canary run T024 before any real value, the hostile tests.
+1. A value reaches Loki or stdout through a form the redactor missed or a boundary. Prevented: the FR-011 forms, the pump cut before a straddling form, one batch before `run_pipeline`, the canary run T024 before any real value, the hostile tests.
 2. Secrets reach a branch nobody meant (default `branches = ["*"]`, `?*`, `secret_branches` ignored). Prevented: FR-010 gate with its tests.
 3. A change to the first `bws` call breaks every run, with or without secrets, because `fetch_with` shares it. Prevented: `fetch` and `parse_list` keep their tests unchanged; `fetch_with` with an empty allowlist must equal `fetch` (test); selftest runs the lib tests before `main`; the no-secret canary T021.
 4. The release or rollout breaks: lock and manifest disagree under `--locked`; the pin is bad; the tested SHA is not the tagged SHA; the pin gate never ran. Prevented: T016 touches two lines and `repo_files.rs` compares them; T019 records and compares SHAs; T020 adds the missing selftest path so job `shell` runs; T021 canary.
@@ -373,7 +373,7 @@ Assume it shipped and broke. The five likeliest causes:
 - I6: stdout lines belong to the existing grammar and stderr lines to `FAULTS`, whatever the secret values are; no line holds a secret name.
 - I7: `Redactor::add(a)` then `add(b)` masks the same text as `new(a + b)`; `new([v])` masks `v` for any non-empty `v`.
 - I8: every run makes exactly one `bws` call.
-- I9: the output of `pump` equals its input with masked forms replaced, whatever the chunk cuts and whatever value of at most 32 KiB.
+- I9: the output of `pump` equals its input, in order, and no occurrence of a form is split between two pieces, whatever value of at most 32 KiB (except when the text before an occurrence leaves no earlier cut, see "Pump boundary").
 - I10: `Held::take` never returns a value that breaks the value rule.
 
 ## Edge-case checklist (feiyi-edge-cases) answered for this plan
@@ -382,7 +382,7 @@ Assume it shipped and broke. The five likeliest causes:
 - State and order: no state kept; the lookup finishes before the first container; a crash leaves only the checkout the existing cleanup removes.
 - Timing: no new call; the existing 60 s attempt and one retry without backoff apply.
 - Concurrency: concurrent runs read the store independently; the workflow's queue group is unchanged.
-- Resources: values at most 32 KiB, derived forms at most 48 KiB, pump carry below the 64 KiB chunk; a list over 16 MiB ends in `secret store unreachable`; the test group is split for the process limit.
+- Resources: values at most 32 KiB, derived forms at most 48 KiB, forms below the 64 KiB chunk; a list over 16 MiB ends in `secret store unreachable`; the test group is split for the process limit.
 - Permissions and trust: the watch file on `main` decides names and refs; the pipeline cannot widen it; runner settings never pass; names are public.
 - Failure and rollback: every failure stops before a container; rollback list below.
 - Output and UI: no UI; two new closed lines; public lines from fixed grammar.
@@ -435,7 +435,7 @@ Rollback, in this order:
 | S2 dind is privileged | Any docker step in a pipeline with secrets is refused | FR-009, T009 |
 | S3 token reaches `run_checkout`; `Debug` leaks | The lookup sits in `job()`; `Args` holds `Held` with names-free `Debug`; no `Debug` on holders; interface v1 | Lookup interface, T008, T015 |
 | S4 redactor misses `echo "$V" \| base64` and other forms | Forms added with floors and caps; hostile tests use those commands | Redactor forms, T011, T004 |
-| S5 pump chunk boundary | Carry equals the longest form, bounded by the 32 KiB value cap and 48 KiB form cap | Pump boundary, T012, T006 |
+| S5 pump chunk boundary | The pump cuts before any form that straddles the cut; forms are bounded by the 32 KiB value cap and 48 KiB form cap | Pump boundary, T012, T006 |
 | S6 value rule and public-line mangling | Control characters refused, blank inner lines allowed, surrounding whitespace on single lines refused, public line from fixed grammar | Value rule, T008, T011 |
 | S7 reserve `BW_`, `BITWARDEN` | `BWS_` already there; `BW_` and `BITWARDEN` added | T009, T003 |
 | S8 canary run, rotation, agent rules | T024, rollback step 6, tasks.md rules | tasks.md |
@@ -456,7 +456,7 @@ Rollback, in this order:
 | S1 no test before `main` | T013 runs `--lib` in the selftest; landing by branch push then fast-forward; commits link the feature folder |
 | S2 `[P]` dependencies | T008 first; T011 after T008; T012 after T011; others parallel |
 | S3 clippy | New data in `Args`; `steps` 6 parameters; no `#[allow]` |
-| S4 pump carry | 32 KiB value cap; 48 KiB derived-form cap; carry = longest form, below 64 KiB; tests at the cap |
+| S4 pump forms | 32 KiB value cap; 48 KiB derived-form cap; forms below 64 KiB; tests at the cap |
 | S5 trailing newline | Refused on single-line values; multi-line unchanged |
 | S6 `docker pull` | Dropped; digest from the release summary; T021 pulls |
 | S7 "dropped" overclaim | Reworded to retention only; no zeroize |
@@ -504,6 +504,6 @@ README.md  rust-ci-runner/README.md
 |---|---|---|
 | `Log` redactor behind an `RwLock` | Secret names are known only after the log exists; values must join without a second log; feature 011 adds values later | A second `Log` resets the 10 MB limit and cut state |
 | `StepSecrets` and `Held` with names-free `Debug` | A stray `{:?}` of the map or the held rows must not print values | Bare maps print their values |
-| Extra redactor forms, caps and the pump tail | Security S4, S5: a step can print `echo "$V" \| base64`; a long line can straddle the read cut | Plain value and plain base64 miss both |
+| Extra redactor forms, caps and the pump cut | Security S4, S5: a step can print `echo "$V" \| base64`; a long line can straddle the read cut | Plain value and plain base64 miss both |
 | Public line from raw event text | Security S6: a value such as `pass` breaks `pipeline passed` | Printing the redacted text does that |
 | `ci-canary/.factory-ci.toml` | A canary that does not rerun the 30-minute runner pipeline | Reusing `rust-ci-runner` costs 30 minutes per canary |
