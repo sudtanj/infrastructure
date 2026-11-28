@@ -4,7 +4,7 @@ Each entry gives the decision, the evidence and what was rejected. Evidence was 
 
 ## R-A The atomic primitive for the queue
 
-**Decision**: release assets in a per-state release `ci-queue-<state>`. Asset name `t-<runid>`, label `<runid>.<server epoch>`, order by asset id.
+**Decision**: release assets in a per-state release `ci-queue+<repo>+<project>+<state>` in the store repo. Asset name `t-<runid>-<attempt>-<entry>`, label `<runid>.<server epoch>`, order by asset id.
 
 **Evidence**:
 - GitHub's "Upload a release asset" page (docs.github.com/en/rest/releases/assets) says: "If you upload an asset with the same filename as another uploaded asset, you'll receive an error and must delete the old file before you can re-upload the new asset." That is the atomic create.
@@ -49,15 +49,15 @@ Each entry gives the decision, the evidence and what was rejected. Evidence was 
 
 ## R-D One runner-only key list
 
-**Decision**: `store::RUNNER_KEYS` with ten names; `BOOT_KEYS` is the first four.
+**Decision**: `store::RUNNER_KEYS` with thirteen names; `REQUIRED_KEYS` is the first four.
 
-**Evidence**: the 010 plan (`origin/010-ci-step-secrets`, "Single list of runner keys (devops N6)") puts `RUNNER_KEYS: [&str; 4]` in `store.rs` and makes `valid_secret_name`, `fetch_named` and the `log.rs` fault names use it. 011 grows the same constant to ten, so the five consumers close together. `pipeline.rs` `valid_secret_name` already reserves `FACTORY_CI`, `BWS_`; 010 adds `BW_` and `BITWARDEN`.
+**Evidence**: the 010 plan (`origin/010-ci-step-secrets`, "Single list of runner keys (devops N6)") puts `RUNNER_KEYS: [&str; 4]` in `store.rs` and makes `valid_secret_name`, `fetch_named` and the `log.rs` fault names use it. 011 grows the same constant to thirteen, so the five consumers close together. `pipeline.rs` `valid_secret_name` already reserves `FACTORY_CI`, `BWS_`; 010 adds `BW_` and `BITWARDEN`.
 
 ## R-E Schedule
 
 **Evidence** (docs.github.com, "Events that trigger workflows", `schedule`): the shortest interval is once every 5 minutes; scheduled workflows run on the latest commit of the default branch; the event "can be delayed during periods of high loads ... High load times include the start of every hour. If the load is sufficiently high enough, some queued jobs may be dropped"; "In a public repository, scheduled workflows are automatically disabled when no repository activity has occurred in 60 days."
 
-**Decision**: cron `2,17,32,47 * * * *`, so each tick sits 2 minutes into its quarter hour with 13 minutes of slack. `due` is a pure function of the epoch minute. The 60-day risk gets a `::warning::` in the `due` job at 50 days since the last commit on `main`, plus a README instruction. No third-party keepalive action, no write permission.
+**Decision**: up to 3 `cron` lines in the workflow, each mapped by a `case` on `github.event.schedule` to repo, ref, project and entry number. A cron line carries its own cadence, so no schedule file, no `due` command and no slot marker are needed (the critic review removed them). The owner picks a minute off the top of the hour. A duplicated tick runs twice in sequence through the queue. The 60-day switch-off gets a README line (push a commit before day 55) and an alert on a missing `pipeline passed` with no-data set to Alerting.
 
 ## R-F Where the tests run
 
@@ -66,4 +66,5 @@ Each entry gives the decision, the evidence and what was rejected. Evidence was 
 ## R-G Findings that changed the design late
 
 - The 002 threat model (coordinator, 2026-11-28): install, lint and test run third-party code as root and must never see the state file. This produced D8 (one declaring step, ordering rule, hook, mode 0600, chown by the step with a runner backstop) and replaced the earlier plan of a pipeline-wide restore and a world-readable `chmod`.
-- The 010 plan on the remote branch moved on after the first read (ref gate through `secrets_allowed_on`, `StepSecrets`, the `fetch` closure, `Redactor::add` with more forms). The 011 plan follows the later revision.
+- The 010 plan moved on twice: the second critic round re-baselined 011 on 010's real names (`REQUIRED_KEYS`, `fetch_with`, `Held::take`, `Redactor::forms`, `Log::secret_forms`, `Args`).
+- Critic review of faa835f: tick retired, queue cap and wait cap removed, slot marker, schedule file and `due` removed, tags with `+`, asset regexes with a digit entry, staged 0.4.0 and 0.4.1, constitution 1.2.0.
