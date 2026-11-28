@@ -57,17 +57,18 @@ impl Redactor {
                 let n = 3 * (v.len().saturating_sub(k) / 3);
                 if n > 0 {
                     let mid = base64(&v.as_bytes()[k..k + n]);
+                    // `Log::write` redacts one line at a time and `base64` wraps at 76 columns: the
+                    // whole-group form wraps the same way as the value followed by anything else.
+                    if k == 0 && mid.len() > WRAP {
+                        derived.extend(
+                            (0..mid.len())
+                                .step_by(WRAP)
+                                .map(|i| mid[i..(i + WRAP).min(mid.len())].to_string()),
+                        );
+                    }
                     derived.push(url_safe(&mid));
                     derived.push(mid);
                 }
-            }
-            // `Log::write` redacts one line at a time and `base64` wraps at 76 columns.
-            if b64.len() > WRAP {
-                derived.extend(
-                    (0..b64.len())
-                        .step_by(WRAP)
-                        .map(|i| b64[i..(i + WRAP).min(b64.len())].to_string()),
-                );
             }
             derived.push(percent(&v));
             if let Ok(json) = serde_json::to_string(&v) {

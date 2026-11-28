@@ -2071,6 +2071,12 @@ fn production_seams_are_fixed_and_ignore_the_environment() {
 mod step_secrets {
     use super::*;
 
+    /// The text of each line pushed for `step` on `stream`, without the `run= sha= branch=` label the shipper adds.
+    fn lines(w: &W, step: &str, stream: &str) -> Vec<String> {
+        let bare = |l: String| l.splitn(4, ' ').nth(3).unwrap_or_default().to_string();
+        w.hub.lines(step, stream).into_iter().map(bare).collect()
+    }
+
     const KEY: &str = "SITE_API_KEY";
     const VAL: &str = "fake-site-value-Q7x1";
     const MAIN: &str = "branches = [\"main\"]\n";
@@ -2162,7 +2168,7 @@ mod step_secrets {
     }
 
     fn detail(w: &W) -> Vec<String> {
-        [w.hub.lines("ci", "stderr"), w.hub.lines("ci", "stdout")].concat()
+        [lines(&w, "ci", "stderr"), lines(&w, "ci", "stdout")].concat()
     }
 
     /// A docker stub body: the step prints its secret.
@@ -2251,7 +2257,7 @@ mod step_secrets {
         w.docker_body = print_secret();
         assert_eq!(w.ok(), 0, "{}", w.stderr());
         assert!(step_env(&w, "a").contains(&format!("{KEY}=abcd")));
-        let lines = w.hub.lines("a", "stdout");
+        let lines = lines(&w, "a", "stdout");
         assert!(lines.contains(&"***".to_string()), "{lines:?}");
         assert!(!lines.iter().any(|l| l.contains("abcd")), "{lines:?}");
     }
@@ -2267,7 +2273,7 @@ mod step_secrets {
         for part in ["BEGIN FAKE", "body-line-1234", "END FAKE"] {
             assert!(!bodies.contains(part), "{part} in Loki");
         }
-        let lines = w.hub.lines("a", "stdout");
+        let lines = lines(&w, "a", "stdout");
         assert!(lines.iter().filter(|l| *l == "***").count() >= 3, "{lines:?}");
     }
 
@@ -2562,7 +2568,7 @@ mod step_secrets {
                 assert!(!text.contains(n.as_str()), "{n} found in {label}");
             }
         }
-        let lines = w.hub.lines("a", "stdout");
+        let lines = lines(&w, "a", "stdout");
         assert!(lines.contains(&"line prefix-***-suffix".to_string()), "{lines:?}");
         // plain, both base64 lines, percent and hex: five short lines that hold `***`
         let short = lines.iter().filter(|l| l.contains("***") && l.len() <= 12).count();
@@ -2591,7 +2597,7 @@ mod step_secrets {
         // Loki holds the redacted text
         let w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, "pass")]);
         assert_eq!(w.ok(), 0);
-        let runner = w.hub.lines("runner", "stdout");
+        let runner = lines(&w, "runner", "stdout");
         assert!(runner.iter().any(|l| l == "pipeline ***ed"), "{runner:?}");
     }
 
