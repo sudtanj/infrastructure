@@ -152,7 +152,7 @@ Not covered: the `.github/scripts/test-factory-monorepo-ci.sh` pin shape (selfte
 
 ## Final Phase: Docs (last task)
 
-- [ ] T027 Update `README.md` (line 55), `rust-ci-runner/README.md` (the `ci` list, the fault list, Secrets, risks), the GitHub description (`gh repo edit`, needs admin) and add `readme_has_no_stale_secrets_sentence` to `rust-ci-runner/tests/repo_files.rs`, as listed under T027 in plan.md, including the rollback list, the runbook line and the note that `repo_files.rs` needs `../` (FR-017). The README also says: the tick gets no secrets, and a step that holds a secret can pass a value to a later step on purpose through `/workspace` (a documented limit, spec R2)
+- [ ] T027 Update `README.md` (line 55), `rust-ci-runner/README.md` (line 88 `secret_branches` default and the `ci` list, the fault list, Secrets, risks), the GitHub description (`gh repo edit`, needs admin) and add `readme_has_no_stale_secrets_sentence` to `rust-ci-runner/tests/repo_files.rs`, as listed under T027 in plan.md, including the rollback list, the runbook line and the note that `repo_files.rs` needs `../` (FR-017). Also fix `specs/010-ci-step-secrets/contracts/ci-secrets.md` line 17 if it drifts. The README also says: the tick gets no secrets, and a step that holds a secret can pass a value to a later step on purpose through `/workspace` (a documented limit, spec R2)
 
 ## Dependencies
 

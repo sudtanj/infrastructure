@@ -14,7 +14,7 @@ secrets = ["SITE_API_KEY"]            # placeholder name; allowlist of step secr
 
 - `secrets`: names a pipeline of this repo may request through `ci`. Default none. At most 20, no duplicates, each a valid secret name. The list is per repo, not per Bitwarden project. Names are public in this file.
 - Refused in this list: every reserved name (`FACTORY_CI*`, which covers the four runner settings, `BWS_`, `BW_`, `BITWARDEN`, `PATH` and so on). One such name refuses the whole file: `plan --check` reports it and `ci` prints `repository or ref not in the watch list`.
-- Ref gate when a pipeline requests secrets: with `secret_branches` set, the ref must match it; without it, `branches` must be explicit and none of its patterns made only of `*` and `?` characters. Otherwise `[runner] repository or ref not in the watch list`.
+- Ref gate when a pipeline requests secrets: the ref must match `secret_branches`. Without `secret_branches` no ref gets secrets (T017a, M3); `branches` plays no part. Otherwise `[runner] repository or ref not in the watch list`. The tick and its job pass no secrets at all (T017b).
 - Only the entry of the repo being run counts. `sudtanj/infrastructure` never gets `secrets`. A name appears in one entry only.
 
 ## Pipeline step (`.factory-ci.toml`, untrusted, from the fetched branch)
