@@ -1,21 +1,32 @@
 # Contract: the release store
 
-The store is a separate private repo with no code and no workflows. Its `owner/name` is the runner setting `FACTORY_CI_STATE_REPO` (Bitwarden), never a file in the public repo. All calls use `FACTORY_CI_STATE_TOKEN` (scoped to that repo, contents write) as `Authorization: Bearer <token>`, header `Accept: application/vnd.github+json`. Hosts are fixed: `api.github.com` and `uploads.github.com`; `GITHUB_API_URL` is never read. Redirects are off on every call. Before any ticket, `GET /repos/<store>` must answer `private: true`.
+The store is a separate private repo with no code, no workflows and no tag rulesets that block creation; it starts with one README commit. Its `owner/name` is the runner setting `FACTORY_CI_STATE_REPO` (Bitwarden), never a file in the public repo. All calls use `FACTORY_CI_STATE_TOKEN` (scoped to that repo, contents write) as `Authorization: Bearer <token>`, header `Accept: application/vnd.github+json`. Hosts are fixed: `api.github.com` and `uploads.github.com`; `GITHUB_API_URL` is never read. Redirects are off on every call. Before any ticket, `GET /repos/<store>` must answer `private: true`.
 
-Each call has a time limit (30 s; 300 s for an upload) and one retry on no answer or 5xx. A 403, a 429 or `x-ratelimit-remaining: 0` pauses all store calls (polls and renewals too) until `retry-after`, `x-ratelimit-reset` or 60 s, whichever the answer gives, with the Loki line `rate limited`. Mutations are at least 1 s apart. The exit-time ticket delete has a 5 s limit and no retry. Every answer's `Date` header is parsed as server time.
+Each call has a time limit (30 s; 300 s for an upload) and one retry on no answer or 5xx. A 403, a 429 or `x-ratelimit-remaining: 0` pauses all calls except renewals until `retry-after`, `x-ratelimit-reset` or 60 s, never longer than 120 s, with the Loki line `rate limited`. A renewal never pauses. Mutations are at least 1 s apart. The exit-time ticket delete has a 5 s limit and no retry. Every answer's `Date` header is parsed as server time.
 
-## Names
+## Tags
 
-`<repo>` is the pipeline repo as `<owner>_<name>`. `<project>` is `root` for `.`, other dots become `_`. A tag over 200 bytes is `pipeline file refused`. The tag never comes from the pipeline file.
+`<repo>` is the pipeline repo as `<owner>_<name>` (owner has no `_`, so the first `_` splits). `<project>` is the folder name, or `-` for the root project `.` (a folder name cannot be `-`). The delimiter `+` is outside every alphabet (owner `[A-Za-z0-9-]`, name `[A-Za-z0-9._-]`, project `[A-Za-z0-9._-]`, state `[A-Za-z0-9_-]`), so the mapping is injective; a test walks a table of colliding-looking inputs. A project that contains `..`, ends with `.` or `.lock`, or a tag over 200 bytes is `pipeline file refused` when `[state]` or `[artifacts]` is declared. The tag never comes from the pipeline file.
 
-| Thing | Release tag | Asset name | Label |
-|---|---|---|---|
-| Ticket | `ci-queue-<repo>-<project>-<state>` | `t-<runid>-<attempt>-<entry>` | `<runid>.<epoch>` |
-| Slot marker | `ci-state-<repo>-<project>-<state>` | `slot-<epoch>-<entry>` | none |
-| State | `ci-state-<repo>-<project>-<state>` | `state-<runid>-<attempt>-<entry>-<8 hex>.bin` | none |
-| Artifact | `ci-artifacts-<repo>-<project>` | `artifact-<runid>-<attempt>-<entry>-<8 hex>.bin` | none |
+| Thing | Release tag |
+|---|---|
+| Ticket | `ci-queue+<repo>+<project>+<state>` |
+| State | `ci-state+<repo>+<project>+<state>` |
+| Artifact | `ci-artifacts+<repo>+<project>` |
 
-`<runid>` is `GITHUB_RUN_ID` when it is a valid name, else the random id. `<attempt>` is `GITHUB_RUN_ATTEMPT` (`0` when unset). `<entry>` is the schedule index, `-` for a manual run. Releases are `prerelease: true`, `draft: false`, `make_latest: "false"`, at the default branch head. Immutable releases must be off.
+Releases are `prerelease: true`, `draft: false`, `make_latest: "false"`, at the default branch head. Immutable releases must be off.
+
+## Asset names (one regex per kind)
+
+`<runid>` is `GITHUB_RUN_ID` when it is all digits, else a random decimal number. `<attempt>` is `GITHUB_RUN_ATTEMPT` (`1` when unset). `<entry>` is the entry number: `0` for a manual run, `1` to `3` for a cron entry. `<8hex>` is random.
+
+| Kind | Regex | Label |
+|---|---|---|
+| Ticket | `^t-[0-9]+-[0-9]+-[0-9]+$` | `<runid>.<epoch>` matching `^[0-9]+\.[0-9]+$` |
+| State | `^state-[0-9]+-[0-9]+-[0-9]+-[0-9a-f]{8}\.bin$` | none |
+| Artifact | `^artifact-[0-9]+-[0-9]+-[0-9]+-[0-9a-f]{8}\.bin$` | none |
+
+Only assets that match a regex of the kind being read count. A test shows that an asset written by a manual run (entry 0) restores.
 
 ## Calls
 
@@ -24,30 +35,33 @@ Each call has a time limit (30 s; 300 s for an upload) and one retry on no answe
 | Find release | `GET /repos/{o}/{r}/releases/tags/{tag}`; 404 means absent |
 | Create release | `POST /repos/{o}/{r}/releases`; any 4xx means re-fetch by tag |
 | List assets | `GET /repos/{o}/{r}/releases/{id}/assets?per_page=100&page=N`; follow pages; more than 300 assets fails closed |
-| Upload | `POST https://uploads.github.com/repos/{o}/{r}/releases/{id}/assets?name=...&label=...`, `Content-Type: application/octet-stream`, explicit `Content-Length`; any 4xx means re-list and decide |
+| Upload | `POST https://uploads.github.com/repos/{o}/{r}/releases/{id}/assets?name=...&label=...`, `Content-Type: application/octet-stream`, explicit `Content-Length`; any 4xx means re-list and decide; after a timeout, delete a half-created asset of the own name and retry once |
 | Renew | `PATCH /repos/{o}/{r}/releases/assets/{asset_id}` `{"label":"<runid>.<epoch>"}` |
 | Delete | `DELETE /repos/{o}/{r}/releases/assets/{asset_id}`; 404 counts as gone |
-| Download | check name and `size` first (state at most 10 MB plus overhead, artifact at most 100 MB plus overhead); `GET .../releases/assets/{asset_id}` with `Accept: application/octet-stream`, redirects off; the `Location` must be https on `*.githubusercontent.com`; `GET <Location>` with no `Authorization`; a counting reader stops at the bound |
+| Download | check name and `size` first (state at most 10 MB plus overhead, artifact at most 100 MB plus overhead); `GET .../releases/assets/{asset_id}` with `Accept: application/octet-stream`, redirects off; the `Location` must be https on `*.githubusercontent.com`; `GET <Location>` with no `Authorization`; a counting reader stops at the bound; one retry on a 404 |
 
-Only assets whose API `state` is `uploaded` count, with one exception: a ticket in state `starter` younger than 120 s by `created_at` counts as live. Asset names must match their pattern; others are ignored (tickets) or make the listing a store fault (state, artifacts) only when they would be chosen.
+## What counts
+
+- Only assets whose API `state` is `uploaded` count as stored (state, artifacts, tickets).
+- Any asset that is not `uploaded` and is younger than 120 s by `created_at` is in flight: a ticket-pattern asset in flight counts as a live ticket; others are left alone.
+- A non-`uploaded` asset of any name older than 120 s is deleted at the next listing.
+- Retention counts only `uploaded` assets, so two failed uploads never evict the last good state.
 
 ## Ticket protocol
 
-1. List. A ticket counts only if its name matches `t-[0-9]+-[0-9]+-(-|[0-9]+)`. Delete every ticket whose label is missing, malformed, more than 120 s ahead of this run's latest `Date`, or 600 s or more behind it. Count live tickets; at 3 or more, end with `queue is full` and register nothing.
-2. For a scheduled run, create the slot marker. A refusal means another run took the slot: Loki `slot taken`, exit 0.
-3. Upload the ticket with label `<runid>.<epoch of the latest Date>`. On a 4xx, list again: an own ticket means it succeeded; a foreign one with the same name (a rerun) is deleted and the upload repeats once.
-4. List again. If this ticket's position by id is above 3, delete it and end with `queue is full`.
-5. Wait: poll every 20 s; the first poll that shows this ticket with the lowest id among live tickets starts a 3 s settle; list again; claim only if still lowest. Print `waiting for the queue` once on the first miss. The wait is capped at `min(120 min, FACTORY_CI_BUDGET_END - now - 45 min)`.
-6. Renew every 60 s from a thread, waiting or running; each renewal lists again and logs `overlap` when a live ticket has a lower id. A failed renewal is a Loki line, never a stop.
-7. A missing own ticket while waiting, after a 60 s grace for read lag, registers again.
-8. At the cap: delete the ticket, `queue wait timed out`.
-9. At the end, on every path, delete the ticket (5 s, no retry).
+1. List. Delete every ticket whose label is missing, does not match the label regex, is more than 120 s ahead of this run's latest `Date`, or is 600 s or more behind it.
+2. Upload the ticket `t-<runid>-<attempt>-<entry>` with label `<runid>.<epoch of the latest Date>`. On a 4xx, list again: an own live ticket means it succeeded; a foreign asset of the same name (a rerun) is deleted and the upload repeats once.
+3. List again and note the position by id (Loki `queue registered`). There is no cap on tickets.
+4. Wait: poll every 20 s; the first poll that shows this ticket with the lowest id among live tickets starts a 3 s settle; list again; claim only if still lowest. Print `waiting for the queue` once on the first miss. The wait ends at `FACTORY_CI_BUDGET_END` minus 45 minutes (the budget end is the runner start plus 200 minutes when the variable is unset): delete the ticket, `queue wait expired`.
+5. Renew every 60 s from a thread, waiting or running. Each renewal lists again and logs `overlap` when a live ticket has a lower id. A failed renewal is a Loki line. When renewals have failed for 600 s the run deletes its ticket, stops, prints `queue renewal failed` and exits 1.
+6. A missing own ticket while waiting, after a 60 s grace for read lag, registers again at the back (accepted residual).
+7. At the end, on every path, delete the ticket (5 s, no retry). A SIGINT or SIGTERM handler deletes the ticket first, within 5 s, skips the Loki flush and exits 1.
 
 Fence: before a state upload and again after it, list and check the ticket still exists with a label starting with `<runid>.`. If it is gone after the upload, delete the new asset and end `state save failed`.
 
 ## Retention
 
-State: after the new asset is `uploaded` and its size equals the ciphertext length, delete all but the 2 highest ids. Artifacts: after an upload, delete all but the 10 highest ids of `artifact-*`. Slot markers older than 7 days (by the epoch in the name) are deleted at the same time.
+State: after the new asset is `uploaded` and its size equals the ciphertext length, delete all but the 2 highest ids of `uploaded` state assets. Artifacts: after an upload, delete all but the 10 highest ids of `uploaded` artifact assets.
 
 ## Loki lines
 
