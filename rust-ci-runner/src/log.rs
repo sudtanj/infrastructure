@@ -189,15 +189,34 @@ impl Log {
 
     /// Step or clone output: printed unless quiet or public, shipped with its stream.
     pub fn out(&self, who: &str, stream: &str, text: &str) {
-        self.write(who, stream, text, !self.quiet && !self.public);
+        self.write(who, Some(stream), text, !self.quiet && !self.public);
+    }
+
+    /// Output that is printed where the log prints, and not shipped: a step that holds secrets.
+    pub fn out_local(&self, who: &str, text: &str) {
+        self.write(who, None, text, !self.quiet && !self.public);
+    }
+
+    /// The name a public line shows: a step named like a secret value shows as `step`.
+    fn public_name(&self, who: &str) -> String {
+        let masked = self
+            .red
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .apply(who);
+        if masked == who {
+            who.to_string()
+        } else {
+            "step".to_string()
+        }
     }
 
     /// A runner event (started, result, duration): always printed. Callers pass fixed text.
     pub fn event(&self, who: &str, text: &str) {
-        self.write(who, "stdout", text, true);
+        self.write(who, Some("stdout"), text, true);
     }
 
-    fn write(&self, who: &str, stream: &str, text: &str, print: bool) {
+    fn write(&self, who: &str, stream: Option<&str>, text: &str, print: bool) {
         // Control characters other than tab could rewrite a terminal line or forge a log line (R7).
         let raw = text.trim_end_matches(['\r', '\n']);
         let text = self
@@ -234,7 +253,7 @@ impl Log {
         &self,
         g: &mut Inner,
         who: &str,
-        stream: &str,
+        stream: Option<&str>,
         piece: &str,
         raw: &str,
         print: bool,
@@ -261,7 +280,7 @@ impl Log {
         }
         if print {
             let shown = if self.public {
-                public_form(who, raw).map(|l| l + "\n")
+                public_form(&self.public_name(who), raw).map(|l| l + "\n")
             } else {
                 Some(msg)
             };
@@ -270,7 +289,7 @@ impl Log {
                 let _ = g.out.flush();
             }
         }
-        if let Some(s) = &self.sink {
+        if let (Some(s), Some(stream)) = (&self.sink, stream) {
             s.push(who, stream, piece);
         }
         true
@@ -926,5 +945,36 @@ pub mod tests {
         assert_eq!(pushed(&rec).len(), 200);
         log.out("s", "stdout", "fake-batch-0-value fake-batch-19-value");
         assert_eq!(pushed(&rec).last().unwrap().2, "*** ***");
+    }
+
+    // L6: a step named like a secret value never prints its name.
+    #[test]
+    fn a_step_named_like_a_secret_prints_without_its_name() {
+        let (log, out, _err, _rec) = public(&["deploy-prod-1"]);
+        log.event("deploy-prod-1", "started");
+        log.event("deploy-prod-1", "success in 3s");
+        log.event("other", "started");
+        assert_eq!(
+            out.text(),
+            "[step] started\n[step] success in 3s\n[other] started\n"
+        );
+        // a name that is only part of a secret still prints
+        let (log, out, _err, _rec) = public(&["xdeploy-prod-1x"]);
+        log.event("deploy-prod-1", "started");
+        assert_eq!(out.text(), "[deploy-prod-1] started\n");
+    }
+
+    // H1: `out_local` prints like `out` and ships nothing.
+    #[test]
+    fn out_local_prints_and_does_not_ship() {
+        let (log, buf, rec) = with_rec(&[], 1000);
+        log.out_local("a", "kept here");
+        log.out("a", "stdout", "shipped");
+        assert_eq!(buf.text(), "[a] kept here\n[a] shipped\n");
+        assert_eq!(pushed(&rec), [("a".into(), "stdout".into(), "shipped".into())]);
+        let (log, out, _err, rec) = public(&[]);
+        log.out_local("a", "hidden");
+        assert_eq!(out.text(), "");
+        assert!(pushed(&rec).is_empty());
     }
 }

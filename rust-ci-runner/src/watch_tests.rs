@@ -335,9 +335,8 @@ fn entries_without_branches_match_every_ref() {
 }
 
 // ---- 010 T003: FR-004, FR-010 ----
-// Planned: `WatchEntry::secrets_allowed_on(&self, git_ref: &str) -> bool`. `secret_branches` set: the ref
-// matches one of them. Unset: no `branches` pattern is made only of `*` and `?`, and the ref matches
-// `branches`. The default `branches` is `["*"]`, so the default refuses.
+// `WatchEntry::secrets_allowed_on(&self, git_ref: &str) -> bool`: the ref matches one of `secret_branches`. Without
+// `secret_branches` no ref does (M3), whatever `branches` says.
 
 fn gate(body: &str, git_ref: &str) -> bool {
     parse(&one(body)).unwrap()[0].secrets_allowed_on(git_ref)
@@ -385,25 +384,16 @@ fn secrets_allowed_on_refuses_every_pattern_made_only_of_star_and_question_mark(
 }
 
 #[test]
-fn secrets_allowed_on_explicit_branches_main() {
-    assert!(gate("branches = [\"main\"]", "main"));
-    assert!(!gate("branches = [\"main\"]", "dev"));
-    assert!(!gate("branches = [\"main\"]", "main2"));
-    assert!(!gate("branches = [\"main\"]", "feat/main"));
-}
-
-#[test]
-fn secrets_allowed_on_explicit_release_glob() {
-    let b = "branches = [\"release/*\"]";
-    assert!(gate(b, "release/1.0"));
-    assert!(gate(b, "release/1.0/rc"));
-    assert!(!gate(b, "main"));
-    assert!(!gate(b, "release"));
-    let b = "branches = [\"main\", \"release/*\", \"v?.0\"]";
-    for r in ["main", "release/9", "v1.0"] {
-        assert!(gate(b, r), "{r}");
+fn secrets_allowed_on_refuses_every_ref_without_secret_branches() {
+    for b in [
+        "branches = [\"main\"]",
+        "branches = [\"release/*\"]",
+        "branches = [\"main\", \"release/*\", \"v?.0\"]",
+    ] {
+        for r in ["main", "release/1.0", "release/1.0/rc", "v1.0", "dev"] {
+            assert!(!gate(b, r), "{b} {r}");
+        }
     }
-    assert!(!gate(b, "dev"));
 }
 
 #[test]

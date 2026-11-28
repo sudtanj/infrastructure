@@ -687,15 +687,15 @@ fn held_take_refuses_empty_blank_and_each_control_character() {
 
 #[test]
 fn held_take_line_boundary() {
-    // multi-line: every non-blank trimmed line has 4 or more characters; blank inner lines, CRLF and a
+    // multi-line: every non-blank trimmed line has 8 or more characters; blank inner lines, CRLF and a
     // trailing newline pass; the value comes back unchanged
     for v in [
-        "good-line\nabcd",
-        "good-line\n\nabcd",
-        "good-line\r\nabcd",
-        "good-line\nabcd\n",
-        "good-line\r\nabcd\r\n",
-        "good-line\n  abcd  \nlast-line",
+        "good-line\nabcdefgh",
+        "good-line\n\nabcdefgh",
+        "good-line\r\nabcdefgh",
+        "good-line\nabcdefgh\n",
+        "good-line\r\nabcdefgh\r\n",
+        "good-line\n  abcdefgh  \nlast-line",
         "-----BEGIN KEY-----\n\nbody-1234\n\n-----END KEY-----\n",
     ] {
         let got = one(v).ok().unwrap_or_else(|| panic!("{v:?} was refused"));
@@ -705,7 +705,7 @@ fn held_take_line_boundary() {
         "good-line\nabc",
         "good-line\n  abc  \nlast-line",
         "abc\ngood-line",
-        "good-line\nabcd\nxy\n",
+        "good-line\nabcdefgh\nxy\n",
         "good-line\n\n\nab\n\nlast-line",
     ] {
         let e = one(v).err().unwrap_or_else(|| panic!("{v:?} was accepted"));
@@ -714,20 +714,24 @@ fn held_take_line_boundary() {
             "{v:?}: {e:?}"
         );
     }
-    // a single line of 4 characters passes
-    assert_eq!(one("abcd").ok().unwrap()["SITE_API_KEY"], "abcd");
+    // the floor is 8 characters: a single line of 8 passes, of 7 does not (L5)
+    assert_eq!(one("abcdefgh").ok().unwrap()["SITE_API_KEY"], "abcdefgh");
+    for v in ["abcdefg", "good-line\nabcdefg", "abcdefgh\nabcdefg\n"] {
+        let e = one(v).err().unwrap_or_else(|| panic!("{v:?} was accepted"));
+        assert!(matches!(e, NamedError::Unusable { index: 0 }), "{v:?}: {e:?}");
+    }
 }
 
 #[test]
 fn held_take_refuses_surrounding_whitespace_on_a_single_line() {
-    for v in [" abcd", "abcd ", "abcd\n", "abcd\r\n", "  abcd  ", "\nabcd"] {
+    for v in [" abcdefgh", "abcdefgh ", "abcdefgh\n", "abcdefgh\r\n", "  abcdefgh  ", "\nabcdefgh"] {
         let e = one(v).err().unwrap_or_else(|| panic!("{v:?} was accepted"));
         assert!(
             matches!(e, NamedError::Unusable { index: 0 }),
             "{v:?}: {e:?}"
         );
     }
-    assert_eq!(one("abcd efgh").ok().unwrap()["SITE_API_KEY"], "abcd efgh");
+    assert_eq!(one("abcdefgh efgh").ok().unwrap()["SITE_API_KEY"], "abcdefgh efgh");
 }
 
 #[test]
@@ -742,7 +746,7 @@ fn held_take_size_cap() {
 fn held_take_passes_unicode_and_equals_untouched() {
     for v in [
         "pä€漢字=x==",
-        "====",
+        "========",
         "key=value=more",
         "emoji-😀-ok",
         "a'b\"c\\d$e`f",

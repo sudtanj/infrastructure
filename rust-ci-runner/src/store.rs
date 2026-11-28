@@ -172,7 +172,7 @@ impl Held {
 }
 
 /// At most 32 KiB, not blank, no control character but `\n` and `\r\n`, no surrounding whitespace
-/// on a single line, and every non-blank line at least 4 characters once trimmed.
+/// on a single line, and every non-blank line at least 8 characters once trimmed.
 fn usable_secret(v: &str) -> bool {
     let t = v.trim();
     v.len() <= 32768
@@ -184,7 +184,7 @@ fn usable_secret(v: &str) -> bool {
         && (t.contains('\n') || t == v)
         && v.lines()
             .map(str::trim)
-            .all(|l| l.is_empty() || l.chars().count() >= 4)
+            .all(|l| l.is_empty() || l.chars().count() >= 8)
 }
 
 fn allowed_server(url: &str) -> bool {

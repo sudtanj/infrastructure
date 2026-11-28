@@ -313,7 +313,7 @@ impl W {
         // Parallel steps call the stub at once: the lock keeps a call and its env block in the same position.
         let rec = |tool: &str| {
             format!(
-                "d='{d}'\nwhile ! mkdir \"$d/{tool}.lock\" 2>/dev/null; do :; done\nprintf '%s\\n' \"$@\" '=====' >> \"$d/{tool}.calls\"\ne=$(/usr/bin/env); printf '%s\\n=====\\n' \"$e\" >> \"$d/{tool}.envs\"\nrmdir \"$d/{tool}.lock\"\n"
+                "d='{d}'\ni=0\nwhile ! mkdir \"$d/{tool}.lock\" 2>/dev/null; do i=$((i+1)); [ $i -gt 2000 ] && exit 1; sleep 0.01; done\nprintf '%s\\n' \"$@\" '=====' >> \"$d/{tool}.calls\"\ne=$(/usr/bin/env); printf '%s\\n=====\\n' \"$e\" >> \"$d/{tool}.envs\"\nrmdir \"$d/{tool}.lock\"\n"
             )
         };
         let list: Vec<_> = self
@@ -2080,7 +2080,7 @@ mod step_secrets {
 
     const KEY: &str = "SITE_API_KEY";
     const VAL: &str = "fake-site-value-Q7x1";
-    const MAIN: &str = "branches = [\"main\"]\n";
+    const MAIN: &str = "branches = [\"main\"]\nsecret_branches = [\"main\"]\n";
     const RUNNER_NAMES: [&str; 6] = [
         "FACTORY_CI_TOKEN",
         "FACTORY_CI_LOG_URL",
@@ -2172,6 +2172,21 @@ mod step_secrets {
         [lines(&w, "ci", "stderr"), lines(&w, "ci", "stdout")].concat()
     }
 
+
+    /// H1: a step that holds secrets ships its state lines (`started`, `success in`, `failed in`) and nothing
+    /// it printed.
+    fn no_step_output_shipped(w: &W, step: &str) {
+        for stream in ["stdout", "stderr"] {
+            let out = lines(w, step, stream);
+            let state = |l: &String| {
+                l == "started"
+                    || l.starts_with("success in ")
+                    || l.starts_with("failed in ")
+                    || l.starts_with("skipped")
+            };
+            assert!(out.iter().all(state), "{step} {stream}: {out:?}");
+        }
+    }
     /// A docker stub body: the step prints its secret.
     fn print_secret() -> String {
         "case \"$1\" in run) printf '%s\\n' \"$SITE_API_KEY\";; esac".to_string()
@@ -2256,14 +2271,17 @@ mod step_secrets {
     }
 
     #[test]
-    fn four_char_value_runs() {
-        let mut w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, "abcd")]);
+    fn eight_char_value_runs_and_a_seven_char_value_is_unavailable() {
+        let mut w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, "abcdefgh")]);
         w.docker_body = print_secret();
         assert_eq!(w.ok(), 0, "{}", w.stderr());
-        assert!(step_env(&w, "a").contains(&format!("{KEY}=abcd")));
-        let lines = lines(&w, "a", "stdout");
-        assert!(lines.contains(&"***".to_string()), "{lines:?}");
-        assert!(!lines.iter().any(|l| l.contains("abcd")), "{lines:?}");
+        assert!(step_env(&w, "a").contains(&format!("{KEY}=abcdefgh")));
+        no_step_output_shipped(&w, "a");
+        assert!(!w.hub.bodies().contains("abcdefgh"));
+        // the floor is 8 characters (L5): fail closed, no container
+        let w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, "abcdefg")]);
+        assert_eq!(w.ok(), 1);
+        refused(&w, "step secret unavailable");
     }
 
     #[test]
@@ -2280,11 +2298,7 @@ mod step_secrets {
         for part in ["BEGIN FAKE", "body-line-1234", "END FAKE"] {
             assert!(!bodies.contains(part), "{part} in Loki");
         }
-        let lines = lines(&w, "a", "stdout");
-        assert!(
-            lines.iter().filter(|l| *l == "***").count() >= 3,
-            "{lines:?}"
-        );
+        no_step_output_shipped(&w, "a");
     }
 
     #[test]
@@ -2612,23 +2626,14 @@ mod step_secrets {
                 assert!(!text.contains(n.as_str()), "{n} found in {label}");
             }
         }
-        let lines = lines(&w, "a", "stdout");
-        assert!(
-            lines.contains(&"line prefix-***-suffix".to_string()),
-            "{lines:?}"
-        );
-        // plain, both base64 lines, percent and hex: five short lines that hold `***`
-        let short = lines
-            .iter()
-            .filter(|l| l.contains("***") && l.len() <= 12)
-            .count();
-        assert!(short >= 5, "{short} short masked lines in {lines:?}");
+        no_step_output_shipped(&w, "a");
         assert_public(&w);
     }
 
     #[test]
     fn a_secret_named_pass_keeps_pipeline_passed_on_stdout() {
-        for v in ["pass", "started", "success", "failed", "pipeline"] {
+        // the floor is 8 characters, so the values are the longest words and phrases of the public lines
+        for v in ["pipeline", "pipeline passed", "log store answered HTTP"] {
             let w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, v)]);
             assert_eq!(w.ok(), 0, "{v}: {}", w.stderr());
             assert_eq!(
@@ -2645,10 +2650,10 @@ mod step_secrets {
             assert_public(&w);
         }
         // Loki holds the redacted text
-        let w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, "pass")]);
+        let w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, "pipeline")]);
         assert_eq!(w.ok(), 0);
         let runner = lines(&w, "runner", "stdout");
-        assert!(runner.iter().any(|l| l == "pipeline ***ed"), "{runner:?}");
+        assert!(runner.iter().any(|l| l == "*** passed"), "{runner:?}");
     }
 
     #[test]
@@ -2771,14 +2776,7 @@ printf '%s' "$SITE_API_KEY" | base64
         for n in [VAL, b64.as_str(), &VAL[..6], &b64[..6]] {
             assert!(!all.contains(n) && !bodies.contains(n), "{n} leaked");
         }
-        let out = lines(w, "a", "stdout");
-        assert!(
-            out.iter().filter(|l| *l == "***").count() >= 2,
-            "masked lines missing: {:?}",
-            out.iter()
-                .map(|l| (l.len(), l.chars().rev().take(12).collect::<String>()))
-                .collect::<Vec<_>>()
-        );
+        no_step_output_shipped(w, "a");
         assert_public(w);
     }
 
@@ -2787,11 +2785,9 @@ printf '%s' "$SITE_API_KEY" | base64
         assert_boundary_masked(&boundary_world(" "));
     }
 
-    // D1 in test-map.md. The base64 of `ke-site-value-Q7x1` starts with `a`, so a run of `a` is a form prefix at
-    // every byte: `cut_point` walks back one byte at a time to the start of the chunk and falls back to the
-    // plain cut, in the middle of the value. Seen in selftest run 46115243670.
+    // D1 in test-map.md: a run of `a` before the value (selftest run 46115243670) must not push the cut into the
+    // value.
     #[test]
-    #[ignore = "defect D1: cut_point walks to the chunk start on a run of a form's first character, see test-map.md"]
     fn a_value_across_the_64k_read_boundary_after_a_run_of_one_character_is_masked_in_loki() {
         assert_boundary_masked(&boundary_world("a"));
     }
@@ -2815,12 +2811,7 @@ echo "$SITE_API_KEY" | base64 -w 0
         for n in [v.as_str(), first, second, &enc[..132]] {
             assert!(!all.contains(n) && !bodies.contains(n), "{n} leaked");
         }
-        let out = lines(&w, "a", "stdout");
-        assert!(out.iter().all(|l| !l.contains(first)), "{out:?}");
-        assert!(
-            out.iter().filter(|l| l.contains("***")).count() >= 3,
-            "{out:?}"
-        );
+        no_step_output_shipped(&w, "a");
         assert_public(&w);
     }
 
@@ -2845,5 +2836,52 @@ echo "$SITE_API_KEY" | base64 -w 0
             w.stdout()
         );
         assert_public(&w);
+    }
+
+    /// H1: the output of a step that holds secrets is not shipped; a step without secrets ships it.
+    #[test]
+    fn output_of_a_step_with_secrets_is_not_shipped() {
+        let pl = [one_step("one", &[KEY]), one_step("two", &[])].concat();
+        let mut w = world(&pl, &entry(MAIN, &[KEY]), &[(KEY, VAL)]);
+        w.docker_body = "case \"$1\" in run) echo visible-output-line; echo visible-error-line >&2;; esac"
+            .to_string();
+        assert_eq!(w.ok(), 0, "{}", w.stderr());
+        no_step_output_shipped(&w, "one");
+        let one = lines(&w, "one", "stdout");
+        assert!(one.contains(&"started".to_string()), "{one:?}");
+        assert!(one.iter().any(|l| l.starts_with("success in ")), "{one:?}");
+        let two = lines(&w, "two", "stdout");
+        assert!(two.contains(&"visible-output-line".to_string()), "{two:?}");
+        assert!(lines(&w, "two", "stderr").contains(&"visible-error-line".to_string()));
+        // a failing step ships its state and exit code, not its output
+        let pl = "[steps.one]\nimage = \"alpine\"\ncommands = [\"x\"]\nsecrets = [\"SITE_API_KEY\"]\n";
+        let mut w = world(pl, &entry(MAIN, &[KEY]), &[(KEY, VAL)]);
+        w.docker_body = "case \"$1\" in run) echo failing-output-line; exit 3;; esac".to_string();
+        assert_eq!(w.ok(), 1);
+        no_step_output_shipped(&w, "one");
+        assert!(!w.hub.bodies().contains("failing-output-line"));
+        let out = lines(&w, "one", "stdout");
+        assert!(out.iter().any(|l| l.starts_with("failed in ")), "{out:?}");
+    }
+
+    /// M3: `branches` never opens secrets; only `secret_branches` does.
+    #[test]
+    fn explicit_branches_without_secret_branches_get_no_secrets() {
+        for (branches, git_ref) in [("main", "main"), ("release/*", "release/1")] {
+            let extra = format!("branches = [{branches:?}]\n");
+            let w = world(&req(&[KEY]), &entry(&extra, &[KEY]), &[(KEY, VAL)]);
+            assert_eq!(w.go(&set(w.args(), "--ref", Some(git_ref))), 1, "{git_ref}");
+            refused(&w, "repository or ref not in the watch list");
+            assert_eq!(w.bws_calls(), 1, "{git_ref}");
+            assert!(!w.hub.bodies().contains(VAL), "{git_ref}");
+        }
+        // with `secret_branches` the release branch gets them, and `main` does not
+        let extra = "branches = [\"main\", \"release/*\"]\nsecret_branches = [\"release/*\"]\n";
+        let w = world(&req(&[KEY]), &entry(extra, &[KEY]), &[(KEY, VAL)]);
+        assert_eq!(w.go(&set(w.args(), "--ref", Some("release/1"))), 0, "{}", w.stderr());
+        assert!(step_env(&w, "a").contains(&format!("{KEY}={VAL}")));
+        let w = world(&req(&[KEY]), &entry(extra, &[KEY]), &[(KEY, VAL)]);
+        assert_eq!(w.go(&w.args()), 1);
+        refused(&w, "repository or ref not in the watch list");
     }
 }

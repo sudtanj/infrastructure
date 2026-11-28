@@ -87,8 +87,10 @@ fn pump(r: impl Read, forms: &[String], mut f: impl FnMut(&str)) {
     }
 }
 
-/// Where to cut a full chunk: not inside a character, and before every start of a form that the chunk
-/// ends in the middle of. If that leaves nothing, the character boundary alone.
+/// Where to cut a full chunk: not inside a character, before the text at its end that starts a form
+/// (looked for once, within the longest form, so a run of a form's first character does not walk the cut
+/// back), and not inside a form that is complete in the chunk. Only a chain of whole forms that reaches the
+/// start of the chunk, such as one repeated character, leaves the character boundary alone.
 fn cut_point(buf: &[u8], forms: &[String]) -> usize {
     let whole = match std::str::from_utf8(buf) {
         Err(e) if e.error_len().is_none() => e.valid_up_to(),
@@ -96,10 +98,16 @@ fn cut_point(buf: &[u8], forms: &[String]) -> usize {
     };
     let widest = forms.iter().map(String::len).max().unwrap_or(0);
     let mut cut = whole;
-    while let Some(p) = (cut.saturating_sub(widest)..cut).find(|&p| {
+    let tail = (cut.saturating_sub(widest)..cut).find(|&p| {
         forms
             .iter()
             .any(|f| f.len() > cut - p && f.as_bytes().starts_with(&buf[p..cut]))
+    });
+    cut = tail.unwrap_or(cut);
+    while let Some(p) = (cut.saturating_sub(widest)..cut).find(|&p| {
+        forms
+            .iter()
+            .any(|f| f.len() > cut - p && buf[p..].starts_with(f.as_bytes()))
     }) {
         cut = p;
     }
@@ -288,6 +296,7 @@ impl Engine {
         who: &str,
         container: &str,
         log: &Log,
+        ship: bool,
         end: Instant,
         timeout_msg: &str,
     ) -> State {
@@ -304,12 +313,20 @@ impl Engine {
         let err = child.stderr.take();
         let forms = log.secret_forms();
         let forms = &forms;
+        // A step that holds secrets prints where the log prints and ships nothing of its output.
+        let emit = |l: &str, stream: &str| {
+            if ship {
+                log.out(who, stream, l)
+            } else {
+                log.out_local(who, l)
+            }
+        };
         std::thread::scope(|sc| {
             if let Some(r) = out {
-                sc.spawn(move || pump(r, forms, |l| log.out(who, "stdout", l)));
+                sc.spawn(move || pump(r, forms, |l| emit(l, "stdout")));
             }
             if let Some(r) = err {
-                sc.spawn(move || pump(r, forms, |l| log.out(who, "stderr", l)));
+                sc.spawn(move || pump(r, forms, |l| emit(l, "stderr")));
             }
             loop {
                 match child.try_wait() {
@@ -364,7 +381,7 @@ impl Engine {
         a.extend(extra.iter().cloned());
         a.extend(strs(&["--entrypoint", "sh", image, "-c", &script]));
         let env = [(s("FCI_TOKEN"), s(token))];
-        self.run_logged(&a, &env, "clone", &name, log, end, "clone timed out")
+        self.run_logged(&a, &env, "clone", &name, log, true, end, "clone timed out")
     }
 }
 
@@ -524,7 +541,7 @@ fn run_step(ctx: &RunCtx, name: &str, step: &Step, side: Option<&Sidecar>) -> St
         _ => (ctx.deadline, s("run timed out")),
     };
     ctx.engine
-        .run_logged(&a, &env, name, &container, ctx.log, end, &msg)
+        .run_logged(&a, &env, name, &container, ctx.log, env.is_empty(), end, &msg)
 }
 
 fn blocked(p: &Pipeline, states: &BTreeMap<String, State>, name: &str) -> Option<String> {
@@ -899,11 +916,10 @@ mod tests {
         }
     }
 
-    // D1 in test-map.md. The base64 of `ke-site-value-Q7x1` starts with `a`, so a run of `a` is a prefix of a form
-    // at every byte. `cut_point` walks back one byte at a time to the start of the chunk, then falls back to
-    // the plain cut, which is in the middle of the value. Same with a text that repeats the value's own prefix.
+    // D1 in test-map.md: a run of a form's first character before the value must not drive the cut back to
+    // the start of the chunk, and the cut stays before the value. The same with a text that repeats the
+    // value's own prefix.
     #[test]
-    #[ignore = "defect D1: cut_point walks to the chunk start on a run of a form's first character, see test-map.md"]
     fn pump_masks_a_value_after_a_run_of_a_forms_first_character() {
         let cases = [
             ("a".repeat(CUT - 6), "fake-site-value-Q7x1"),

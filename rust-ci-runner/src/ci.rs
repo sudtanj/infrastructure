@@ -380,7 +380,7 @@ fn run_checkout(
     let secrets = if names.is_empty() {
         BTreeMap::new()
     } else if !a.ref_may_hold_secrets {
-        detail("secrets need explicit branches or secret_branches in the watch entry");
+        detail("secrets need secret_branches in the watch entry, and the ref must match it");
         log.fault("repository or ref not in the watch list");
         return (false, image);
     } else {

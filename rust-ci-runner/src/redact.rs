@@ -5,7 +5,8 @@ pub struct Redactor {
     secrets: Vec<String>,
 }
 
-const WRAP: usize = 76;
+/// Column widths of wrapped base64: most tools use 76, `openssl base64` uses 64.
+const WRAPS: [usize; 2] = [76, 64];
 const DERIVED_MIN: usize = 8;
 const DERIVED_MAX: usize = 48 * 1024;
 
@@ -13,12 +14,31 @@ fn url_safe(s: &str) -> String {
     s.replace('+', "-").replace('/', "_")
 }
 
-fn percent(s: &str) -> String {
+/// Percent-encoding that leaves ASCII letters, digits and `keep` alone; `plus` writes a space as `+`.
+fn percent(s: &str, keep: &str, upper: bool, plus: bool) -> String {
     s.bytes().fold(String::new(), |mut out, b| {
-        if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
+        if b.is_ascii_alphanumeric() || keep.contains(b as char) {
             out.push(b as char);
-        } else {
+        } else if plus && b == b' ' {
+            out.push('+');
+        } else if upper {
             out.push_str(&format!("%{b:02X}"));
+        } else {
+            out.push_str(&format!("%{b:02x}"));
+        }
+        out
+    })
+}
+
+/// A JSON string body with every non-ASCII character written as `\uXXXX`.
+fn json_ascii(inner: &str) -> String {
+    inner.chars().fold(String::new(), |mut out, c| {
+        if c.is_ascii() {
+            out.push(c);
+        } else {
+            for unit in c.encode_utf16(&mut [0; 2]) {
+                out.push_str(&format!("\\u{unit:04x}"));
+            }
         }
         out
     })
@@ -26,7 +46,7 @@ fn percent(s: &str) -> String {
 
 impl Redactor {
     // shortcut: a secret split across two output lines is not caught, and a form under 8
-    // characters (`echo "$V" | base64` of a value under 6 bytes) is not derived. Upgrade if steps
+    // characters (`echo "$V" | base64` of a value under 3 bytes) is not derived. Upgrade if steps
     // may print such values.
     pub fn new<I: IntoIterator<Item = String>>(values: I) -> Self {
         let mut r = Self {
@@ -57,24 +77,40 @@ impl Redactor {
                 let n = 3 * (v.len().saturating_sub(k) / 3);
                 if n > 0 {
                     let mid = base64(&v.as_bytes()[k..k + n]);
-                    // `Log::write` redacts one line at a time and `base64` wraps at 76 columns: the
-                    // whole-group form wraps the same way as the value followed by anything else.
-                    if k == 0 && mid.len() > WRAP {
-                        derived.extend(
-                            (0..mid.len())
-                                .step_by(WRAP)
-                                .map(|i| mid[i..(i + WRAP).min(mid.len())].to_string()),
-                        );
+                    // `Log::write` redacts one line at a time and `base64` wraps: the whole-group form
+                    // wraps the same way as the value followed by anything else.
+                    if k == 0 {
+                        for w in WRAPS.into_iter().filter(|w| mid.len() > *w) {
+                            derived.extend(
+                                (0..mid.len())
+                                    .step_by(w)
+                                    .map(|i| mid[i..(i + w).min(mid.len())].to_string()),
+                            );
+                        }
                     }
                     derived.push(url_safe(&mid));
                     derived.push(mid);
                 }
             }
-            derived.push(percent(&v));
+            // `echo "$V" | base64`: the newline changes the padding group, which the middle drops.
+            derived.push(base64(format!("{v}\n").as_bytes()));
+            // Unreserved sets of RFC 3986 and of `encodeURIComponent`, lowercase hex, `+` for a space.
+            for (keep, upper, plus) in [
+                ("-._~", true, false),
+                ("-._~", false, false),
+                ("-_.!~*'()", true, false),
+                ("-._~", true, true),
+            ] {
+                derived.push(percent(&v, keep, upper, plus));
+            }
             if let Ok(json) = serde_json::to_string(&v) {
-                derived.push(json[1..json.len() - 1].to_string());
+                let inner = &json[1..json.len() - 1];
+                let slashed = inner.replace('/', "\\/");
+                derived.extend([json_ascii(inner), json_ascii(&slashed)]);
+                derived.extend([inner.to_string(), slashed]);
             }
             derived.push(v.bytes().map(|b| format!("{b:02x}")).collect());
+            derived.push(v.bytes().map(|b| format!("{b:02X}")).collect());
             self.secrets.extend(
                 derived
                     .into_iter()
@@ -251,6 +287,56 @@ mod tests {
         }
     }
 
+    // S1, S2, M4 of the review: `echo "$V" | base64`, `openssl base64` (64 columns), lowercase percent,
+    // `encodeURIComponent`, `+` for a space, uppercase hex and the JSON `\/` and `\uXXXX` forms.
+    #[test]
+    fn add_masks_the_review_forms() {
+        let v = "canary-Zq81-value-key";
+        assert_eq!(added(&[v]).apply(&base64(format!("{v}\n").as_bytes())), "***");
+
+        let long = format!("canary-Zq81-{}", "k9".repeat(44));
+        let enc = base64(format!("{long}\n").as_bytes());
+        let r = added(&[&long]);
+        for width in [64, 76] {
+            for i in (0..enc.len()).step_by(width) {
+                let l = &enc[i..(i + width).min(enc.len())];
+                assert!(leaked(&r.apply(l), l) < LEFT, "{width}: {l}");
+            }
+        }
+
+        let v = "pa ss/wo\"rd\\é=1+x#";
+        let r = added(&[v]);
+        let lower: String = v
+            .bytes()
+            .map(|b| match b {
+                b if b.is_ascii_alphanumeric() || b"-._~".contains(&b) => (b as char).to_string(),
+                b => format!("%{b:02x}"),
+            })
+            .collect();
+        assert_eq!(r.apply(&lower), "***");
+        assert_eq!(r.apply(&pct(v).replace("%20", "+")), "***");
+        assert_eq!(r.apply(&hex(v.as_bytes()).to_uppercase()), "***");
+
+        let v = "key!(1)*'x/y z~";
+        let ecu: String = v
+            .bytes()
+            .map(|b| match b {
+                b if b.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&b) => (b as char).to_string(),
+                b => format!("%{b:02X}"),
+            })
+            .collect();
+        assert_eq!(added(&[v]).apply(&ecu), "***");
+
+        let v = "a/b/c-secret-key";
+        assert_eq!(added(&[v]).apply(&v.replace('/', "\\/")), "***");
+        let v = "pässwörd-漢字-😀-key";
+        let ascii = "p\\u00e4ssw\\u00f6rd-\\u6f22\\u5b57-\\ud83d\\ude00-key";
+        assert_eq!(added(&[v]).apply(ascii), "***");
+        let v = "é/漢-secret-key";
+        let both = "\\u00e9\\/\\u6f22-secret-key";
+        assert_eq!(added(&[v]).apply(both), "***");
+    }
+
     #[test]
     fn add_masks_percent_json_and_hex_forms() {
         let v = "pa ss/wo\"rd\\é=1+x#";
@@ -286,11 +372,13 @@ mod tests {
         assert_eq!(r.apply("616263"), "616263");
         // hex of 4 bytes is 8 characters: at the floor, masked
         assert_eq!(added(&["abcd"]).apply("61626364"), "***");
-        // the documented limit (spec R2): `echo "$V" | base64` of a value under 6 bytes
-        let r = added(&["abcde"]);
-        let echo = base64(b"abcde\n");
+        // the documented limit (spec R2): `echo "$V" | base64` of a value under 3 bytes is under the floor
+        let r = added(&["ab"]);
+        let echo = base64(b"ab\n");
         assert_eq!(r.apply(&echo), echo);
-        assert_eq!(r.apply(&base64(b"abcde")), "***");
+        assert_eq!(r.apply(&base64(b"ab")), "***");
+        // from 3 bytes up it is 8 characters and masked whole (S1)
+        assert_eq!(added(&["abc"]).apply(&base64(b"abc\n")), "***");
         // 48 KiB cap on a derived form: hex of 24576 bytes is 49152 characters, one more byte is over
         let at = "a".repeat(24576);
         assert_eq!(added(&[&at]).apply(&hex(at.as_bytes())), "***");
