@@ -187,8 +187,6 @@ impl Engine {
             .map_err(|e| format!("{SPAWN_FAIL}{}: {e}", self.bin))?;
         let out = child.stdout.take();
         let err = child.stderr.take();
-        let forms = log.secret_forms();
-        let forms = &forms;
         let end = Instant::now() + limit;
         std::thread::scope(|sc| {
             let o = sc.spawn(move || out.map(|r| read_capped(r, 16 << 20)).unwrap_or_default());
