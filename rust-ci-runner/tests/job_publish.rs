@@ -153,7 +153,7 @@ case "$1" in
     [ -n "$r" ] && [ -n "$ws" ] && echo "ADD . /x" >> "$ws/$r"
     big=$(get STUB_BIG)
     b=$(get STUB_BUILT)
-    [ -d "$b" ] && [ -n "$ws" ] && cp -a "$b/." "$ws/"
+    [ -d "$b" ] && [ -n "$ws" ] && cp -a "$b/docker/img/." "$ws/"
     [ -n "$big" ] && [ -n "$ws" ] && truncate -s "$big" "$ws/image-amd64.tar"
     o=$(get STUB_OUT)
     [ -n "$o" ] && echo "$o";;
