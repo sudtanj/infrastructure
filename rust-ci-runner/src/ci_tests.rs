@@ -310,9 +310,10 @@ impl W {
 
     fn scripts(&self) {
         let d = self.root.display();
+        // Parallel steps call the stub at once: the lock keeps a call and its env block in the same position.
         let rec = |tool: &str| {
             format!(
-                "d='{d}'\nprintf '%s\\n' \"$@\" '=====' >> \"$d/{tool}.calls\"\ne=$(/usr/bin/env); printf '%s\\n=====\\n' \"$e\" >> \"$d/{tool}.envs\"\n"
+                "d='{d}'\nwhile ! mkdir \"$d/{tool}.lock\" 2>/dev/null; do :; done\nprintf '%s\\n' \"$@\" '=====' >> \"$d/{tool}.calls\"\ne=$(/usr/bin/env); printf '%s\\n=====\\n' \"$e\" >> \"$d/{tool}.envs\"\nrmdir \"$d/{tool}.lock\"\n"
             )
         };
         let list: Vec<_> = self
