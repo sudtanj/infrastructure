@@ -292,7 +292,10 @@ mod tests {
     #[test]
     fn add_masks_the_review_forms() {
         let v = "canary-Zq81-value-key";
-        assert_eq!(added(&[v]).apply(&base64(format!("{v}\n").as_bytes())), "***");
+        assert_eq!(
+            added(&[v]).apply(&base64(format!("{v}\n").as_bytes())),
+            "***"
+        );
 
         let long = format!("canary-Zq81-{}", "k9".repeat(44));
         let enc = base64(format!("{long}\n").as_bytes());
@@ -321,7 +324,9 @@ mod tests {
         let ecu: String = v
             .bytes()
             .map(|b| match b {
-                b if b.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&b) => (b as char).to_string(),
+                b if b.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&b) => {
+                    (b as char).to_string()
+                }
                 b => format!("%{b:02X}"),
             })
             .collect();

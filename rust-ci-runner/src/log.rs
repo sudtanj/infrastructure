@@ -971,7 +971,10 @@ pub mod tests {
         log.out_local("a", "kept here");
         log.out("a", "stdout", "shipped");
         assert_eq!(buf.text(), "[a] kept here\n[a] shipped\n");
-        assert_eq!(pushed(&rec), [("a".into(), "stdout".into(), "shipped".into())]);
+        assert_eq!(
+            pushed(&rec),
+            [("a".into(), "stdout".into(), "shipped".into())]
+        );
         let (log, out, _err, rec) = public(&[]);
         log.out_local("a", "hidden");
         assert_eq!(out.text(), "");

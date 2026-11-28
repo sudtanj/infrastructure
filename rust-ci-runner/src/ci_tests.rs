@@ -2172,7 +2172,6 @@ mod step_secrets {
         [lines(&w, "ci", "stderr"), lines(&w, "ci", "stdout")].concat()
     }
 
-
     /// H1: a step that holds secrets ships its state lines (`started`, `success in`, `failed in`) and nothing
     /// it printed.
     fn no_step_output_shipped(w: &W, step: &str) {
@@ -2843,8 +2842,9 @@ echo "$SITE_API_KEY" | base64 -w 0
     fn output_of_a_step_with_secrets_is_not_shipped() {
         let pl = [one_step("one", &[KEY]), one_step("two", &[])].concat();
         let mut w = world(&pl, &entry(MAIN, &[KEY]), &[(KEY, VAL)]);
-        w.docker_body = "case \"$1\" in run) echo visible-output-line; echo visible-error-line >&2;; esac"
-            .to_string();
+        w.docker_body =
+            "case \"$1\" in run) echo visible-output-line; echo visible-error-line >&2;; esac"
+                .to_string();
         assert_eq!(w.ok(), 0, "{}", w.stderr());
         no_step_output_shipped(&w, "one");
         let one = lines(&w, "one", "stdout");
@@ -2854,7 +2854,8 @@ echo "$SITE_API_KEY" | base64 -w 0
         assert!(two.contains(&"visible-output-line".to_string()), "{two:?}");
         assert!(lines(&w, "two", "stderr").contains(&"visible-error-line".to_string()));
         // a failing step ships its state and exit code, not its output
-        let pl = "[steps.one]\nimage = \"alpine\"\ncommands = [\"x\"]\nsecrets = [\"SITE_API_KEY\"]\n";
+        let pl =
+            "[steps.one]\nimage = \"alpine\"\ncommands = [\"x\"]\nsecrets = [\"SITE_API_KEY\"]\n";
         let mut w = world(pl, &entry(MAIN, &[KEY]), &[(KEY, VAL)]);
         w.docker_body = "case \"$1\" in run) echo failing-output-line; exit 3;; esac".to_string();
         assert_eq!(w.ok(), 1);
@@ -2878,7 +2879,12 @@ echo "$SITE_API_KEY" | base64 -w 0
         // with `secret_branches` the release branch gets them, and `main` does not
         let extra = "branches = [\"main\", \"release/*\"]\nsecret_branches = [\"release/*\"]\n";
         let w = world(&req(&[KEY]), &entry(extra, &[KEY]), &[(KEY, VAL)]);
-        assert_eq!(w.go(&set(w.args(), "--ref", Some("release/1"))), 0, "{}", w.stderr());
+        assert_eq!(
+            w.go(&set(w.args(), "--ref", Some("release/1"))),
+            0,
+            "{}",
+            w.stderr()
+        );
         assert!(step_env(&w, "a").contains(&format!("{KEY}={VAL}")));
         let w = world(&req(&[KEY]), &entry(extra, &[KEY]), &[(KEY, VAL)]);
         assert_eq!(w.go(&w.args()), 1);

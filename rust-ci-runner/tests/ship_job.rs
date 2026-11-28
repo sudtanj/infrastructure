@@ -89,7 +89,9 @@ fn with_shipping_on_stdout_holds_only_events_and_the_markers_reach_loki_redacted
     let build: Vec<_> = lines.iter().filter(|(l, _)| l["step"] == "build").collect();
     assert!(!build.is_empty(), "no state line of build");
     assert!(
-        build.iter().all(|(_, t)| !t.contains(OUT) && !t.contains(ERR)),
+        build
+            .iter()
+            .all(|(_, t)| !t.contains(OUT) && !t.contains(ERR)),
         "{build:?}"
     );
 }

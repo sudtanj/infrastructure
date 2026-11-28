@@ -718,20 +718,33 @@ fn held_take_line_boundary() {
     assert_eq!(one("abcdefgh").ok().unwrap()["SITE_API_KEY"], "abcdefgh");
     for v in ["abcdefg", "good-line\nabcdefg", "abcdefgh\nabcdefg\n"] {
         let e = one(v).err().unwrap_or_else(|| panic!("{v:?} was accepted"));
-        assert!(matches!(e, NamedError::Unusable { index: 0 }), "{v:?}: {e:?}");
+        assert!(
+            matches!(e, NamedError::Unusable { index: 0 }),
+            "{v:?}: {e:?}"
+        );
     }
 }
 
 #[test]
 fn held_take_refuses_surrounding_whitespace_on_a_single_line() {
-    for v in [" abcdefgh", "abcdefgh ", "abcdefgh\n", "abcdefgh\r\n", "  abcdefgh  ", "\nabcdefgh"] {
+    for v in [
+        " abcdefgh",
+        "abcdefgh ",
+        "abcdefgh\n",
+        "abcdefgh\r\n",
+        "  abcdefgh  ",
+        "\nabcdefgh",
+    ] {
         let e = one(v).err().unwrap_or_else(|| panic!("{v:?} was accepted"));
         assert!(
             matches!(e, NamedError::Unusable { index: 0 }),
             "{v:?}: {e:?}"
         );
     }
-    assert_eq!(one("abcdefgh efgh").ok().unwrap()["SITE_API_KEY"], "abcdefgh efgh");
+    assert_eq!(
+        one("abcdefgh efgh").ok().unwrap()["SITE_API_KEY"],
+        "abcdefgh efgh"
+    );
 }
 
 #[test]

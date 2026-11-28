@@ -540,8 +540,16 @@ fn run_step(ctx: &RunCtx, name: &str, step: &Step, side: Option<&Sidecar>) -> St
         Some((at, t)) if at < ctx.deadline => (at, format!("timed out after {t}s")),
         _ => (ctx.deadline, s("run timed out")),
     };
-    ctx.engine
-        .run_logged(&a, &env, name, &container, ctx.log, env.is_empty(), end, &msg)
+    ctx.engine.run_logged(
+        &a,
+        &env,
+        name,
+        &container,
+        ctx.log,
+        env.is_empty(),
+        end,
+        &msg,
+    )
 }
 
 fn blocked(p: &Pipeline, states: &BTreeMap<String, State>, name: &str) -> Option<String> {
