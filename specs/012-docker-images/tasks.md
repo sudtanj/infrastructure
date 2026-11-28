@@ -126,6 +126,11 @@ Found by the final security and review pass at `08543e7`.
 - [x] T049 [US2] Reviewer minor: `docker/README.md` step 3 also lists `rust-ci-runner/tests/fixtures/image/pass/.factory-ci.toml`, `rust-ci-runner/tests/job_publish.rs` and `specs/012-docker-images/contracts/image-project.md`. Chosen over building the TOML from `STEP_IMAGE`: `job_publish.rs` holds two string constants and a function per template is the bigger change. Acceptance: the README lists the three paths
 - [x] T050 [US2] Reviewer minor: `docker/README.md` says every `.env.*` file is refused, including `.env.example` and `.env.sample`, and the other T045 names. Acceptance: the README names them
 
+Found by the T046 to T050 review: two holes in T048.
+
+- [x] T051 [US1] `publish::go` calls `api.repo(&t.repo)` before `hub::ensure_public` and ends `failure` with `publish refused: source repository is private` when the GitHub repo is private (a hand-run `job --allow-docker`, or a repo made private after the plan). A failed read ends `error` `tip of main unreadable`. Acceptance: a `job_publish.rs` test where the fake GitHub reports `private: true`: the job ends `failure`, no container starts and no Hub request is made. Update `data-model.md`
+- [x] T052 [US1] `plan.rs`: a private repo with an image project on `main` and an `allow_docker` entry emits no matrix row and posts one terminal `failure` status `publish refused: source repository is private` with the entry's docker token (`docker: e.allow_docker`), so the tick does not retry it. Acceptance: a `plan_tests.rs` test asserting no row, one `failure` status carrying that text, and `docker` true
+
 ## Dependencies and order
 
 - Phase 1 first; T001 feeds T005 (`CRANE_IMAGE`) and T018; T002 feeds T005 (`CRANE_SH`, `CRANE_BIN`), T012 (login endpoint) and T019.

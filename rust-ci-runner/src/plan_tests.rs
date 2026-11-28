@@ -295,21 +295,40 @@ fn rows_carry_repo_id_secrets_ok_and_retry() {
 }
 
 #[test]
-fn a_private_repo_image_row_gets_no_docker_and_no_secrets() {
-    // T048: a private watched repo must not publish a public image
-    for (private, want) in [(true, false), (false, true)] {
-        let api = fake();
-        api.set_repo(R, 123, private, "main");
-        add_repo(&api, R, &[("main", 1, 10)], &["docker", "docker/img"]);
-        let list = entries(&[(R, "id = 123\nallow_docker = true")]);
-        let (_, fin) = plan_all(&api, &list, &opts());
-        let r = rows(&fin)[0].clone();
-        assert_eq!(
-            (r.allow_docker, r.secrets_ok),
-            (want, want),
-            "private {private}"
-        );
+fn a_public_repo_image_row_gets_docker_and_secrets() {
+    // T048
+    let api = fake();
+    api.set_repo(R, 123, false, "main");
+    add_repo(&api, R, &[("main", 1, 10)], &["docker", "docker/img"]);
+    let list = entries(&[(R, "id = 123\nallow_docker = true")]);
+    let (_, fin) = plan_all(&api, &list, &opts());
+    let r = rows(&fin)[0].clone();
+    assert!(r.allow_docker && r.secrets_ok);
+}
+
+#[test]
+fn a_private_repo_image_project_gets_one_failure_status_and_no_row() {
+    // T048, T052: a row would end `error` and be retried every tick
+    let (plain, docker) = (fake(), fake());
+    for api in [&plain, &docker] {
+        api.set_repo(R, 123, true, "main");
+        add_repo(api, R, &[("main", 1, 10)], &["docker", "docker/img"]);
     }
+    let list = entries(&[(R, "id = 123\nallow_docker = true")]);
+    let apis = Apis {
+        plain: &plain,
+        docker: &docker,
+    };
+    let cand = candidates(&apis, &list, &opts());
+    let fin = finish(&apis, cand, &opts());
+    assert!(rows(&fin).is_empty());
+    assert!(plain.posts().is_empty());
+    let p = docker.posts();
+    assert_eq!(p.len(), 1);
+    assert_eq!(
+        (p[0].state.as_str(), p[0].description.as_str()),
+        ("failure", "publish refused: source repository is private")
+    );
 }
 
 #[test]

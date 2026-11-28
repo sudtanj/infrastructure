@@ -292,6 +292,15 @@ fn read_repo(
                     out.invalid
                         .push(post("error", format!("invalid project folder name{mark}")))
                 }
+                // A row here would end `error` and be retried every tick; a `failure` status ends it.
+                Decision::Run { .. }
+                    if repo.private
+                        && e.allow_docker
+                        && crate::image::publishes(&p.path, &b.name) =>
+                {
+                    out.invalid
+                        .push(post("failure", crate::publish::PRIVATE_SOURCE.into()))
+                }
                 Decision::Run { prev, retry } => out.rows.push(Item {
                     repo: e.repo.clone(),
                     repo_id: if e.id == Some(repo.id) {
@@ -304,14 +313,10 @@ fn read_repo(
                     project: p.path.clone(),
                     context: p.context.clone(),
                     prev_sha: prev.clone().unwrap_or_default(),
-                    allow_docker: !repo.private
-                        && e.allow_docker
-                        && crate::image::publishes(&p.path, &b.name),
+                    allow_docker: e.allow_docker && crate::image::publishes(&p.path, &b.name),
                     fail_closed: repo.private && !o.b_private,
                     retry: *retry,
-                    secrets_ok: !repo.private
-                        && e.allow_docker
-                        && crate::image::publishes(&p.path, &b.name),
+                    secrets_ok: e.allow_docker && crate::image::publishes(&p.path, &b.name),
                     secrets: e.secrets.join(" "),
                     run_id: String::new(),
                     n: 0,

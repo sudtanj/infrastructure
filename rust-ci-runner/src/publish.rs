@@ -33,6 +33,7 @@ const UNREADABLE: &str = "publish refused: archive unreadable";
 const ROOT: &str = "publish refused: image runs as root";
 const SHELL: &str = "publish refused: image has a shell entrypoint";
 const PLATFORM: &str = "publish refused: image platform mismatch";
+pub(crate) const PRIVATE_SOURCE: &str = "publish refused: source repository is private";
 const TIP: &str = "tip of main unreadable";
 const REFUSED_TOKEN: &str = "registry refused the token";
 const INCOMPLETE: &str = "image index incomplete";
@@ -281,6 +282,10 @@ fn go(
     }
 
     left(deadline)?;
+    // The plan skips a private repo; a hand-run `job --allow-docker` or a repo made private since gets here.
+    if api.repo(&t.repo).map_err(|_| err(TIP))?.private {
+        return Err(done("failure", PRIVATE_SOURCE));
+    }
     let first = tip(api, &t.repo)?;
     let remaining = left(deadline)?;
     let ensured = hub::ensure_public(hub_base, &login, &token, NAMESPACE, name, remaining);

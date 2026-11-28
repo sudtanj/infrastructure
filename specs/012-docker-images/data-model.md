@@ -114,6 +114,7 @@ clone -> check ok -> pipeline (two builds, two archives; a failed step or a time
    login name present and == "sudtanj"?  -- empty --> error "publish refused: no login name"; other --> error "publish refused: login is not the namespace"
    both archives ok?         -- no --> error "publish refused: archive missing" / "archive too large" / "archive unreadable"
    archive config ok?        -- no --> error "publish refused: image runs as root" / "image has a shell entrypoint" / "image platform mismatch"
+   source repo private?      -- yes --> failure "publish refused: source repository is private"
    tip of main readable?     -- no --> error "tip of main unreadable" (nothing pushed)
    teardown (cleanup_run), run_left?  -- left --> error "publish refused: sidecar still running"
    Docker Hub (runner memory, no child): login; probe repository;
@@ -143,6 +144,7 @@ All fixed, at most 140 characters, no content from the repo.
 |---|---|
 | `failure` | `check failed: <ids>` |
 | `failure` | `step <n> failed: <reason>` for a project that is not an image project (existing); for an image row the same fixed line is posted as `error` (FR-007) |
+| `failure` | `publish refused: source repository is private` (the GitHub repo, not the Docker Hub one; also posted by the plan, once, for a private repo with an image project and `allow_docker`) |
 | `success` | `published latest and sha-<12>` |
 | `success` | `published sha-<12> not latest` |
 | `error` | `publish refused: no token`, `publish refused: no login name`, `publish refused: login is not the namespace` |

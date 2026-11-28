@@ -25,6 +25,7 @@ use std::io::Write;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 const TOKEN: &str = "canary-Zq81-value-key-0123456789";
@@ -302,6 +303,8 @@ struct Gh {
     url: String,
     reqs: Arc<Mutex<Vec<Req>>>,
     tips: Arc<Mutex<VecDeque<String>>>,
+    /// What `GET /repos/o/r` reports.
+    private: Arc<AtomicBool>,
 }
 
 /// `branches` answers the scripted bodies in order; the last one repeats. Status posts answer 201.
@@ -311,6 +314,8 @@ fn gh(tips: &[String]) -> Gh {
     let reqs: Arc<Mutex<Vec<Req>>> = Arc::default();
     let queue: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(tips.iter().cloned().collect()));
     let tips_handle = queue.clone();
+    let private: Arc<AtomicBool> = Arc::default();
+    let private_seen = private.clone();
     let log = reqs.clone();
     std::thread::spawn(move || {
         for mut rq in server.incoming_requests() {
@@ -332,6 +337,12 @@ fn gh(tips: &[String]) -> Gh {
                     q.front().cloned().unwrap_or_else(|| NO_TIP.to_string())
                 };
                 (200, b)
+            } else if method == "GET" && url == "/repos/o/r" {
+                let p = private_seen.load(Ordering::SeqCst);
+                (
+                    200,
+                    format!("{{\"id\":1,\"private\":{p},\"default_branch\":\"main\"}}"),
+                )
             } else if method == "POST" {
                 (201, "{}".to_string())
             } else {
@@ -344,6 +355,7 @@ fn gh(tips: &[String]) -> Gh {
         url: format!("http://127.0.0.1:{port}"),
         reqs,
         tips: tips_handle,
+        private,
     }
 }
 
@@ -2227,4 +2239,14 @@ fn an_image_row_without_allow_docker_is_a_plain_row() {
     w.ended(&o, "success", "all steps passed");
     w.nothing_published();
     assert_eq!(w.gh.branch_reads(), 0);
+}
+
+#[test]
+fn a_private_source_repository_is_refused_before_the_hub() {
+    // 012 T051: a hand-run `--allow-docker` job, or a repo made private after the plan
+    let w = W::new();
+    w.gh.private.store(true, Ordering::SeqCst);
+    let o = w.run(|_| {});
+    w.ended(&o, "failure", "publish refused: source repository is private");
+    w.nothing_published();
 }
