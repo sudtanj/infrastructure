@@ -25,7 +25,8 @@ pub const CRANE_BIN: &str = "/ko-app/crane";
 pub const JOB_DEADLINE: std::time::Duration = std::time::Duration::from_secs(40 * 60);
 
 const DOCKERFILE_MAX: usize = 256 * 1024;
-/// `libc::O_NONBLOCK` on Linux; the crate has no libc dependency.
+/// `libc::O_NONBLOCK` on Linux (the crate has no libc dependency); other targets open without it.
+#[cfg(target_os = "linux")]
 const O_NONBLOCK: i32 = 0o4000;
 const PLATFORM_VARS: [&str; 5] = [
     "BUILDPLATFORM",
@@ -101,14 +102,15 @@ pub fn check(dir: &Path) -> Vec<&'static str> {
 
 /// `None` when over 256 KiB (exactly 256 KiB passes), not UTF-8, holding a NUL, or unreadable.
 fn read_dockerfile(path: &Path) -> Option<String> {
+    #[cfg(target_os = "linux")]
     use std::os::unix::fs::OpenOptionsExt;
     let mut buf = Vec::new();
+    let mut o = std::fs::OpenOptions::new();
+    o.read(true);
     // O_NONBLOCK: a FIFO swapped in after the `symlink_metadata` check must not block the open.
-    let f = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(O_NONBLOCK)
-        .open(path)
-        .ok()?;
+    #[cfg(target_os = "linux")]
+    o.custom_flags(O_NONBLOCK);
+    let f = o.open(path).ok()?;
     if !f.metadata().ok()?.is_file() {
         return None;
     }
@@ -174,6 +176,7 @@ fn token(text: &str, prefix: &str, min: usize, class: fn(u8) -> bool) -> bool {
         text.as_bytes()[i + prefix.len()..]
             .iter()
             .take_while(|b| class(**b))
+            .take(min)
             .count()
             >= min
     })
@@ -477,6 +480,10 @@ fn run_copy(i: &Ins, stages: &mut [Stage], bad: &mut BTreeSet<&'static str>) {
     let (fl, rest) = flags(&i.args);
     let run = i.kw == "RUN";
     for f in &fl {
+        // Host network and extra privileges are not part of the allowlist.
+        if f.starts_with("--network") || f.starts_with("--security") {
+            bad.insert("instruction");
+        }
         // A quoted CSV field hides `from=` or `type=` from the split below: refuse, fail closed.
         if (f.starts_with("--mount=") || f.starts_with("--from=")) && f.contains(['"', '\'']) {
             bad.insert("external-source");

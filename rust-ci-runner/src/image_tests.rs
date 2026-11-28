@@ -1165,3 +1165,42 @@ fn json_form_must_be_a_string_array() {
     );
     assert_eq!(ids(&ok), Vec::<&str>::new());
 }
+
+// ---- follow-up: scan cost, FIFO, RUN network and security flags ----
+
+#[test]
+fn repeated_prefixes_scan_in_linear_time() {
+    // just under 256 KiB of `AKIA`: every 4th byte is a prefix and the class run is the whole line
+    let start = std::time::Instant::now();
+    let df = format!("# {}\n{DF}", "AKIA".repeat(60 * 1024));
+    expect_has(ids(&df), "secret-value", "repeated prefix");
+    assert!(start.elapsed().as_secs() < 10, "{:?}", start.elapsed());
+}
+
+#[test]
+fn a_fifo_named_dockerfile_is_layout_and_does_not_hang() {
+    // 012 review MINOR 1: skip when `mkfifo` is missing
+    let t = project(DF.as_bytes(), TOML);
+    let p = t.0.join("Dockerfile");
+    std::fs::remove_file(&p).unwrap();
+    match std::process::Command::new("mkfifo").arg(&p).status() {
+        Ok(s) if s.success() => expect_has(run(&t), "layout", "fifo"),
+        _ => eprintln!("skip: mkfifo not available"),
+    }
+}
+
+#[test]
+fn run_network_and_security_flags_are_refused() {
+    for flag in [
+        "--network=host",
+        "--network=none",
+        "--security=insecure",
+        "--network host",
+    ] {
+        expect_has(
+            ids(&in_build(&format!("RUN {flag} true"))),
+            "instruction",
+            flag,
+        );
+    }
+}
