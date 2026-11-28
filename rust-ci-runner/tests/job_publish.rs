@@ -21,7 +21,7 @@ mod common;
 use common::*;
 use rust_ci_runner::util::base64;
 use std::collections::VecDeque;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
