@@ -48,9 +48,9 @@ impl Case {
 
 #[test]
 fn with_shipping_on_stdout_holds_only_events_and_the_markers_reach_loki_redacted() {
-    // AS 11.1, FR-030, FR-032, I17
+    // AS 11.1, FR-030, FR-032, I17. H1: a step that holds secrets ships none of its output.
     let c = Case::new();
-    let toml = pipeline(&[("build", "secrets = [\"NPM_TOKEN\"]")]);
+    let toml = pipeline(&[("build", "secrets = [\"NPM_TOKEN\"]"), ("plain", "")]);
     let o = c.run(&toml, &[], &[("NPM_TOKEN", "npm-val-123")], true);
     assert!(o.status.success(), "{}", out_text(&o));
     let all = out_text(&o);
@@ -60,7 +60,7 @@ fn with_shipping_on_stdout_holds_only_events_and_the_markers_reach_loki_redacted
     );
     assert!(!all.contains("npm-val-123"));
     for l in stdout(&o).lines() {
-        let event = l.starts_with("[build] ")
+        let event = (l.starts_with("[build] ") || l.starts_with("[plain] "))
             && ["started", "success in", "failed in", "skipped", "timed out"]
                 .iter()
                 .any(|e| l.contains(e));
@@ -72,6 +72,7 @@ fn with_shipping_on_stdout_holds_only_events_and_the_markers_reach_loki_redacted
         .find(|(_, t)| t.contains(OUT))
         .expect("stdout marker in Loki");
     assert_eq!(out.0["stream"], "stdout");
+    assert_eq!(out.0["step"], "plain");
     assert!(
         out.1.contains("***") && !out.1.contains("npm-val-123"),
         "{}",
@@ -82,8 +83,15 @@ fn with_shipping_on_stdout_holds_only_events_and_the_markers_reach_loki_redacted
         .find(|(_, t)| t.contains(ERR))
         .expect("stderr marker in Loki");
     assert_eq!(err.0["stream"], "stderr");
-    assert_eq!(err.0["step"], "build");
+    assert_eq!(err.0["step"], "plain");
     assert!(lines.iter().all(|(_, t)| !t.contains("npm-val-123")));
+    // the step with the secret shipped its state and nothing it printed
+    let build: Vec<_> = lines.iter().filter(|(l, _)| l["step"] == "build").collect();
+    assert!(!build.is_empty(), "no state line of build");
+    assert!(
+        build.iter().all(|(_, t)| !t.contains(OUT) && !t.contains(ERR)),
+        "{build:?}"
+    );
 }
 
 #[test]
