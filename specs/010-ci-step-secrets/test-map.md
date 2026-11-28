@@ -111,4 +111,8 @@ No property-test crate is a dependency (`proptest` absent) and the brief did not
 
 ## Verdict
 
-Filled in after the CI run of QA's tests, below.
+NOT READY. One criterion fails with evidence: FR-013 and SC-002 hold for ordinary output but not after a 64 KB run of one character (D1, run 46115243670). Everything else in T008 to T017 passes.
+
+Green selftest run with QA's tests: 46115584789 (head of the commit that ignores the two D1 tests): 390 lib tests passed, 2 ignored (both D1), integration binaries ok, `repo_files` 5 passed 1 ignored (T027).
+
+To reach READY: fix `cut_point` (D1), remove the two `#[ignore]` markers in `engine.rs` and `ci_tests.rs`, and see them pass in the selftest. Landing and docs tasks (T018 onward, FR-014 tag, FR-015, FR-017, FR-019, SC-001, SC-004) are not part of this verdict and stay NOT TESTED.
