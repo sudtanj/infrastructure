@@ -20,6 +20,9 @@
 //!
 //! Secrets here are fakes: the token is the canary of `tasks.md`.
 
+// S6 removes this: the file calls code (`queue`) that exists only after S6, so it cannot compile yet.
+#![cfg(any())]
+
 mod common;
 use common::*;
 use rust_ci_runner::util::base64;
