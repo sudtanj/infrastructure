@@ -254,10 +254,20 @@ fn jwt(text: &str) -> bool {
 
 /// File names that hold credentials.
 fn secret_file(name: &str) -> bool {
-    let named = [".env", ".npmrc", ".netrc", "id_rsa", "id_dsa", "id_ed25519", "id_ecdsa"];
+    let named = [
+        ".env",
+        ".npmrc",
+        ".netrc",
+        "id_rsa",
+        "id_dsa",
+        "id_ed25519",
+        "id_ecdsa",
+    ];
     named.contains(&name)
         || name.starts_with(".env.")
-        || [".pem", ".key", ".p12", ".pfx"].iter().any(|e| name.ends_with(e))
+        || [".pem", ".key", ".p12", ".pfx"]
+            .iter()
+            .any(|e| name.ends_with(e))
 }
 
 /// Every file of the folder, not only the three the check names: capped in entries, bytes and depth, no

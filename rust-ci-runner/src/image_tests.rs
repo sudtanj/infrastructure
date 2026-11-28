@@ -1242,7 +1242,10 @@ fn step_template_fails_for_any_other_step_command_or_flag() {
         ("other pinned digest", other_digest),
         (
             "env set",
-            toml_with("timeout = 1800\n", "timeout = 1800\nenv = { MODE = \"x\" }\n"),
+            toml_with(
+                "timeout = 1800\n",
+                "timeout = 1800\nenv = { MODE = \"x\" }\n",
+            ),
         ),
         ("changed", toml_with(first, "docker build -t other .")),
         ("added", toml_with(chmod, &format!("{chmod}\",\n  \"id"))),
