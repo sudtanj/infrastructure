@@ -552,6 +552,9 @@ fn job_and_status_silence_the_panic_hook() {
     for f in ["pub fn job(", "pub fn status("] {
         let at = src.find(f).unwrap();
         let head: String = src[at..].chars().take(300).collect();
-        assert!(head.contains("std::panic::set_hook(Box::new(|_| {}))"), "{f}");
+        assert!(
+            head.contains("std::panic::set_hook(Box::new(|_| {}))"),
+            "{f}"
+        );
     }
 }

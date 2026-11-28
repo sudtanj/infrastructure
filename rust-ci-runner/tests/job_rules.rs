@@ -330,7 +330,11 @@ fn the_sidecar_daemon_port_is_closed_to_every_interface_but_the_run_network() {
     });
     let info = at(&|c| c.first().map(String::as_str) == Some("exec") && c.contains(&"info".into()));
     let step = at(&|c| c.iter().any(|a| a.starts_with("DOCKER_HOST=")));
-    let (guard, info, step) = (guard.expect("no iptables rule"), info.unwrap(), step.unwrap());
+    let (guard, info, step) = (
+        guard.expect("no iptables rule"),
+        info.unwrap(),
+        step.unwrap(),
+    );
     assert!(info < guard && guard < step, "{calls:?}");
 }
 

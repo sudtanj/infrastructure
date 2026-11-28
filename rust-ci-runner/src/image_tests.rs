@@ -1250,16 +1250,31 @@ fn step_template_fails_for_any_other_step_command_or_flag() {
 #[test]
 fn credential_file_names_fail() {
     // 012 T039, security S3
-    for name in [".env", "id_rsa", "id_ed25519", "server.pem", "deploy.key", "Sub/Dir/TLS.PEM"] {
+    for name in [
+        ".env",
+        "id_rsa",
+        "id_ed25519",
+        "server.pem",
+        "deploy.key",
+        "Sub/Dir/TLS.PEM",
+    ] {
         expect_only(with_files(&[(name, "x\n")]), "secret-file", name);
     }
-    assert_eq!(with_files(&[("hello.go", "package main\n"), ("keys.txt", "x\n")]), Vec::<&str>::new());
+    assert_eq!(
+        with_files(&[("hello.go", "package main\n"), ("keys.txt", "x\n")]),
+        Vec::<&str>::new()
+    );
 }
 
 #[test]
 fn credentials_in_any_file_fail() {
     // 012 T039, security S3: new prefixes, and files other than the Dockerfile and the pipeline
-    let jwt = format!("eyJ{}.{}.{}", "a".repeat(20), "b".repeat(20), "c".repeat(20));
+    let jwt = format!(
+        "eyJ{}.{}.{}",
+        "a".repeat(20),
+        "b".repeat(20),
+        "c".repeat(20)
+    );
     let hits = [
         format!("sk_live_{}", "A".repeat(24)),
         format!("xoxb-{}", "1".repeat(12)),
@@ -1270,9 +1285,19 @@ fn credentials_in_any_file_fail() {
     ];
     for hit in hits {
         let text = format!("package main\n// {hit}\n");
-        expect_only(with_files(&[("src/hello.go", text.as_str())]), "secret-value", &hit);
+        expect_only(
+            with_files(&[("src/hello.go", text.as_str())]),
+            "secret-value",
+            &hit,
+        );
     }
-    for fine in ["eyJ", "eyJabc.def.ghi", "xoxb-", "npm_short", "sk_live_short"] {
+    for fine in [
+        "eyJ",
+        "eyJabc.def.ghi",
+        "xoxb-",
+        "npm_short",
+        "sk_live_short",
+    ] {
         assert_eq!(with_files(&[("a.txt", fine)]), Vec::<&str>::new(), "{fine}");
     }
 }
@@ -1309,6 +1334,9 @@ fn the_folder_walk_refuses_links_and_oversized_folders() {
 fn the_two_build_archives_are_not_walked() {
     // 012 T039: `publish` checks the folder again after the build; the archives are big and hold layers
     let tar = format!("sk_live_{}", "A".repeat(24));
-    let ids = with_files(&[("image-amd64.tar", tar.as_str()), ("image-arm64.tar", tar.as_str())]);
+    let ids = with_files(&[
+        ("image-amd64.tar", tar.as_str()),
+        ("image-arm64.tar", tar.as_str()),
+    ]);
     assert_eq!(ids, Vec::<&str>::new());
 }
