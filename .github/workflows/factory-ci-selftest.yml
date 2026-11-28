@@ -10,6 +10,7 @@ on:
     paths:
       - "rust-ci-runner/**"
       - ".github/workflows/factory-ci*.yml"
+      - ".github/workflows/factory-monorepo-ci.yml"
       - ".github/factory-ci-repos.toml"
       - ".github/scripts/**"
   push:
@@ -17,6 +18,7 @@ on:
     paths:
       - "rust-ci-runner/**"
       - ".github/workflows/factory-ci*.yml"
+      - ".github/workflows/factory-monorepo-ci.yml"
       - ".github/factory-ci-repos.toml"
       - ".github/scripts/**"
 
