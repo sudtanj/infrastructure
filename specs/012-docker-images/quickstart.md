@@ -22,9 +22,11 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST https://hub.docker.com/v2/repos
 curl -s -H "Authorization: Bearer $JWT" https://hub.docker.com/v2/repositories/sudtanj/spike-012/ | jq .is_private
 ```
 
+Also confirm, with the pinned `crane:debug` image from T001, that the two paths the publish uses exist: `docker run --rm --entrypoint /busybox/sh <image> -c 'test -x /ko-app/crane && echo ok'` prints `ok` (report the real paths if they differ; they become `CRANE_SH` and `CRANE_BIN`).
+
 If the login answers 401 with a valid token, retry against `POST /v2/users/login` with `{"username":"sudtanj","password":"<token>"}` and report which endpoint works. The crane and mirror spikes of research.md use the same throwaway repository.
 
-## 1. Owner setup (once, before the runner digest moves; spec A14), names only
+## 1. Owner setup (once, before the watch-entry PR merges; spec A14), names only
 
 The two keys already exist. The owner confirms, without printing a value:
 
@@ -54,16 +56,19 @@ git diff --name-only origin/main...HEAD | grep -E '^\.github/(workflows|scripts)
 
 Expected: `ok`.
 
-## 4. Release and canary
+## 4. Release, canary, then the watch-entry PR
 
-1. Merge the PR. The tick still runs the 0.3.0 runner and plans the repo as before; check one tick.
+The watch-entry edit (`allow_docker` and `secrets`, T020) is a separate follow-up PR. Under the pinned 0.3.0 runner, `plan.rs:307` copies the entry's `allow_docker` to every row and `plan.rs:489-490` partitions `matrix_docker` on it, so `rust-ci-runner` and `ci-canary` would move into the docker job (Environment `factory-ci-docker`, the `_DOCKER` store token) the moment the toml merges; `main.rs:115-118` would drop the whole entry if `FACTORY_CI_TOKEN_DOCKER` were unset; and `plan.rs:185` would read statuses with the docker token (plan K2). So the toml merges only after the 0.4.0 runner is pinned and the owner checks (T028) are done.
+
+1. Merge the main PR (runner code, `docker/hello-static`, tests). The watch entry is unchanged, so the tick still runs the 0.3.0 runner and plans the repo exactly as before; `docker/` is not discovered. Check one tick.
 2. Tag `rust-ci-runner-v0.4.0` on the merge commit and push the tag. The release workflow ends with the digest line; record it.
-3. `gh variable set RUNNER_IMAGE_DIGEST --body sha256:<64 hex>`.
-4. Canary, two ticks: `factory-ci/rust-ci-runner` and `factory-ci/ci-canary` post once and are not planned again on the second tick. A re-plan means the two tokens are different users: stop and roll back.
+3. `gh variable set RUNNER_IMAGE_DIGEST --body sha256:<64 hex>`. Canary, two ticks: `factory-ci/rust-ci-runner` and `factory-ci/ci-canary` post once and are not planned again. With the entry unchanged, a `docker/hello-static` row is a plain row and a `docker = true` step in it is refused with an `error`; that is expected until step 5.
+4. The owner confirms T028 (names, token scope, `FACTORY_CI_TOKEN_DOCKER` coverage and same user, Environment).
+5. Open the follow-up PR that adds `allow_docker = true` and `secrets = ["DOCKERHUB_USERNAME", "DOCKERHUB_TOKEN"]` to the `sudtanj/infrastructure` entry, and merge it. Canary again, two ticks: the two plain projects post once and are not planned again (a re-plan means the two tokens are different users: revert the toml PR at once), and `factory-ci/docker/hello-static` is planned into the docker job.
 
 ## 5. End-to-end (SC-001, SC-003, SC-006, SC-007)
 
-1. Wait for a tick. It posts `factory-ci/docker/hello-static` on the `main` tip: built, checked, repository created public if missing, pushed.
+1. After step 4.5, wait for a tick. It posts `factory-ci/docker/hello-static` on the `main` tip: built, checked, repository created public if missing, pushed.
 2. From a machine with no Docker Hub login:
 
 ```
@@ -85,7 +90,9 @@ Expected: both digests equal, and each lists exactly `linux/amd64` and `linux/ar
 
 ## 7. Rollback
 
-1. `gh variable set RUNNER_IMAGE_DIGEST --body <value from step 1.5>`. The next tick runs 0.3.0: `docker/` is not discovered, nothing publishes.
-2. Delete the published tags, and any repository the runner created, on Docker Hub by hand if they must go; the runner never deletes any.
-3. Revoke the Docker Hub token.
-4. Revert the `allow_docker` and `secrets` lines of `.github/factory-ci-repos.toml` in a separate reviewed PR (with the `secrets` lines gone, the repo-files test returns to "no secrets").
+Order matters: with the toml changed, the 0.3.0 runner would route every row of the repo into the docker job.
+
+1. If the watch-entry PR (T020) is merged, revert it first, in a separate reviewed PR (with the `secrets` lines gone the repo-files test returns to "no secrets"). Plain rows go back to the plain job.
+2. `gh variable set RUNNER_IMAGE_DIGEST --body <value from step 1.5>`. The next tick runs 0.3.0: `docker/` is not discovered, nothing publishes.
+3. Delete the published tags, and any repository the runner created, on Docker Hub by hand if they must go; the runner never deletes any.
+4. Revoke the Docker Hub token.

@@ -68,7 +68,7 @@ Evidence is `file:line` on branch `012-docker-images`. Each decision answers one
 - The residual window is the gap between the second tip read and `crane tag` (a container start). A newer commit lands in it only if a second tick starts and finishes inside it, which the concurrency group forbids. If the tip moves, the newer commit's own tick moves `latest` 5 minutes later.
 - A failed second read ends in `error` with the `sha-` tag in place.
 
-**Reuse and K3.** When the `sha-<12>` list exists, container A compares its child digests with `crane digest --tarball` of the two archives (lead decision 4). Equal: continue. Unequal: exit 45. A rebuild of the same commit is not byte-identical, so a retry after a written list fails unless the build is reproducible. The next commit publishes under its own tag. Spec FR-020 says so.
+**Reuse (critic MAJOR-3, replaces the digest comparison of lead decision 4).** `docker build` plus `docker save` records the build time in the image config, so a rebuild of the same commit never matches the existing `sha-<12>` digests and a comparison would fail every retry. When the `sha-<12>` list already exists, container A pushes nothing and prints it; the runner checks it with `verify_index`, the new archives with the archive policy, and the tip with the two reads; then only `latest` is tagged on the existing list. An invalid existing list ends `image index incomplete`, with nothing overwritten. Spec FR-020 says so.
 
 ## D5. The distroless check
 
@@ -154,3 +154,11 @@ Not verifiable on this VM. Use a throwaway Docker Hub repository the owner creat
 3. `crane:debug` carries `sh`, and `crane index append` fills the platform from the config.
 4. `mirror.gcr.io/library/golang@sha256:<index digest>` pulls by digest from the sidecar.
 5. Docker Hub API (owner runs, status codes only, quickstart 0): `POST /v2/auth/token` accepts the Read & Write token as `secret`; `POST /v2/repositories/` with the returned token creates a public repository; a probe of a missing repository answers 404 and not 401. If any answer differs, the fallback endpoint or a broader scope is an owner decision (spec R13).
+
+## D12. Review decisions (critic and qa, 2026-11-28)
+
+- **Rollout order (MAJOR-1).** `plan.rs:307` copies the entry's `allow_docker` to every row and `plan.rs:489-490` partitions `matrix_docker` on it, so under the pinned 0.3.0 runner the entry edit would move `rust-ci-runner` and `ci-canary` into `run-docker`; `main.rs:115-118` drops the whole entry when `FACTORY_CI_TOKEN_DOCKER` is unset; `plan.rs:185` reads statuses with the docker token. The edit is a follow-up PR after 0.4.0 is pinned and the owner checks are done.
+- **Failed step is `error` for image rows (MAJOR-2).** `job.rs:555-560` maps a failed step to `failure` and only exit 125 or a spawn failure to `error`; `walk.rs:96-107` retries only `error`; a rate limit during the sidecar's pulls would be final. Image rows map a failed step and a timeout to `error`; deterministic mistakes already fail at the static check.
+- **Explicit entrypoint (MAJOR-4).** `crane:debug` has a non-shell entrypoint; the publish containers run `--entrypoint <CRANE_SH> <image> -c <script>` as `engine.rs:382` does, and call crane by `CRANE_BIN`. T002 confirms both paths in the pinned image.
+- **Shared deadline (MINOR-5).** Clone 10 minutes (`job.rs:492`), pipeline 30 minutes (`job.rs:109`), publish two containers of 10 minutes plus Hub calls could pass the 45-minute job limit (`factory-ci-tick.yml:215`). One `JOB_DEADLINE` of 40 minutes, each call gets the time left.
+- **Other.** Hub override variable only in debug builds; `mount_arg`'s `:` check on the publish mount (`engine.rs:388-393`); `run_left` fails closed; `plan_hardening_tests.rs:89` keeps a fixture with no `docker/` project; ticks are serialised by `factory-ci-tick.yml:9-11`.

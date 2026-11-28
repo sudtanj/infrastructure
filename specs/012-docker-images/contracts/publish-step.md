@@ -25,48 +25,47 @@ The real run's environment then holds `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` an
 
 `publish::publish(engine, env, api, target, dir, log) -> Done`
 
-Steps, in this order, each failure a fixed line (data-model.md "Status texts"):
+Steps, in this order, each failure a fixed line (data-model.md "Status texts"). Before every step that starts a container or makes a request, and before the next one, `publish` checks the shared `JOB_DEADLINE` (data-model.md Constants.JOB_DEADLINE); with too little time left it ends `publish refused: time ran out`. Each container and Hub call gets `min(its own limit, time left)`.
 
-1. `publishes(project, branch)`; else return before any env read, engine call or API call.
+1. `publishes(project, branch)`; else return before any env read, engine call, API call or Hub call.
 2. `image::check` again on the files now on disk; a failing id gives `failure` `check failed: ...`.
 3. `var(env, "DOCKERHUB_TOKEN")` present and non-empty, and `var(env, "DOCKERHUB_USERNAME")` present (`publish refused: no login name`) and equal to `NAMESPACE` (`publish refused: login is not the namespace`; no value printed). Both are kept in memory; the username is used only for this comparison and the login and is never registered with a redactor.
-4. Both archives of `PLATFORMS` exist in `dir`, each a regular file (`symlink_metadata`), size 1 byte to `ARCHIVE_MAX`.
-5. `archive::read_config` of each archive; user, entrypoint and platform rules of data-model.md "Archive config".
+4. Both archives of `PLATFORMS` exist in `dir`, each a regular file (`symlink_metadata`), size 1 byte to `ARCHIVE_MAX` inclusive.
+5. `archive::read_config` of each archive (it returns the config and judges nothing); `publish` applies the user, entrypoint and platform policy of data-model.md "Archive config" and sets `image runs as root`, `image has a shell entrypoint`, `image platform mismatch`.
 6. Tip read 1: `api.branches(repo)`, the entry named `main`. Error or no entry gives `tip of main unreadable`, nothing started.
-7. Teardown: `engine.cleanup_run(run_id)` stops and removes the sidecar, every container of the run, the run's networks and its volumes (`engine.rs:240-266`). Then `engine.run_left(run_id)` must be false, else `publish refused: sidecar still running`.
+7. Teardown: `engine.cleanup_run(run_id)` stops and removes the sidecar, every container of the run, the run's networks and its volumes (`engine.rs:240-266`). Then `engine.run_left(run_id)` must be false, else `publish refused: sidecar still running`. `run_left` fails closed: a failed `ps`, `network ls` or `volume ls` counts as "left".
 8. `hub::ensure_public` (contracts/hub-api.md): login, probe, create a missing repository as public, verify. Runs in the runner process; its errors end the item with its fixed lines before any publish container starts.
-8b. Fresh directory under `RUNNER_TEMP`, mode 0700, new name. Move both archives into it (`rename`; a copy when `rename` fails). It holds nothing else.
-9. Container A. Then, only when tip 1 equals the commit, tip read 2; error gives `tip of main unreadable` with the `sha-` tag in place; equal runs container B. Otherwise `published sha-<12>, not latest`.
-10. Remove the fresh directory. The caller's final `cleanup_run` removes the publish containers.
+9. Fresh directory under `RUNNER_TEMP`, mode 0700, new name. Its path must not contain `:` (the check of `mount_arg`, `engine.rs:388-393`, applies to `<fresh dir>:/in:ro` too); otherwise `publish refused: archive unreadable`. Move both archives into it (`rename`; a copy when `rename` fails). It holds nothing else.
+10. Container A. Then, only when tip 1 equals the commit, tip read 2; error gives `tip of main unreadable` with the `sha-` tag in place; equal runs container B. Otherwise `published sha-<12>, not latest`.
+11. Remove the fresh directory. The caller's final `cleanup_run` removes the publish containers.
 
 ### Containers A and B: the token is on standard input
 
-Both are started with `Engine::capture_in(args, env, input, limit, container)` where `input` is the token bytes (no newline), `env` is empty, limit 10 minutes.
+Both are started with `Engine::capture_in(args, env, input, limit, container)` where `input` is the token bytes as `&[u8]` (no newline), `env` is empty, limit 10 minutes or the time left. The image's own entrypoint is not a shell, so the run names the shell explicitly, as `engine.rs:382` does for the clone container, and the scripts call crane by its absolute path:
 
 ```
 docker run -i --rm --name factory-ci-<run>-publish --label factory-ci.run=<run>
   --read-only --tmpfs /tmp:rw,size=64m --cap-drop ALL
   --security-opt no-new-privileges --pids-limit 256 --memory 1g
   --user <uid>:<gid> -v <fresh dir>:/in:ro
-  -e HOME=/tmp -e DOCKER_CONFIG=/tmp/.docker
+  -e HOME=/tmp -e DOCKER_CONFIG=/tmp/.docker -e CRANE=<CRANE_BIN>
   -e REPO=index.docker.io/sudtanj/<name> -e TAG=sha-<12 hex>
-  <CRANE_IMAGE> sh -c '<script A>'
+  --entrypoint <CRANE_SH> <CRANE_IMAGE> -c '<script A>'
 ```
 
-The container uses the default bridge network (the run network is gone after teardown). `--user` is the uid and gid of the fresh directory. No `-e DOCKERHUB_TOKEN`, no value anywhere in argv or any environment. Container B is the same with `--name factory-ci-<run>-tag`, no `-v`, `<script B>`.
+`CRANE_SH` and `CRANE_BIN` are constants (data-model.md Constants.CRANE_SH, Constants.CRANE_BIN); T002 confirms both paths exist in the pinned image, and `publish_tests.rs` asserts `--entrypoint` and the image come in that order. The container uses the default bridge network (the run network is gone after teardown). `--user` is the uid and gid of the fresh directory. No `-e DOCKERHUB_TOKEN`, no value anywhere in argv or any environment. Container B is the same with `--name factory-ci-<run>-tag`, no `-v`, `<script B>`.
 
-Script A, in order:
+Script A, in order (`"$CRANE"` is the binary):
 
-1. `crane auth login index.docker.io -u sudtanj --password-stdin` (reads the token from standard input); failure exits 41.
-2. `d_amd64=$(crane digest --tarball /in/image-amd64.tar)` and the same for arm64; failure exits 43.
-3. `m=$(crane manifest "$REPO:$TAG" 2>&1)`. Success: take the child digests from `m`, compare as a set with the two digests of step 2; unequal exits 45; equal skips to step 6. Output with `MANIFEST_UNKNOWN` or `NAME_UNKNOWN`: continue. `UNAUTHORIZED` or `DENIED`: exit 41. Anything else: exit 42.
-4. For each architecture: `crane push /in/image-<arch>.tar "$REPO@$d_<arch>"` (by digest, no tag). `UNAUTHORIZED` or `DENIED` exits 41; any other failure exits 42.
-5. `crane index append -t "$REPO:$TAG" -m "$REPO@$d_amd64" -m "$REPO@$d_arm64"`; 41 or 42 as above. No other tag is written in steps 4 and 5.
-6. `m=$(crane manifest "$REPO:$TAG")`, then print one line, `INDEX ` followed by `m` with newlines removed. Nothing else is printed; crane's own output goes to `/dev/null`.
+1. `"$CRANE" auth login index.docker.io -u sudtanj --password-stdin` (reads the token from standard input); failure exits 41.
+2. `m=$("$CRANE" manifest "$REPO:$TAG" 2>&1)`. Success: the `sha-<12>` list already exists; go to step 5 and push nothing (reuse, no digest comparison: a rebuild never matches, FR-020). Output with `MANIFEST_UNKNOWN` or `NAME_UNKNOWN`: continue. `UNAUTHORIZED` or `DENIED`: exit 41. Anything else: exit 42.
+3. For each architecture: `d=$("$CRANE" digest --tarball /in/image-<arch>.tar)` (failure exits 43); `"$CRANE" push /in/image-<arch>.tar "$REPO@$d"` by digest, no tag (`UNAUTHORIZED` or `DENIED` exits 41; other failure exits 42).
+4. `"$CRANE" index append -t "$REPO:$TAG" -m "$REPO@$d_amd64" -m "$REPO@$d_arm64"`; 41 or 42 as above. No other tag is written in steps 3 and 4.
+5. `m=$("$CRANE" manifest "$REPO:$TAG")`, then print one line, `INDEX ` followed by `m` with newlines removed. Nothing else is printed; crane's own output goes to `/dev/null`.
 
-Script B: `crane auth login ... --password-stdin` (41 on failure), `crane tag "$REPO:$TAG" latest` (41 or 42). It prints nothing.
+Script B: login as in A (41 on failure), `"$CRANE" tag "$REPO:$TAG" latest` (41 or 42). It prints nothing.
 
-The runner takes the last stdout line of A that starts with `INDEX `, runs `publish::verify_index` on the JSON, and ends `image index incomplete` when it fails or the line is absent.
+The runner takes the last stdout line of A that starts with `INDEX `, runs `publish::verify_index` on the JSON, and ends `image index incomplete` when it fails or the line is absent. An existing list that fails is never overwritten: nothing is pushed or tagged.
 
 ### Exit mapping
 
@@ -74,14 +73,13 @@ The runner takes the last stdout line of A that starts with `INDEX `, runs `publ
 |---|---|
 | 0 | continue |
 | 41 | `registry refused the token` |
-| 45 | `existing tag differs from this build` |
 | 42, 43, any other code, timeout, spawn failure | `push failed` |
 
 `capture_in` reports a non-zero exit as `exit status: <n>` in its error; the mapping matches that text and a test pins it.
 
 ## 3. Redaction
 
-Every `Redactor` that can see the run includes `DOCKERHUB_TOKEN`, the base64 of `sudtanj:<token>` and the Hub login access token. It does not include `DOCKERHUB_USERNAME`: a username is not confidential, and registering a 7-character value would only blank `sudtanj` from statuses. The script does mask it in the Actions log (the form a docker config holds). That covers the `creds` passed to `post` (`job.rs:727`) and the log built in `attempt` (`job.rs:520-530`).
+Every `Redactor` that can see the run includes `DOCKERHUB_TOKEN`, the base64 of `sudtanj:<token>` (the form a docker config holds) and the Hub login access token. It does not include `DOCKERHUB_USERNAME`: a username is not confidential, and registering a 7-character value would only blank `sudtanj` from statuses. The script does mask it in the Actions log. The redactors cover the `creds` passed to `post` (`job.rs:727`) and the log built in `attempt` (`job.rs:520-530`).
 
 ## 4. What a user-written step sees
 
