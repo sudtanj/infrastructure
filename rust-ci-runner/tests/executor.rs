@@ -523,3 +523,33 @@ fn local_run_of_a_docker_pipeline_needs_no_opt_in_and_leaves_nothing() {
     assert!(leftovers(&id).is_empty(), "{:?}", leftovers(&id));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_real_hello_static_builds_both_platforms_into_archives_that_pass_the_publish_policy() {
+    // 012 FR-003, FR-012, FR-028, FR-030, T018: run the committed pipeline of docker/hello-static
+    // against the real engine and read what the publish step would read.
+    pull_once();
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../docker/hello-static");
+    let dir = tmp();
+    for e in std::fs::read_dir(&src).unwrap() {
+        let p = e.unwrap().path();
+        if p.is_file() {
+            std::fs::copy(&p, dir.join(p.file_name().unwrap())).unwrap();
+        }
+    }
+    let o = Command::new(common::BIN)
+        .args(["run", "--dir", dir.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let out = common::out_text(&o);
+    assert!(o.status.success(), "{out}");
+    for (arch, file) in [("amd64", "image-amd64.tar"), ("arm64", "image-arm64.tar")] {
+        let c = rust_ci_runner::archive::read_config(&dir.join(file))
+            .unwrap_or_else(|e| panic!("{file}: {e}"));
+        assert_eq!((c.os.as_str(), c.architecture.as_str()), ("linux", arch));
+        assert_eq!(c.user, "65532:65532", "{file}");
+        assert_eq!(c.entrypoint, vec!["/hello".to_string()], "{file}");
+        assert!(c.cmd.is_empty(), "{file}: {:?}", c.cmd);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
