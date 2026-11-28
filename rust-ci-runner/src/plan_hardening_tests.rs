@@ -80,13 +80,13 @@ fn no_id_leaves_repo_id_empty_and_a_matching_id_fills_it() {
 
 #[test]
 fn the_default_branch_comes_from_the_repo_lookup() {
-    // FR-060: default secret_branches is the repo's default branch
+    // The default branch still names the row; secrets_ok is false for every row (T017b)
     let api = fake();
     api.set_repo(R, 1, false, "trunk");
     add_repo(&api, R, &[("main", 1, 30), ("trunk", 2, 20)], &["."]);
     let (_, fin) = plan_all(&api, &entries(&[(R, "")]), &opts());
     for r in rows(&fin) {
-        assert_eq!(r.secrets_ok, r.branch == "trunk", "{}", r.branch);
+        assert!(!r.secrets_ok, "{}", r.branch);
     }
 }
 

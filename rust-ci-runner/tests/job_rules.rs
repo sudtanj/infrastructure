@@ -89,8 +89,8 @@ fn the_runner_environment_never_becomes_a_container_environment() {
 }
 
 #[test]
-fn a_listed_secret_is_passed_by_name_and_its_value_only_in_the_client_environment() {
-    // AS 7.7
+fn a_pipeline_with_a_secret_ends_in_error_before_any_container() {
+    // The tick's job passes no secrets (feature 010, T017b): the manual `ci` command does.
     let j = Job::new();
     let toml = pipeline(&[("deploy", "secrets = [\"NPM_TOKEN\"]")]);
     let o = j.run(
@@ -99,16 +99,19 @@ fn a_listed_secret_is_passed_by_name_and_its_value_only_in_the_client_environmen
         &[("NPM_TOKEN", "npm-value-4242")],
     );
     assert!(o.status.success(), "{}", out_text(&o));
-    let runs = j.sb.step_runs();
+    assert!(j.sb.step_runs().is_empty(), "{:?}", j.sb.step_runs());
+    let s = j.last_status();
+    assert_eq!(s["state"], "error");
+    let text = format!("{s}{}", out_text(&o));
     assert!(
-        runs.iter().any(|r| dash_e(r).contains(&"NPM_TOKEN")),
-        "{}",
-        args_of(&runs)
+        s["description"]
+            .as_str()
+            .unwrap()
+            .contains("steps with secrets are not run by this job"),
+        "{s}"
     );
-    assert!(!args_of(&runs).contains("npm-value-4242"));
-    assert!(j.sb.client_envs().contains("NPM_TOKEN=npm-value-4242"));
-    assert!(!out_text(&o).contains("npm-value-4242"));
-    assert!(!j.last_status().to_string().contains("npm-value-4242"));
+    assert!(!text.contains("NPM_TOKEN") && !text.contains("npm-value-4242"), "{text}");
+    assert!(!j.sb.client_envs().contains("npm-value-4242"));
 }
 
 #[test]
@@ -144,22 +147,17 @@ fn docker_steps_with_the_opt_in_start() {
 }
 
 #[test]
-fn a_missing_secret_ends_in_error_before_any_container() {
-    // AS 7.7, FR-041
+fn a_missing_secret_gets_the_same_refusal_and_names_nothing() {
+    // AS 7.7, FR-041 before T017b; now the job refuses any secret with one fixed reason
     let j = Job::new();
     let toml = pipeline(&[("deploy", "secrets = [\"NPM_TOKEN\"]")]);
     j.run(&[(".factory-ci.toml", &toml)], &[], &[]);
     assert!(j.sb.step_runs().is_empty());
     let s = j.last_status();
     assert_eq!(s["state"], "error");
-    // The status text is sanitized (FR-051): the comma becomes an underscore.
-    assert!(
-        s["description"]
-            .as_str()
-            .unwrap()
-            .contains("requests secret NPM_TOKEN_ which is not defined"),
-        "{s}"
-    );
+    let d = s["description"].as_str().unwrap();
+    assert!(d.contains("steps with secrets are not run by this job"), "{s}");
+    assert!(!d.contains("NPM_TOKEN"), "{s}");
 }
 
 #[test]

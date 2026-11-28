@@ -393,17 +393,15 @@ fn the_clone_carries_the_token_in_the_environment_only() {
 }
 
 #[test]
-fn a_description_never_holds_a_secret_value() {
-    // FR-024
+fn a_pipeline_with_a_secret_is_refused_and_the_description_holds_neither_name_nor_value() {
+    // FR-024; the job passes no secrets (T017b)
     let (sb, g, fx) = setup(&pipeline(&[("deploy", "secrets = [\"NPM_TOKEN\"]")]));
     let engine = sb.engine(&fx, true, "-deploy", 1, "login failed for npm-secret-77");
     run_job(&sb, &g, &engine, &[], &[("NPM_TOKEN", "npm-secret-77")]);
-    assert_eq!(g.last()["state"], "failure");
-    assert!(
-        !g.last().to_string().contains("npm-secret-77"),
-        "{}",
-        g.last()
-    );
+    assert_eq!(g.last()["state"], "error");
+    let last = g.last().to_string();
+    assert!(last.contains("steps with secrets are not run by this job"), "{last}");
+    assert!(!last.contains("npm-secret-77") && !last.contains("NPM_TOKEN"), "{last}");
 }
 
 #[test]

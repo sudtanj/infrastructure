@@ -85,26 +85,18 @@ fn step(name: &str, extra: &str) -> String {
 }
 
 #[test]
-fn the_names_file_holds_the_sorted_deduplicated_union_of_every_steps_secrets() {
-    // AS 12.1
+fn a_pipeline_with_secrets_is_refused_with_one_fixed_reason_and_no_name() {
+    // The tick's job passes no secrets (feature 010, T017b): the names file stays empty.
     let p = Prep::new();
     let toml = format!(
-        "{}{}{}",
+        "{}{}",
         step("a", "secrets = [\"Z_KEY\", \"A_KEY\"]"),
-        step("b", "secrets = [\"A_KEY\"]"),
-        step("c", "secrets = [\"M_KEY\"]")
+        step("b", "secrets = [\"M_KEY\"]")
     );
     let o = p.run(&[(".factory-ci.toml", &toml)], &[]);
-    assert_eq!(o.status.code(), Some(0), "{}", out_text(&o));
-    assert_eq!(
-        std::fs::read_to_string(&p.names).unwrap(),
-        "A_KEY\nM_KEY\nZ_KEY\n"
-    );
-    assert!(
-        o.stdout.is_empty() && o.stderr.is_empty(),
-        "{}",
-        out_text(&o)
-    );
+    p.assert_refused(&o, "steps with secrets are not run by this job");
+    let reason = std::fs::read_to_string(&p.reason).unwrap();
+    assert!(!reason.contains("_KEY"), "{reason}");
     assert!(p.sb.step_runs().is_empty(), "prepare starts no container");
     assert!(p.api.requests().is_empty(), "prepare posts no status");
 }

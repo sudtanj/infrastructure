@@ -82,7 +82,7 @@ fn rows_carry_the_entry_shared_names_space_separated() {
 }
 
 #[test]
-fn secret_branches_default_to_the_default_branch_and_an_explicit_list_wins() {
+fn the_tick_gives_no_row_secrets_whatever_secret_branches_says() {
     // FR-060, AS 12.11, I29
     let api = fake();
     api.set_repo(R, 1, false, "main");
@@ -94,7 +94,7 @@ fn secret_branches_default_to_the_default_branch_and_an_explicit_list_wins() {
     );
     let (_, d) = plan_all(&api, &entries(&[(R, "")]), &opts());
     for r in rows(&d) {
-        assert_eq!(r.secrets_ok, r.branch == "main", "{}", r.branch);
+        assert!(!r.secrets_ok, "{}", r.branch);
     }
     let api = fake();
     api.set_repo(R, 1, false, "main");
@@ -110,7 +110,7 @@ fn secret_branches_default_to_the_default_branch_and_an_explicit_list_wins() {
         &opts(),
     );
     for r in rows(&e) {
-        assert_eq!(r.secrets_ok, r.branch != "main", "{}", r.branch);
+        assert!(!r.secrets_ok, "{}", r.branch);
     }
 }
 

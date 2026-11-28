@@ -372,15 +372,14 @@ fn secrets_allowed_on_refuses_branches_omitted() {
 }
 
 #[test]
-fn secrets_allowed_on_refuses_every_pattern_made_only_of_star_and_question_mark() {
-    for pat in ["*", "?*", "*?", "**", "?", "??", "*?*"] {
-        for r in ["main", "dev", "release/1"] {
-            assert!(!gate(&format!("branches = [{pat:?}]"), r), "{pat} {r}");
+fn secrets_allowed_on_secret_branches_star_allows_any_branch_and_an_absent_list_allows_none() {
+    for r in ["main", "dev", "release/1", "feat/x/y"] {
+        assert!(gate("secret_branches = [\"*\"]", r), "{r}");
+        // absent, whatever `branches` says
+        for absent in ["", "branches = [\"*\"]", "branches = [\"?*\"]", "branches = [\"main\"]"] {
+            assert!(!gate(absent, r), "{absent:?} {r}");
         }
     }
-    // one wild pattern spoils the list, even next to an explicit one
-    assert!(!gate("branches = [\"main\", \"*\"]", "main"));
-    assert!(!gate("branches = [\"?*\", \"main\"]", "main"));
 }
 
 #[test]

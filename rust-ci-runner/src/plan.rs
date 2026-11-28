@@ -1,12 +1,12 @@
 //! The plan in two phases (contracts/plan-output.md, data-model.md Item and PlanResult).
 //! Phase A (`candidates`) only reads. Phase C (`finish`) refuses, caps, posts, and returns the rows.
 //! No network here: everything goes through `Api`.
-use crate::github::{Api, ApiError, Branch, Repo};
+use crate::github::{Api, ApiError, Branch};
 use crate::projects::{self, Project};
 use crate::redact::Redactor;
 use crate::util::{random_id, short_sha};
 use crate::walk::{self, Decision};
-use crate::watch::{glob_match, WatchEntry};
+use crate::watch::WatchEntry;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -241,23 +241,18 @@ fn read_repo(
         )));
     }
     // Branches sharing a sha plan once (FR-012, R2): under the default branch if it is among
-    // them, else the alphabetically first name; secrets are allowed if any of them may have them.
+    // them, else the alphabetically first name. The tick passes no secrets (feature 010, T017b).
     tips.sort_by(|a, b| a.name.cmp(&b.name));
-    let mut groups: Vec<(Branch, bool)> = Vec::new();
+    let mut groups: Vec<Branch> = Vec::new();
     for b in tips {
-        let ok = secrets_ok(e, &repo, &b.name);
-        match groups.iter_mut().find(|(g, _)| g.sha == b.sha) {
-            Some((g, any)) => {
-                *any |= ok;
-                if b.name == repo.default_branch {
-                    g.name = b.name;
-                }
-            }
-            None => groups.push((b, ok)),
+        match groups.iter_mut().find(|g| g.sha == b.sha) {
+            Some(g) if b.name == repo.default_branch => g.name = b.name,
+            Some(_) => {}
+            None => groups.push(b),
         }
     }
     let mut out = Candidates::default();
-    for (b, branch_ok) in &groups {
+    for b in &groups {
         let found = projects::discover(api, &e.repo, &b.sha)?;
         let projs: Vec<Project> = found
             .iter()
@@ -312,7 +307,7 @@ fn read_repo(
                     allow_docker: e.allow_docker,
                     fail_closed: repo.private && !o.b_private,
                     retry: *retry,
-                    secrets_ok: *branch_ok,
+                    secrets_ok: false,
                     secrets: e.secrets.join(" "),
                     run_id: String::new(),
                     n: 0,
@@ -529,12 +524,4 @@ fn summary(kept: &[Item], unchecked: &[String], problems: &[String], counts: [us
             .for_each(|r| s.push_str(&format!("- {r}\n")));
     }
     s
-}
-
-/// FR-060: the entry's `secret_branches`, or the repo's default branch when it lists none.
-fn secrets_ok(e: &WatchEntry, repo: &Repo, branch: &str) -> bool {
-    match &e.secret_branches {
-        Some(globs) => globs.iter().any(|g| glob_match(g, branch)),
-        None => branch == repo.default_branch,
-    }
 }

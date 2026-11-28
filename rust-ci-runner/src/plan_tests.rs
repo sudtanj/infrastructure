@@ -179,7 +179,7 @@ fn two_branches_at_one_sha_plan_once_with_the_alphabetically_first_name() {
 
 #[test]
 fn a_shared_sha_goes_to_the_default_branch_when_it_is_among_them() {
-    // R2, FR-060
+    // R2, FR-012; the tick passes no secrets (T017b)
     let api = fake();
     add_repo(
         &api,
@@ -191,12 +191,12 @@ fn a_shared_sha_goes_to_the_default_branch_when_it_is_among_them() {
     let rows = rows(&fin);
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].branch, "main");
-    assert!(rows[0].secrets_ok);
+    assert!(!rows[0].secrets_ok);
 }
 
 #[test]
-fn a_secret_branch_among_several_at_one_sha_allows_secrets() {
-    // R2: the row is named for the first branch, secrets follow any match
+fn a_secret_branch_among_several_at_one_sha_still_gives_the_tick_no_secrets() {
+    // R2: the row is named for the first branch; `secret_branches` no longer opens secrets on the tick
     let api = fake();
     add_repo(&api, R, &[("alpha", 1, 10), ("release/1", 1, 10)], &["."]);
     let list = entries(&[(R, "secret_branches = [\"release/*\"]")]);
@@ -204,7 +204,7 @@ fn a_secret_branch_among_several_at_one_sha_allows_secrets() {
     let rows = rows(&fin);
     assert_eq!(
         (rows.len(), rows[0].branch.as_str(), rows[0].secrets_ok),
-        (1, "alpha", true)
+        (1, "alpha", false)
     );
 }
 
@@ -291,7 +291,7 @@ fn rows_carry_repo_id_secrets_ok_and_retry() {
     let (_, fin) = plan_all(&api, &entries(&[(R, "id = 123")]), &opts());
     let r = rows(&fin)[0].clone();
     assert_eq!(r.repo_id, "123");
-    assert!(r.secrets_ok && !r.retry);
+    assert!(!r.secrets_ok && !r.retry);
 }
 
 #[test]

@@ -7,7 +7,7 @@ use crate::redact::Redactor;
 use crate::ship::{self, Labels, LogConfig, Meta, Shipper, FLUSH_WINDOW};
 use crate::text;
 use crate::util::random_id;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -56,15 +56,25 @@ pub(crate) fn load_pipeline(dir: &Path, step: Option<&str>) -> Result<Pipeline, 
     }
 }
 
+/// The reason the tick's job gives for a pipeline that lists a secret. Fixed text: it is a public
+/// commit status. Secrets run through the manual `ci` command only (feature 010).
+pub(crate) const NO_JOB_SECRETS: &str =
+    "steps with secrets are not run by this job: use the ci command";
+
 /// Reads the pipeline in `dir`, then checks docker steps and looks up the listed secrets, so
-/// that nothing starts on a bad file. Every problem is returned.
+/// that nothing starts on a bad file. Every problem is returned. `allow_secrets` false refuses a
+/// pipeline that lists any, with `NO_JOB_SECRETS` and no name.
 pub(crate) fn prepare(
     dir: &Path,
     step: Option<&str>,
     lookup: impl Fn(&str) -> Option<String>,
     allow_docker: bool,
+    allow_secrets: bool,
 ) -> Result<(Pipeline, BTreeMap<String, String>), Vec<String>> {
     let p = load_pipeline(dir, step)?;
+    if !allow_secrets && !p.secret_names().is_empty() {
+        return Err(vec![NO_JOB_SECRETS.to_string()]);
+    }
     let secrets = p.resolve_secrets(lookup);
     let mut bad = p.docker_problems(allow_docker);
     if let Err(e) = &secrets {
@@ -149,7 +159,7 @@ pub fn local_with(
         listed.then(|| var(env, n)).flatten()
     };
     // A local run needs no opt-in for docker steps.
-    let (p, secrets) = prepare(&ws, step, lookup, true).map_err(|v| v.join("\n"))?;
+    let (p, secrets) = prepare(&ws, step, lookup, true, true).map_err(|v| v.join("\n"))?;
     let id = random_id();
     let shipper = cfg.map(|c| {
         let labels = Labels {
@@ -522,7 +532,7 @@ fn attempt(
         Ok(d) => d,
         Err(d) => return d,
     };
-    let (p, secrets) = match prepare(&dir, None, |n| var(env, n), o.allow_docker) {
+    let (p, secrets) = match prepare(&dir, None, |n| var(env, n), o.allow_docker, false) {
         Ok(v) => v,
         Err(bad) => return done("error", bad.join(". ")),
     };
@@ -584,7 +594,7 @@ fn workspace(o: &Opts, env: Env) -> PathBuf {
     base.join(format!("fci-job-{}-{}", o.t.run_id, random_id()))
 }
 
-/// The sorted union of the pipeline's secret names, one per line, or the reason it is refused.
+/// The names file content (always empty: the job refuses secrets) or the reason it is refused.
 /// Every pre-container check of a real run happens here; no step container starts.
 fn secret_names(
     o: &Opts,
@@ -602,17 +612,15 @@ fn secret_names(
     .quiet(true);
     let dir = checkout(o, env, engine, ws, &log, image).map_err(|d| d.reason)?;
     let p = load_pipeline(&dir, None).map_err(|v| v.join(". "))?;
+    if !p.secret_names().is_empty() {
+        return Err(NO_JOB_SECRETS.to_string());
+    }
     let bad = p.docker_problems(o.allow_docker);
     if !bad.is_empty() {
         return Err(bad.join(". "));
     }
     dind_image(env, &p)?;
-    let names: BTreeSet<&str> = p
-        .steps
-        .values()
-        .flat_map(|s| s.secrets.iter().map(String::as_str))
-        .collect();
-    Ok(names.into_iter().map(|n| format!("{n}\n")).collect())
+    Ok(String::new())
 }
 
 /// Prepare mode: writes the names file, or one reason line to the reason file. Prints nothing,
