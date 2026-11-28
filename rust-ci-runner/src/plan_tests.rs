@@ -300,7 +300,7 @@ fn a_private_repo_image_row_gets_no_docker_and_no_secrets() {
     for (private, want) in [(true, false), (false, true)] {
         let api = fake();
         api.set_repo(R, 123, private, "main");
-        add_repo(&api, R, &[("main", 1, 10)], &["docker/img"]);
+        add_repo(&api, R, &[("main", 1, 10)], &["docker", "docker/img"]);
         let list = entries(&[(R, "id = 123\nallow_docker = true")]);
         let (_, fin) = plan_all(&api, &list, &opts());
         let r = rows(&fin)[0].clone();
