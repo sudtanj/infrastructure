@@ -123,10 +123,9 @@ fn phase_a_makes_no_write_and_never_names_a_store() {
     assert_eq!(api.writes(), 0);
 }
 
-// ---- 010 T003 (test-first, `#[ignore = "test-first"]`): FR-004. `BW_` and `BITWARDEN` are reserved. ----
+// ---- 010 T003: FR-004. `BW_` and `BITWARDEN` are reserved. ----
 
 #[test]
-#[ignore = "test-first"]
 fn bw_and_bitwarden_names_are_refused_in_an_entry_and_a_pipeline() {
     for n in ["BW_X", "BW_", "bw_x", "BITWARDEN", "bitwarden_x", "Bitwarden", "BITWARDENX"] {
         let p = parse(&entry(&format!("secrets = [{n:?}]"))).unwrap_err();

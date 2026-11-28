@@ -5,14 +5,15 @@
 
 use crate::engine::{run_capped, Engine};
 use crate::job::{
-    dind_image, prepare, project_dir, remove_ws, run_env, run_pipeline, with_shipper, MAX_LOG_BYTES,
+    dind_image, load_pipeline, project_dir, remove_ws, run_env, run_pipeline, with_shipper,
+    MAX_LOG_BYTES,
 };
 use crate::log::{Log, LOG_STORE_HINT};
 use crate::pipeline::valid_name;
 use crate::projects::folder_name_ok;
 use crate::redact::Redactor;
 use crate::ship::{self, Labels, LogConfig, Meta, Shipper, FLUSH_WINDOW};
-use crate::store;
+use crate::store::{self, Held, NamedError};
 use crate::util::{base64, random_id};
 use crate::watch;
 use std::collections::BTreeMap;
@@ -76,6 +77,12 @@ struct Args {
     project: String,
     work: String,
     allow_docker: bool,
+    /// The repository id, the secret allowlist, the allowlisted store rows and whether the ref may
+    /// hold secrets: filled by `job` from the watch entry and the store, empty after `parse_args`.
+    id: u64,
+    allowed: Vec<String>,
+    held: Held,
+    ref_may_hold_secrets: bool,
 }
 
 /// Strict: no unknown flag, no repeated flag, no value that starts with `--`, no stray word.
@@ -127,6 +134,10 @@ fn parse_args(args: &[String]) -> Option<Args> {
         project,
         work,
         allow_docker,
+        id: 0,
+        allowed: Vec::new(),
+        held: Held::default(),
+        ref_may_hold_secrets: false,
     })
 }
 
@@ -195,7 +206,7 @@ fn job(
         early.fault(text);
         1
     };
-    let Some(a) = parse_args(args) else {
+    let Some(mut a) = parse_args(args) else {
         return fail("bad arguments");
     };
     let listed = watch::read(Path::new(&a.repos)).ok().and_then(|list| {
@@ -206,17 +217,28 @@ fn job(
                 && (!a.allow_docker || e.allow_docker)
         })
     });
-    let Some(want_id) = listed.and_then(|e| e.id) else {
+    let Some(entry) = listed else {
         return fail("repository or ref not in the watch list");
     };
+    a.id = entry.id.unwrap_or_default(); // `listed` only holds entries with an id
+    a.ref_may_hold_secrets = entry.secrets_allowed_on(&a.git_ref);
+    a.allowed = entry.secrets;
     if token.is_empty() {
         return fail("BWS_ACCESS_TOKEN is not set");
     }
     let server = env("FACTORY_CI_BWS_SERVER_URL").filter(|v| !v.is_empty());
-    let sec = match store::fetch(&s.bws, token, server.as_deref(), s.limits.bws) {
+    let fetched = match store::fetch_with(
+        &s.bws,
+        token,
+        server.as_deref(),
+        s.limits.bws,
+        &a.allowed,
+    ) {
         Ok(v) => v,
         Err(e) => return fail(&e.to_string()),
     };
+    let sec = fetched.secrets;
+    a.held = fetched.held;
     let settings = |k: &str| -> Option<String> {
         match k {
             "FACTORY_CI_LOG_URL" => Some(sec.log_url.clone()),
@@ -259,7 +281,7 @@ fn job(
         sec.log_token.clone(),
     ]);
     let log = w.log(red, &Some(shipper.clone()));
-    let passed = steps(&a, want_id, &sec.token, &run_id, env, s, &log);
+    let passed = steps(&a, &sec.token, &run_id, env, s, &log);
     let delivered = shipper.finish(FLUSH_WINDOW);
     if passed && !delivered {
         log.event("runner", "log lines were dropped");
@@ -271,7 +293,6 @@ fn job(
 /// to the log store as step `ci`. True when the pipeline passed.
 fn steps(
     a: &Args,
-    want_id: u64,
     token: &str,
     run_id: &str,
     env: &dyn Fn(&str) -> Option<String>,
@@ -285,7 +306,7 @@ fn steps(
         log.fault("cannot reach the container engine");
         return false;
     }
-    if let Err(e) = identity(a, want_id, token, s) {
+    if let Err(e) = identity(a, a.id, token, s) {
         detail(&format!("identity check: {e}"));
         log.fault("repository identity check failed");
         return false;
@@ -322,8 +343,8 @@ fn run_checkout(
 ) -> (bool, Option<String>) {
     let detail = |text: &str| log.out("ci", "stderr", text);
     let loaded = project_dir(src, &a.project).and_then(|dir| {
-        prepare(&dir, None, |_| None, true)
-            .map(|(p, _)| (dir, p))
+        load_pipeline(&dir, None)
+            .map(|p| (dir, p))
             .map_err(|bad| bad.join("\n"))
     });
     let (dir, p) = match loaded {
@@ -335,9 +356,11 @@ fn run_checkout(
         }
     };
     let image = p.steps.values().next().map(|st| st.image.clone());
-    let dind = match (p.docker_problems(a.allow_docker), dind_image(env, &p)) {
-        (bad, Ok(dind)) if bad.is_empty() => dind,
-        (bad, dind) => {
+    let mut bad = p.docker_problems(a.allow_docker);
+    bad.extend(p.docker_secret_problems());
+    let dind = match dind_image(env, &p) {
+        Ok(dind) if bad.is_empty() => dind,
+        dind => {
             detail(
                 &bad.into_iter()
                     .chain(dind.err())
@@ -348,6 +371,41 @@ fn run_checkout(
             return (false, image);
         }
     };
+    let unlisted = p.unlisted(&a.allowed);
+    if !unlisted.is_empty() {
+        for (step, name) in unlisted {
+            detail(&format!(
+                "step {step} requests secret {name}, which the watch entry does not allow"
+            ));
+        }
+        log.fault("step secret not allowed");
+        return (false, image);
+    }
+    let names = p.secret_names();
+    let secrets = if names.is_empty() {
+        BTreeMap::new()
+    } else if !a.ref_may_hold_secrets {
+        detail("secrets need explicit branches or secret_branches in the watch entry");
+        log.fault("repository or ref not in the watch list");
+        return (false, image);
+    } else {
+        match a.held.take(&names) {
+            Ok(held) => held.0,
+            Err(e) => {
+                detail(&match e {
+                    NamedError::Count { index, found } => {
+                        format!("secret {}: expected 1, found {found}", names[index])
+                    }
+                    NamedError::Unusable { index } => {
+                        format!("secret {}: unusable value", names[index])
+                    }
+                });
+                log.fault("step secret unavailable");
+                return (false, image);
+            }
+        }
+    };
+    log.add_secrets(secrets.values().cloned().collect());
     let mut step_env = run_env(run_id, sha, None, &a.git_ref, "manual");
     // The checkout belongs to the runner's user, not to root in the step: let git use it.
     let safe = [
@@ -356,16 +414,7 @@ fn run_checkout(
         ("GIT_CONFIG_VALUE_0", "/workspace"),
     ];
     step_env.extend(safe.map(|(k, v)| (k.to_string(), v.to_string())));
-    let out = run_pipeline(
-        engine,
-        run_id,
-        &dir,
-        &p,
-        step_env,
-        BTreeMap::new(),
-        log,
-        &dind,
-    );
+    let out = run_pipeline(engine, run_id, &dir, &p, step_env, secrets, log, &dind);
     engine.cleanup_run(run_id);
     let passed = match out {
         Ok(o) => {

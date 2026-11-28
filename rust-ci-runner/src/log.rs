@@ -1,6 +1,7 @@
 use crate::redact::Redactor;
+use crate::store::REQUIRED_KEYS;
 use std::io::Write;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
 /// A line is shipped in pieces of at most this many bytes (FR-036).
 const MAX_PIECE: usize = 16 * 1024;
@@ -22,17 +23,12 @@ pub const FAULTS: &[&str] = &[
     "docker steps are refused",
     "runner fault",
     "internal error",
+    "step secret not allowed",
+    "step secret unavailable",
 ];
 
 /// Printed when the log store answers 401 or 403 to the probe.
 pub const LOG_STORE_HINT: &str = "log store check failed: check FACTORY_CI_LOG_URL (host only, e.g. https://logs-prod-xxx.grafana.net), FACTORY_CI_LOG_USER (numeric user id) and FACTORY_CI_LOG_TOKEN (needs logs:write)";
-
-const SECRET_KEYS: [&str; 4] = [
-    "FACTORY_CI_TOKEN",
-    "FACTORY_CI_LOG_URL",
-    "FACTORY_CI_LOG_USER",
-    "FACTORY_CI_LOG_TOKEN",
-];
 
 fn is_fault(text: &str) -> bool {
     if FAULTS.contains(&text) {
@@ -44,7 +40,7 @@ fn is_fault(text: &str) -> bool {
     else {
         return false;
     };
-    SECRET_KEYS.contains(&key)
+    REQUIRED_KEYS.contains(&key)
         && (rest == "unusable value"
             || rest
                 .strip_prefix("expected 1, found ")
@@ -98,7 +94,7 @@ pub trait Sink: Send + Sync {
 /// through the redactor, and cut off at the size limit.
 pub struct Log {
     inner: Mutex<Inner>,
-    red: Redactor,
+    red: RwLock<Redactor>,
     sink: Option<Arc<dyn Sink>>,
     quiet: bool,
     public: bool,
@@ -120,7 +116,7 @@ impl Log {
                 left: limit,
                 cut: false,
             }),
-            red,
+            red: RwLock::new(red),
             sink: None,
             quiet: false,
             public: false,
@@ -152,6 +148,30 @@ impl Log {
         self
     }
 
+    /// Masks `values` in every line written from now on; earlier lines stay as they were.
+    pub fn add_secrets(&self, values: Vec<String>) {
+        self.red
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .add(values);
+    }
+
+    pub fn secret_forms(&self) -> Vec<String> {
+        self.red
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .forms()
+    }
+
+    /// Length of the longest form, 0 when there is none.
+    pub fn longest_secret(&self) -> usize {
+        self.secret_forms()
+            .iter()
+            .map(String::len)
+            .max()
+            .unwrap_or(0)
+    }
+
     /// Prints `[runner] <text>` on the fault stream when `text` is in `FAULTS`; drops anything else.
     pub fn fault(&self, text: &str) {
         if !is_fault(text) {
@@ -179,7 +199,12 @@ impl Log {
 
     fn write(&self, who: &str, stream: &str, text: &str, print: bool) {
         // Control characters other than tab could rewrite a terminal line or forge a log line (R7).
-        let text = self.red.apply(text.trim_end_matches(['\r', '\n']));
+        let raw = text.trim_end_matches(['\r', '\n']);
+        let text = self
+            .red
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .apply(raw);
         let bad = |c: char| c.is_control() && c != '\t';
         let text: String = text
             .chars()
@@ -195,7 +220,7 @@ impl Log {
                 n -= 1;
             }
             let (piece, tail) = rest.split_at(n);
-            if !self.emit(&mut g, who, stream, piece, print) || tail.is_empty() {
+            if !self.emit(&mut g, who, stream, piece, raw, print) || tail.is_empty() {
                 return;
             }
             rest = tail;
@@ -205,7 +230,15 @@ impl Log {
     /// False once the size limit is hit; the cut-off marker is printed and queued once. In public
     /// mode the limit applies to step output only: the fixed event lines are short, bounded by the
     /// pipeline, and never cut, so a long step cannot hide `pipeline passed`.
-    fn emit(&self, g: &mut Inner, who: &str, stream: &str, piece: &str, print: bool) -> bool {
+    fn emit(
+        &self,
+        g: &mut Inner,
+        who: &str,
+        stream: &str,
+        piece: &str,
+        raw: &str,
+        print: bool,
+    ) -> bool {
         let fixed = self.public && print;
         if g.cut && !fixed {
             return false;
@@ -228,7 +261,7 @@ impl Log {
         }
         if print {
             let shown = if self.public {
-                public_form(who, piece).map(|l| l + "\n")
+                public_form(who, raw).map(|l| l + "\n")
             } else {
                 Some(msg)
             };
@@ -693,7 +726,7 @@ pub mod tests {
         );
     }
 
-    // 010 T004 (test-first, each new test is `#[ignore = "test-first"]`). FR-011, FR-012; I6, I7.
+    // 010 T004. FR-011, FR-012; I6, I7.
     // Planned: `Log::add_secrets(&self, Vec<String>)` (one batch, takes `&self`: the redactor sits in an
     // `RwLock`), `Log::secret_forms(&self) -> Vec<String>`, `Log::longest_secret(&self) -> usize` (the
     // longest form, 0 when there is none). Fake values only.
@@ -702,7 +735,6 @@ pub mod tests {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn add_secrets_masks_later_lines_only() {
         let (log, buf, rec) = with_rec(&[], 10_000);
         log.out("s", "stdout", "before canary-Zq81-value-key");
@@ -721,7 +753,6 @@ pub mod tests {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn add_secrets_keeps_size_limit_state() {
         // "[a] 0123456789\n" is 15 bytes: two lines use the whole limit of 30
         let (log, buf, rec) = with_rec(&[], 30);
@@ -748,7 +779,6 @@ pub mod tests {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn a_secret_named_pass_cannot_mangle_a_public_line() {
         for secret in ["pass", "started", "failed", "success", "pipeline", "in", "s"] {
             // known when the log is built, and added after
@@ -788,7 +818,6 @@ pub mod tests {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn a_secret_named_pass_is_still_redacted_in_a_non_public_log() {
         // only the public line comes from raw text; the sink and a non-public stream get redacted text
         let (log, buf, rec) = with_rec(&["pass"], 1000);
@@ -803,7 +832,6 @@ pub mod tests {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn faults_hold_the_two_step_secret_lines() {
         // membership, not a count: feature 011 adds lines of its own
         for line in ["step secret not allowed", "step secret unavailable"] {
@@ -835,7 +863,6 @@ pub mod tests {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn secret_forms_and_longest_secret_follow_add_secrets() {
         let (log, _buf, _rec) = with_rec(&[], 1000);
         assert!(log.secret_forms().is_empty());
@@ -862,7 +889,6 @@ pub mod tests {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn add_secrets_while_other_threads_write_loses_no_line_and_masks_the_end() {
         let (log, _buf, rec) = with_rec(&[], u64::MAX);
         std::thread::scope(|sc| {

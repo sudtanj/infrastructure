@@ -2,11 +2,12 @@
 //! Errors name keys and counts, never a value and never the output of `bws`.
 
 use crate::engine::run_capped;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::process::Command;
 use std::time::Duration;
 
-const KEYS: [&str; 4] = [
+pub const REQUIRED_KEYS: [&str; 4] = [
     "FACTORY_CI_TOKEN",
     "FACTORY_CI_LOG_URL",
     "FACTORY_CI_LOG_USER",
@@ -55,6 +56,12 @@ fn usable(v: &str) -> bool {
 /// Takes the JSON of `bws secret list -o json`. Each of the four keys must match exactly one
 /// secret; other keys are ignored.
 pub fn parse_list(json: &str) -> Result<Secrets, StoreError> {
+    parse_list_with(json, &[]).map(|f| f.secrets)
+}
+
+/// Like `parse_list`, and keeps the rows whose whole key equals a name of `allowed`. Nothing else
+/// outlives the call.
+pub fn parse_list_with(json: &str, allowed: &[String]) -> Result<Fetched, StoreError> {
     let rows: Vec<serde_json::Value> =
         serde_json::from_str(json).map_err(|_| StoreError::Unreachable)?;
     let mut keyed = Vec::with_capacity(rows.len());
@@ -66,8 +73,8 @@ pub fn parse_list(json: &str) -> Result<Secrets, StoreError> {
             r,
         ));
     }
-    let mut vals = Vec::with_capacity(KEYS.len());
-    for key in KEYS {
+    let mut vals = Vec::with_capacity(REQUIRED_KEYS.len());
+    for key in REQUIRED_KEYS {
         let hits: Vec<_> = keyed.iter().filter(|(k, _)| *k == key).collect();
         if hits.len() != 1 {
             return Err(StoreError::Count(key, hits.len()));
@@ -82,12 +89,102 @@ pub fn parse_list(json: &str) -> Result<Secrets, StoreError> {
     }
     let [token, log_url, log_user, log_token]: [String; 4] =
         vals.try_into().map_err(|_| StoreError::Unreachable)?;
-    Ok(Secrets {
-        token,
-        log_url,
-        log_user,
-        log_token,
+    let mut held: HashMap<String, Vec<String>> = HashMap::new();
+    for (key, row) in &keyed {
+        if allowed.iter().any(|a| a == *key) {
+            // A value that is not a string is kept as "", which `usable_secret` refuses.
+            let v = row.get("value").and_then(|v| v.as_str()).unwrap_or("");
+            held.entry(key.to_string()).or_default().push(v.to_string());
+        }
+    }
+    Ok(Fetched {
+        secrets: Secrets {
+            token,
+            log_url,
+            log_user,
+            log_token,
+        },
+        held: Held(held),
     })
+}
+
+/// The four values and the rows of the allowlisted keys, from one list.
+pub struct Fetched {
+    pub secrets: Secrets,
+    pub held: Held,
+}
+
+/// Values of the allowlisted keys, by key. Validated only when a name is taken.
+#[derive(Default)]
+pub struct Held(HashMap<String, Vec<String>>);
+
+impl fmt::Debug for Held {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Held").finish_non_exhaustive()
+    }
+}
+
+/// Name to value, one per requested name. `Debug` prints names only.
+pub struct StepSecrets(pub(crate) BTreeMap<String, String>);
+
+impl fmt::Debug for StepSecrets {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_list().entries(self.0.keys()).finish()
+    }
+}
+
+/// Keyed by position in the requested list, so it holds no name and no value.
+#[derive(Debug)]
+pub enum NamedError {
+    Count { index: usize, found: usize },
+    Unusable { index: usize },
+}
+
+impl fmt::Display for NamedError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            NamedError::Count { index, found } => {
+                write!(f, "secret #{index}: expected 1, found {found}")
+            }
+            NamedError::Unusable { index } => write!(f, "secret #{index}: unusable value"),
+        }
+    }
+}
+
+impl Held {
+    pub fn take(&self, names: &[String]) -> Result<StepSecrets, NamedError> {
+        let mut out = BTreeMap::new();
+        for (index, name) in names.iter().enumerate() {
+            let rows = self.0.get(name).map_or(&[][..], Vec::as_slice);
+            let [v] = rows else {
+                return Err(NamedError::Count {
+                    index,
+                    found: rows.len(),
+                });
+            };
+            if !usable_secret(v) {
+                return Err(NamedError::Unusable { index });
+            }
+            out.insert(name.clone(), v.clone());
+        }
+        Ok(StepSecrets(out))
+    }
+}
+
+/// At most 32 KiB, not blank, no control character but `\n` and `\r\n`, no surrounding whitespace
+/// on a single line, and every non-blank line at least 4 characters once trimmed.
+fn usable_secret(v: &str) -> bool {
+    let t = v.trim();
+    v.len() <= 32768
+        && !t.is_empty()
+        && !v
+            .replace("\r\n", "\n")
+            .chars()
+            .any(|c| (c.is_control() && c != '\n') || matches!(c, '\u{2028}' | '\u{2029}'))
+        && (t.contains('\n') || t == v)
+        && v.lines()
+            .map(str::trim)
+            .all(|l| l.is_empty() || l.chars().count() >= 4)
 }
 
 fn allowed_server(url: &str) -> bool {
@@ -145,12 +242,23 @@ pub fn fetch(
     server_url: Option<&str>,
     limit: Duration,
 ) -> Result<Secrets, StoreError> {
+    fetch_with(bws_bin, token, server_url, limit, &[]).map(|f| f.secrets)
+}
+
+/// `fetch`, and the rows of the allowlisted keys.
+pub fn fetch_with(
+    bws_bin: &str,
+    token: &str,
+    server_url: Option<&str>,
+    limit: Duration,
+    allowed: &[String],
+) -> Result<Fetched, StoreError> {
     if server_url.is_some_and(|u| !allowed_server(u)) {
         return Err(StoreError::Unreachable);
     }
     for _ in 0..2 {
         match attempt(bws_bin, token, server_url, limit) {
-            Ok(out) => return parse_list(&out),
+            Ok(out) => return parse_list_with(&out, allowed),
             Err(StoreError::Rejected) => return Err(StoreError::Rejected),
             Err(_) => {}
         }

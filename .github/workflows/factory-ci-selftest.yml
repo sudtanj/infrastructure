@@ -68,9 +68,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - name: type-check the unit tests
+      - name: unit tests
         working-directory: rust-ci-runner
-        run: cargo test --locked --lib --no-run
+        run: cargo test --locked --lib
       # The integration tests, executor.rs included (this runner has docker): a broken one turns the run red.
       - name: integration tests
         working-directory: rust-ci-runner

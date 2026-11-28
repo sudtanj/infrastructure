@@ -47,7 +47,7 @@ pub fn run_env(
     v
 }
 
-fn load_pipeline(dir: &Path, step: Option<&str>) -> Result<Pipeline, Vec<String>> {
+pub(crate) fn load_pipeline(dir: &Path, step: Option<&str>) -> Result<Pipeline, Vec<String>> {
     let text = pipeline::read_file(dir).map_err(|e| vec![e])?;
     let p = pipeline::parse(&text)?;
     match step {

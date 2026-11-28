@@ -5,28 +5,92 @@ pub struct Redactor {
     secrets: Vec<String>,
 }
 
+const WRAP: usize = 76;
+const DERIVED_MIN: usize = 8;
+const DERIVED_MAX: usize = 48 * 1024;
+
+fn url_safe(s: &str) -> String {
+    s.replace('+', "-").replace('/', "_")
+}
+
+fn percent(s: &str) -> String {
+    s.bytes().fold(String::new(), |mut out, b| {
+        if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+        out
+    })
+}
+
 impl Redactor {
-    // shortcut: besides the value, only its base64 and the base64 of the clone's Basic
-    // header are caught, and a secret split across two output lines is not; other
-    // encodings (url, hex) are not. Upgrade if steps may transform secrets.
+    // shortcut: a secret split across two output lines is not caught, and a form under 8
+    // characters (`echo "$V" | base64` of a value under 6 bytes) is not derived. Upgrade if steps
+    // may print such values.
     pub fn new<I: IntoIterator<Item = String>>(values: I) -> Self {
-        let mut secrets = Vec::new();
+        let mut r = Self {
+            secrets: Vec::new(),
+        };
+        r.add(values);
+        r
+    }
+
+    /// One batch: the value, its base64 and the clone's Basic header form, each trimmed line of 4
+    /// or more characters, and derived forms of 8 to 48 KiB characters (base64 middles at three
+    /// alignments, wrapped base64 lines, percent, JSON and hex).
+    pub fn add<I: IntoIterator<Item = String>>(&mut self, values: I) {
         for v in values.into_iter().filter(|s| !s.is_empty()) {
-            secrets.push(base64(v.as_bytes()));
-            secrets.push(base64(format!("x-access-token:{v}").as_bytes()));
+            let b64 = base64(v.as_bytes());
+            self.secrets
+                .push(base64(format!("x-access-token:{v}").as_bytes()));
             // A multi-line value leaks line by line (A22); shorter lines match too much.
-            secrets.extend(
+            self.secrets.extend(
                 v.lines()
                     .map(str::trim)
                     .filter(|l| l.chars().count() >= 4)
                     .map(str::to_string),
             );
-            secrets.push(v);
+            let mut derived = Vec::new();
+            // The middle drops a prefix, a trailing newline or padding, so the form still matches.
+            for k in 0..3 {
+                let n = 3 * (v.len().saturating_sub(k) / 3);
+                if n > 0 {
+                    let mid = base64(&v.as_bytes()[k..k + n]);
+                    derived.push(url_safe(&mid));
+                    derived.push(mid);
+                }
+            }
+            // `Log::write` redacts one line at a time and `base64` wraps at 76 columns.
+            if b64.len() > WRAP {
+                derived.extend(
+                    (0..b64.len())
+                        .step_by(WRAP)
+                        .map(|i| b64[i..(i + WRAP).min(b64.len())].to_string()),
+                );
+            }
+            derived.push(percent(&v));
+            if let Ok(json) = serde_json::to_string(&v) {
+                derived.push(json[1..json.len() - 1].to_string());
+            }
+            derived.push(v.bytes().map(|b| format!("{b:02x}")).collect());
+            self.secrets.extend(
+                derived
+                    .into_iter()
+                    .filter(|f| (DERIVED_MIN..=DERIVED_MAX).contains(&f.len())),
+            );
+            self.secrets.push(b64);
+            self.secrets.push(v);
         }
         // Longest first, so a secret that contains another is replaced whole.
-        secrets.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
-        secrets.dedup();
-        Self { secrets }
+        self.secrets
+            .sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+        self.secrets.dedup();
+    }
+
+    /// Every string `apply` masks.
+    pub fn forms(&self) -> Vec<String> {
+        self.secrets.clone()
     }
 
     pub fn apply(&self, text: &str) -> String {
@@ -64,7 +128,7 @@ mod tests {
         assert_eq!(r.apply("-----BEGIN\n  body1234  \nab\n-----END"), "***");
     }
 
-    // 010 T004 (test-first, each new test is `#[ignore = "test-first"]`). FR-011, FR-013; I7.
+    // 010 T004. FR-011, FR-013; I7.
     // Planned: `Redactor::add(&mut self, values: I)` with `I: IntoIterator<Item = String>` (one batch,
     // sorted and deduped once; `new` calls it) and `Redactor::forms(&self) -> Vec<String>` (every string it
     // masks). Fake values only.
@@ -124,7 +188,6 @@ mod tests {
     const LEFT: usize = 10;
 
     #[test]
-    #[ignore = "test-first"]
     fn new_still_masks_a_two_character_value() {
         let r = Redactor::new(["pw".to_string()]);
         assert_eq!(r.apply("a pw b"), "a *** b");
@@ -135,7 +198,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn add_masks_value_and_base64_forms() {
         for v in [
             "canary-Zq81-value-key",
@@ -170,10 +232,8 @@ mod tests {
 
     // FR-011 says line wrapping does not hide a value. `base64` wraps at 76 columns and `Log::write` redacts
     // one line at a time, so a line of 76 characters has to be masked on its own. A form that must match
-    // across the newline cannot do that: the plan's stable middle is one run of characters. If the plan
-    // keeps the middle only, the claim has to leave the spec; otherwise `add` needs the wrapped lines.
+    // across the newline cannot do that, so `add` also masks each 76-column piece of the standard base64 form.
     #[test]
-    #[ignore = "test-first"]
     fn add_masks_wrapped_base64_line_by_line() {
         let v = format!("canary-Zq81-{}", "k9".repeat(44));
         assert_eq!(v.len(), 100);
@@ -191,7 +251,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn add_masks_percent_json_and_hex_forms() {
         let v = "pa ss/wo\"rd\\é=1+x#";
         let r = added(&[v]);
@@ -213,7 +272,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn add_skips_derived_forms_under_8_chars_and_over_48_kib() {
         // the value, its plain base64 and the clone header form are masked whatever the length
         let r = added(&["abc"]);
@@ -248,7 +306,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn forms_lists_every_form() {
         let v = "canary Zq81/value=key!";
         let r = added(&[v]);
@@ -291,7 +348,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn add_batch_equals_new() {
         let (a, b) = (
             ["canary-Zq81-value-key", "pw"],
@@ -320,7 +376,6 @@ mod tests {
 
     // I7 over generated values and texts (no proptest in the crate: a fixed LCG, as in `watch_tests`).
     #[test]
-    #[ignore = "test-first"]
     fn add_then_add_masks_what_new_of_both_masks_for_generated_values() {
         let mut x: u64 = 7;
         let mut next = |n: usize| {
@@ -365,7 +420,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn add_keeps_longest_first_across_batches() {
         let mut r = Redactor::new(["abcdef".to_string()]);
         r.add(["abcdef-longer-value".to_string()]);

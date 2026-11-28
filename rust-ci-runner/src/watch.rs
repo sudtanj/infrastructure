@@ -33,6 +33,18 @@ impl WatchEntry {
     pub fn matches_branch(&self, name: &str) -> bool {
         self.branches.iter().any(|g| glob_match(g, name))
     }
+
+    /// `secret_branches` names the refs on purpose. Without it, `branches` must be explicit: a
+    /// pattern made only of `*` and `?` matches any ref, and `branches` omitted defaults to `["*"]`.
+    pub fn secrets_allowed_on(&self, git_ref: &str) -> bool {
+        match &self.secret_branches {
+            Some(b) => b.iter().any(|g| glob_match(g, git_ref)),
+            None => {
+                !self.branches.iter().any(|g| g.chars().all(|c| matches!(c, '*' | '?')))
+                    && self.matches_branch(git_ref)
+            }
+        }
+    }
 }
 
 /// `*` matches any run of bytes including `/`, `?` one byte. Two-pointer with one backtrack

@@ -334,7 +334,7 @@ fn entries_without_branches_match_every_ref() {
     );
 }
 
-// ---- 010 T003 (test-first, `#[ignore = "test-first"]`): FR-004, FR-010 ----
+// ---- 010 T003: FR-004, FR-010 ----
 // Planned: `WatchEntry::secrets_allowed_on(&self, git_ref: &str) -> bool`. `secret_branches` set: the ref
 // matches one of them. Unset: no `branches` pattern is made only of `*` and `?`, and the ref matches
 // `branches`. The default `branches` is `["*"]`, so the default refuses.
@@ -344,7 +344,6 @@ fn gate(body: &str, git_ref: &str) -> bool {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn each_runner_setting_in_secrets_refuses_the_file() {
     for n in [
         "FACTORY_CI_TOKEN",
@@ -366,7 +365,6 @@ fn each_runner_setting_in_secrets_refuses_the_file() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn secrets_allowed_on_refuses_branches_omitted() {
     for r in ["main", "dev", "release/1", "feat/x/y"] {
         assert!(!gate("", r), "{r}");
@@ -375,7 +373,6 @@ fn secrets_allowed_on_refuses_branches_omitted() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn secrets_allowed_on_refuses_every_pattern_made_only_of_star_and_question_mark() {
     for pat in ["*", "?*", "*?", "**", "?", "??", "*?*"] {
         for r in ["main", "dev", "release/1"] {
@@ -388,7 +385,6 @@ fn secrets_allowed_on_refuses_every_pattern_made_only_of_star_and_question_mark(
 }
 
 #[test]
-#[ignore = "test-first"]
 fn secrets_allowed_on_explicit_branches_main() {
     assert!(gate("branches = [\"main\"]", "main"));
     assert!(!gate("branches = [\"main\"]", "dev"));
@@ -397,7 +393,6 @@ fn secrets_allowed_on_explicit_branches_main() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn secrets_allowed_on_explicit_release_glob() {
     let b = "branches = [\"release/*\"]";
     assert!(gate(b, "release/1.0"));
@@ -412,7 +407,6 @@ fn secrets_allowed_on_explicit_release_glob() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn secrets_allowed_on_follows_secret_branches_when_set() {
     // matching and not matching, with `branches` left at its default
     assert!(gate("secret_branches = [\"main\"]", "main"));
@@ -428,7 +422,6 @@ fn secrets_allowed_on_follows_secret_branches_when_set() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn secrets_allowed_on_secret_branches_star_opens_it_on_purpose() {
     for r in ["main", "dev", "release/1", "feat/x/y"] {
         assert!(gate("secret_branches = [\"*\"]", r), "{r}");

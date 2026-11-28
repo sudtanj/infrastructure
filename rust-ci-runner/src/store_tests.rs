@@ -8,7 +8,7 @@
 //! the access token`, `secret <KEY>: expected 1, found <N>`, `secret <KEY>: unusable value`). Garbage output
 //! and a refused server URL display as `secret store unreachable`.
 //!
-//! 010 T001 (test-first, each new test is `#[ignore = "test-first"]`): the keyed lookup. Planned shapes
+//! 010 T001: the keyed lookup. Planned shapes
 //! (plan.md "Lookup interface v1", data-model.md): `parse_list_with(&str, &[String]) -> Result<Fetched,
 //! StoreError>`, `fetch_with(&str, &str, Option<&str>, Duration, &[String]) -> Result<Fetched, StoreError>`,
 //! `Fetched { secrets: Secrets, held: Held }`, `Held::take(&self, &[String]) -> Result<StepSecrets, NamedError>`,
@@ -538,7 +538,6 @@ fn shown_with(r: Result<crate::store::Fetched, crate::store::StoreError>) -> Str
 }
 
 #[test]
-#[ignore = "test-first"]
 fn held_take_returns_values_by_exact_key() {
     let h = held(
         &[
@@ -562,7 +561,6 @@ fn held_take_returns_values_by_exact_key() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn held_take_missing_key_is_found_0() {
     let h = held(&[], &["SITE_API_KEY"]);
     let e = h.take(&strs(&["SITE_API_KEY"])).err().expect("missing key");
@@ -578,7 +576,6 @@ fn held_take_missing_key_is_found_0() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn held_take_duplicate_key_is_found_2() {
     let h = held(
         &[
@@ -607,7 +604,6 @@ fn held_take_duplicate_key_is_found_2() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn held_take_key_differing_in_case_does_not_match() {
     for key in [
         "site_api_key",
@@ -627,7 +623,6 @@ fn held_take_key_differing_in_case_does_not_match() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn held_take_refuses_empty_blank_and_each_control_character() {
     for v in [
         "",
@@ -664,7 +659,6 @@ fn held_take_refuses_empty_blank_and_each_control_character() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn held_take_line_boundary() {
     // multi-line: every non-blank trimmed line has 4 or more characters; blank inner lines, CRLF and a
     // trailing newline pass; the value comes back unchanged
@@ -695,7 +689,6 @@ fn held_take_line_boundary() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn held_take_refuses_surrounding_whitespace_on_a_single_line() {
     for v in [" abcd", "abcd ", "abcd\n", "abcd\r\n", "  abcd  ", "\nabcd"] {
         let e = one(v).err().unwrap_or_else(|| panic!("{v:?} was accepted"));
@@ -705,7 +698,6 @@ fn held_take_refuses_surrounding_whitespace_on_a_single_line() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn held_take_size_cap() {
     let at = "a".repeat(32768);
     assert_eq!(one(&at).ok().expect("32768 bytes")["SITE_API_KEY"], at);
@@ -714,7 +706,6 @@ fn held_take_size_cap() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn held_take_passes_unicode_and_equals_untouched() {
     for v in [
         "pä€漢字=x==",
@@ -729,7 +720,6 @@ fn held_take_passes_unicode_and_equals_untouched() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn held_take_validates_only_the_names_taken() {
     let h = held(
         &[
@@ -757,7 +747,6 @@ fn held_take_validates_only_the_names_taken() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn held_take_looks_up_a_repeated_name_once() {
     let h = held(
         &[
@@ -779,7 +768,6 @@ fn held_take_looks_up_a_repeated_name_once() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn fetch_with_keeps_only_allowlisted_rows_and_still_needs_the_four_runner_keys() {
     let mut rows = GOOD.to_vec();
     rows.push(("SITE_API_KEY", "fake-site-value-1111"));
@@ -811,7 +799,6 @@ fn fetch_with_keeps_only_allowlisted_rows_and_still_needs_the_four_runner_keys()
 }
 
 #[test]
-#[ignore = "test-first"]
 fn fetch_with_empty_allowlist_equals_fetch() {
     let (sa, sb) = (Sandbox::new(), Sandbox::new());
     let eu = Some("https://vault.bitwarden.eu");
@@ -856,7 +843,6 @@ fn fetch_with_empty_allowlist_equals_fetch() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn fetch_with_retries_once_and_a_rejected_token_is_final() {
     let allowed = strs(&["SITE_API_KEY"]);
     let sb = Sandbox::new();
@@ -891,7 +877,6 @@ fn fetch_with_retries_once_and_a_rejected_token_is_final() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn fetch_with_refuses_a_foreign_server_url() {
     let allowed = strs(&["SITE_API_KEY"]);
     for bad in [
@@ -911,7 +896,6 @@ fn fetch_with_refuses_a_foreign_server_url() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn fetch_with_child_env_is_cleared() {
     let sb = Sandbox::new();
     let com = Some("https://vault.bitwarden.com");
@@ -939,7 +923,6 @@ fn fetch_with_child_env_is_cleared() {
 }
 
 #[test]
-#[ignore = "test-first"]
 fn debug_and_display_of_held_results_and_errors_hold_no_value_and_no_name() {
     let h = held(
         &[

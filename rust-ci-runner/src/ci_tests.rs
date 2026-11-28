@@ -1419,7 +1419,6 @@ fn allow_docker_needs_the_entry_and_a_pinned_dind_image() {
 // 010 T005 (test-first): a declared name that the watch entry does not list is `step secret not allowed`
 // (it was `pipeline file refused`, spec R6). The entry of `o/r` in `WATCH` has no `secrets`.
 #[test]
-#[ignore = "test-first"]
 fn declared_secret_fails_before_any_container() {
     let mut w =
         W::new("[steps.a]\nimage = \"alpine\"\ncommands = [\"x\"]\nsecrets = [\"NPM_TOKEN\"]\n");
@@ -1720,7 +1719,6 @@ fn panic_prints_internal_error_only() {
 
 // 010 T005 (test-first): two rows added, `step secret not allowed` and `step secret unavailable`.
 #[test]
-#[ignore = "test-first"]
 fn every_stderr_line_is_in_the_fixed_list() {
     type Case = (
         &'static str,
@@ -2060,7 +2058,7 @@ fn production_seams_are_fixed_and_ignore_the_environment() {
     );
 }
 
-// ---- 010 T005 (test-first, each test is `#[ignore = "test-first"]`): step secrets through `ci::run` ----
+// ---- 010 T005: step secrets through `ci::run` ----
 //
 // FR-001 to FR-013, US1 to US4, SC-002, SC-003; I1 to I3, I5, I6, I8. Planned behaviour (plan.md "Order inside
 // `run_checkout`"): after the one `bws` call and the clone, load the pipeline (`pipeline file refused`), docker
@@ -2191,7 +2189,6 @@ mod step_secrets {
     // ---- US1: a step gets its secret ----
 
     #[test]
-    #[ignore = "test-first"]
     fn step_secrets_reach_only_the_step_that_lists_them() {
         let pl = [one_step("one", &[KEY]), one_step("two", &[])].concat();
         let w = world(&pl, &entry(MAIN, &[KEY]), &[(KEY, VAL)]);
@@ -2219,7 +2216,6 @@ mod step_secrets {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn two_steps_listing_one_name_get_one_value() {
         let pl = [one_step("one", &[KEY]), one_step("two", &[KEY])].concat();
         let w = world(&pl, &entry(MAIN, &[KEY]), &[(KEY, VAL)]);
@@ -2234,7 +2230,6 @@ mod step_secrets {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn single_allowed_name_runs() {
         let w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, VAL)]);
         assert_eq!(w.ok(), 0, "{}", w.stderr());
@@ -2251,7 +2246,6 @@ mod step_secrets {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn four_char_value_runs() {
         let mut w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, "abcd")]);
         w.docker_body = print_secret();
@@ -2263,7 +2257,6 @@ mod step_secrets {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn blank_inner_line_value_runs_and_masks_each_line() {
         let v = "-----BEGIN FAKE KEY-----\n\nbody-line-1234\n-----END FAKE KEY-----";
         let mut w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, v)]);
@@ -2279,7 +2272,6 @@ mod step_secrets {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn an_allowlisted_key_with_a_bad_value_does_not_fail_a_run_that_does_not_request_it() {
         let store = [
             (KEY, VAL),
@@ -2296,7 +2288,6 @@ mod step_secrets {
     // ---- US2: allowlist ----
 
     #[test]
-    #[ignore = "test-first"]
     fn unlisted_name_fails_before_any_container() {
         let store = [(KEY, VAL), ("OTHER_KEY", "fake-other-value-9")];
         let w = world(&req(&["OTHER_KEY"]), &entry(MAIN, &[KEY]), &store);
@@ -2314,7 +2305,6 @@ mod step_secrets {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn entry_without_secrets_key_refuses_a_requested_name() {
         let watch = format!("[[watch]]\nrepo = \"o/r\"\nid = 42\n{MAIN}");
         let w = world(&req(&[KEY]), &watch, &[(KEY, VAL)]);
@@ -2327,7 +2317,6 @@ mod step_secrets {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn name_differing_in_case_is_not_allowed() {
         let store = [(KEY, VAL), ("site_api_key", "fake-lower-value-3")];
         let w = world(&req(&["site_api_key"]), &entry(MAIN, &[KEY]), &store);
@@ -2337,7 +2326,6 @@ mod step_secrets {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn runner_setting_in_the_pipeline_is_refused() {
         for n in RUNNER_NAMES {
             let w = world(&req(&[n]), &entry(MAIN, &[]), &[]);
@@ -2349,7 +2337,6 @@ mod step_secrets {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn runner_setting_in_the_entry_refuses_the_watch_file() {
         for n in RUNNER_NAMES {
             let w = world(&req(&[KEY]), &entry(MAIN, &[n]), &[(KEY, VAL)]);
@@ -2364,7 +2351,6 @@ mod step_secrets {
     // ---- US2: ref gate and docker ----
 
     #[test]
-    #[ignore = "test-first"]
     fn docker_step_in_a_pipeline_with_secrets_is_refused() {
         // no flag, entry does not allow docker
         let w = world(&docker_and_secrets(), &entry(MAIN, &[KEY]), &[(KEY, VAL)]);
@@ -2387,7 +2373,6 @@ mod step_secrets {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn secrets_with_branches_omitted_or_star_are_refused() {
         for (label, extra) in [
             ("omitted", ""),
@@ -2404,7 +2389,6 @@ mod step_secrets {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn secret_branches_must_match_the_ref() {
         // the ref is `main`
         let w = world(
@@ -2426,7 +2410,6 @@ mod step_secrets {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn explicit_branches_main_gets_secrets() {
         let w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, VAL)]);
         assert_eq!(w.ok(), 0, "{}", w.stderr());
@@ -2439,7 +2422,6 @@ mod step_secrets {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn a_pipeline_without_secrets_runs_on_branches_star() {
         // the gate is for pipelines that ask for secrets
         let w = W::new(&pipe(&["a"]));
@@ -2450,7 +2432,6 @@ mod step_secrets {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn rules_are_checked_in_the_documented_order() {
         // unlisted name and a refused ref: the allowlist comes first
         let w = world(&req(&["OTHER_KEY"]), &entry("", &[KEY]), &[(KEY, VAL)]);
@@ -2473,7 +2454,6 @@ mod step_secrets {
     // ---- US3: a missing or bad value stops early ----
 
     #[test]
-    #[ignore = "test-first"]
     fn unavailable_value_ends_the_run_before_any_container() {
         let big = "a".repeat(32769);
         let none = format!("secret {KEY}: expected 1, found 0");
@@ -2508,7 +2488,6 @@ mod step_secrets {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn every_run_makes_one_bws_call() {
         let cases: Vec<(&str, W, i32)> = vec![
             ("no secrets", W::new(&pipe(&["a"])), 0),
@@ -2548,7 +2527,6 @@ mod step_secrets {
     // ---- US4: nothing leaks ----
 
     #[test]
-    #[ignore = "test-first"]
     fn hostile_step_cannot_print_a_secret_anywhere() {
         let v = "fake hostile/Zq81=key+1";
         let (pv, hv) = (pct(v), hex(v.as_bytes()));
@@ -2593,7 +2571,6 @@ mod step_secrets {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn a_secret_named_pass_keeps_pipeline_passed_on_stdout() {
         for v in ["pass", "started", "success", "failed", "pipeline"] {
             let w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, v)]);
@@ -2619,7 +2596,6 @@ mod step_secrets {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn no_public_line_holds_a_secret_name_or_count() {
         let big = "a".repeat(32769);
         let store = [(KEY, VAL), ("OTHER_KEY", "fake-other-value-9")];

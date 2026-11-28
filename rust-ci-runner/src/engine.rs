@@ -60,17 +60,50 @@ fn strs(v: &[&str]) -> Vec<String> {
     v.iter().map(|x| x.to_string()).collect()
 }
 
-/// Reads lines, in pieces of at most 64 KB, and hands each to `f`.
-fn pump(r: impl Read, mut f: impl FnMut(&str)) {
+/// Reads lines, in pieces of at most 64 KB, and hands each to `f`. A piece cut with no newline never
+/// ends inside a character or inside an occurrence of one of `forms`: `Log::write` redacts each piece
+/// alone, so the cut moves back to the start of what would straddle it and that text opens the next piece.
+fn pump(r: impl Read, forms: &[String], mut f: impl FnMut(&str)) {
     let mut r = BufReader::new(r);
     let mut buf = Vec::new();
     loop {
-        buf.clear();
-        match r.by_ref().take(65536).read_until(b'\n', &mut buf) {
-            Ok(0) | Err(_) => break,
-            Ok(_) => f(&String::from_utf8_lossy(&buf)),
+        let more = r
+            .by_ref()
+            .take((65536 - buf.len()) as u64)
+            .read_until(b'\n', &mut buf);
+        let eof = !matches!(more, Ok(n) if n > 0);
+        let cut = if buf.len() == 65536 && buf.last() != Some(&b'\n') {
+            cut_point(&buf, forms)
+        } else {
+            buf.len()
+        };
+        if !buf.is_empty() {
+            f(&String::from_utf8_lossy(&buf[..cut]));
         }
+        if eof {
+            break;
+        }
+        buf.drain(..cut);
     }
+}
+
+/// Where to cut a full chunk: not inside a character, and before every start of a form that the chunk
+/// ends in the middle of. If that leaves nothing, the character boundary alone.
+fn cut_point(buf: &[u8], forms: &[String]) -> usize {
+    let whole = match std::str::from_utf8(buf) {
+        Err(e) if e.error_len().is_none() => e.valid_up_to(),
+        _ => buf.len(),
+    };
+    let widest = forms.iter().map(String::len).max().unwrap_or(0);
+    let mut cut = whole;
+    while let Some(p) = (cut.saturating_sub(widest)..cut).find(|&p| {
+        forms
+            .iter()
+            .any(|f| f.len() > cut - p && f.as_bytes().starts_with(&buf[p..cut]))
+    }) {
+        cut = p;
+    }
+    if cut == 0 { whole } else { cut }
 }
 
 pub(crate) fn read_capped(r: impl Read, cap: u64) -> String {
@@ -154,6 +187,8 @@ impl Engine {
             .map_err(|e| format!("{SPAWN_FAIL}{}: {e}", self.bin))?;
         let out = child.stdout.take();
         let err = child.stderr.take();
+        let forms = log.secret_forms();
+        let forms = &forms;
         let end = Instant::now() + limit;
         std::thread::scope(|sc| {
             let o = sc.spawn(move || out.map(|r| read_capped(r, 16 << 20)).unwrap_or_default());
@@ -265,12 +300,14 @@ impl Engine {
         };
         let out = child.stdout.take();
         let err = child.stderr.take();
+        let forms = log.secret_forms();
+        let forms = &forms;
         std::thread::scope(|sc| {
             if let Some(r) = out {
-                sc.spawn(move || pump(r, |l| log.out(who, "stdout", l)));
+                sc.spawn(move || pump(r, forms, |l| log.out(who, "stdout", l)));
             }
             if let Some(r) = err {
-                sc.spawn(move || pump(r, |l| log.out(who, "stderr", l)));
+                sc.spawn(move || pump(r, forms, |l| log.out(who, "stderr", l)));
             }
             loop {
                 match child.try_wait() {
@@ -610,17 +647,14 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
 
-    // 010 T006 (test-first, each test is `#[ignore = "test-first"]`). FR-013; I9.
-    // Planned: `fn pump(r: impl Read, carry: usize, f: impl FnMut(&str))`. `carry` is `Log::longest_secret()`:
-    // the pump holds back the last `carry` bytes of a chunk that was cut at 64 KB, puts them in front of the
-    // next chunk, flushes what is left at the end of the stream and never cuts inside a UTF-8 character.
-    // `carry` 0 is today's behaviour. `Redactor::forms` is planned too (T004).
+    // 010 T006. FR-013; I9. `pump(r, forms, f)`: a piece cut with no newline never ends inside a character or
+    // inside an occurrence of a form (`Redactor::forms`), and the cut-off text opens the next piece.
     const V: &str = "canary-Zq81-value-key-0123456789";
     const CUT: usize = 65536;
 
-    fn pieces(input: &[u8], carry: usize) -> Vec<String> {
+    fn pieces(input: &[u8], forms: &[String]) -> Vec<String> {
         let mut got = Vec::new();
-        pump(Cursor::new(input.to_vec()), carry, |p| got.push(p.to_string()));
+        pump(Cursor::new(input.to_vec()), forms, |p| got.push(p.to_string()));
         got
     }
 
@@ -631,9 +665,6 @@ mod tests {
             .collect()
     }
 
-    fn carry_of(red: &Redactor) -> usize {
-        red.forms().iter().map(String::len).max().unwrap_or(0)
-    }
 
     /// A reader that returns at most `step` bytes per call.
     struct Drip<'a> {
@@ -651,11 +682,9 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn pump_masks_a_value_across_the_64k_cut() {
         let red = Redactor::new([V.to_string()]);
-        let carry = carry_of(&red);
-        assert!(carry >= V.len() && carry < CUT, "{carry}");
+        let forms = red.forms();
         for form in [V.to_string(), base64(V.as_bytes())] {
             let starts = [
                 CUT - form.len(),
@@ -666,11 +695,7 @@ mod tests {
             ];
             for start in starts {
                 let line = format!("{}{form}{}", "a".repeat(start), "b".repeat(200));
-                let got = pieces(format!("{line}\n").as_bytes(), carry);
-                assert!(
-                    !got.iter().any(|p| p.contains(&form)),
-                    "{form} at {start} reached a piece whole"
-                );
+                let got = pieces(format!("{line}\n").as_bytes(), &forms);
                 let want = format!("{}***{}", "a".repeat(start), "b".repeat(200));
                 assert_eq!(shown(&red, &got), want, "{form} at {start}");
             }
@@ -679,73 +704,68 @@ mod tests {
         let line = format!("{}{V}{}\n", "a".repeat(CUT - 10), "b".repeat(200));
         let mut got = Vec::new();
         let r = Drip { data: line.as_bytes(), step: 7 };
-        pump(r, carry, |p| got.push(p.to_string()));
+        pump(r, &forms, |p| got.push(p.to_string()));
         let want = format!("{}***{}", "a".repeat(CUT - 10), "b".repeat(200));
         assert_eq!(shown(&red, &got), want);
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn pump_masks_a_32_kib_value_across_the_cut() {
         let v: String = (0..32768).map(|i| (b'a' + (i % 26) as u8) as char).collect();
         let red = Redactor::new([v.clone()]);
-        let carry = carry_of(&red);
-        assert!((32768..=48 * 1024).contains(&carry), "{carry}");
+        let forms = red.forms();
         for start in [CUT - 32767, CUT - 16384, CUT - 1] {
             let line = format!("{}{v}{}", "x".repeat(start), "y".repeat(100));
-            let got = pieces(format!("{line}\n").as_bytes(), carry);
-            assert!(!got.iter().any(|p| p.contains(&v)), "whole value at {start}");
+            let got = pieces(format!("{line}\n").as_bytes(), &forms);
             let want = format!("{}***{}", "x".repeat(start), "y".repeat(100));
             assert_eq!(shown(&red, &got), want, "start {start}");
         }
     }
 
     // `Held::take` refuses a value over 32 KiB (store_tests `held_take_size_cap`), so the pump never sees a
+    // `Held::take` refuses a value over 32 KiB (store_tests `held_take_size_cap`), so the pump never sees a
     // form built from one. This is the pump side: with a value one byte over, the forms stay under the
-    // 48 KiB cap, below the 64 KiB chunk, and nothing waits forever or is lost; a carry that is too big
-    // does not stall it either.
+    // 48 KiB cap, and nothing waits forever or is lost; a form that is longer than a chunk does not stall it
+    // either.
     #[test]
-    #[ignore = "test-first"]
     fn pump_with_a_value_one_byte_over_the_cap_is_never_given_to_it() {
         let v = "k".repeat(32769);
         let red = Redactor::new([v]);
-        let carry = carry_of(&red);
-        assert!(carry <= 48 * 1024 && carry < CUT, "{carry}");
+        let forms = red.forms();
+        assert!(forms.iter().all(|f| f.len() <= 48 * 1024));
         let input: Vec<u8> = (0..200_000u32).map(|i| b'a' + (i % 23) as u8).collect();
-        for c in [carry, CUT - 1, CUT, CUT + 1, 3 * CUT] {
-            let got = pieces(&input, c);
-            assert_eq!(got.concat().as_bytes(), &input[..], "carry {c}");
+        for forms in [forms, vec!["a".repeat(3 * CUT)]] {
+            let got = pieces(&input, &forms);
+            assert_eq!(got.concat().as_bytes(), &input[..]);
         }
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn pump_keeps_order_and_flushes_the_tail() {
-        for carry in [0, 1, 5, 100, 49152] {
+        for forms in [vec![], vec!["line 4".to_string()], vec!["a".repeat(100)]] {
             // no newline at the end: the last text still arrives
-            let got = pieces(b"one\ntwo\nthree", carry);
-            assert_eq!(got.concat(), "one\ntwo\nthree", "carry {carry}");
-            assert!(got.last().unwrap().ends_with("three"), "carry {carry}: {got:?}");
-            assert!(got.iter().all(|p| !p.is_empty()), "carry {carry}: {got:?}");
+            let got = pieces(b"one\ntwo\nthree", &forms);
+            assert_eq!(got.concat(), "one\ntwo\nthree", "{forms:?}");
+            assert!(got.last().unwrap().ends_with("three"), "{forms:?}: {got:?}");
+            assert!(got.iter().all(|p| !p.is_empty()), "{forms:?}: {got:?}");
             // lines keep their order
             let text: String = (0..500).map(|i| format!("line {i}\n")).collect();
-            assert_eq!(pieces(text.as_bytes(), carry).concat(), text, "carry {carry}");
-            assert!(pieces(b"", carry).is_empty(), "carry {carry}");
-            assert_eq!(pieces(b"\n\n", carry).concat(), "\n\n", "carry {carry}");
+            assert_eq!(pieces(text.as_bytes(), &forms).concat(), text, "{forms:?}");
+            assert!(pieces(b"", &forms).is_empty(), "{forms:?}");
+            assert_eq!(pieces(b"\n\n", &forms).concat(), "\n\n", "{forms:?}");
             // a long stream without a newline, cut at 64 KB several times
             let long: Vec<u8> = (0..3 * CUT + 17).map(|i| b'a' + (i % 26) as u8).collect();
-            assert_eq!(pieces(&long, carry).concat().as_bytes(), &long[..], "carry {carry}");
+            assert_eq!(pieces(&long, &forms).concat().as_bytes(), &long[..], "{forms:?}");
         }
-        // carry 0 is what `pump` does today: pieces of at most 64 KB, a newline ends a piece
+        // no forms is what `pump` does today: pieces of at most 64 KB, a newline ends a piece
         let line = format!("{}\n", "a".repeat(70_000));
-        let sizes: Vec<usize> = pieces(line.as_bytes(), 0).iter().map(String::len).collect();
+        let sizes: Vec<usize> = pieces(line.as_bytes(), &[]).iter().map(String::len).collect();
         assert_eq!(sizes, [CUT, 70_001 - CUT]);
-        assert_eq!(pieces(b"one\ntwo\nthree", 0), ["one\n", "two\n", "three"]);
+        assert_eq!(pieces(b"one\ntwo\nthree", &[]), ["one\n", "two\n", "three"]);
     }
 
     // A line that has arrived whole is handed over at once, not held until the stream ends.
     #[test]
-    #[ignore = "test-first"]
     fn pump_does_not_hold_back_a_complete_line() {
         struct Probe {
             step: u8,
@@ -768,7 +788,7 @@ mod tests {
         let (seen, ok) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicBool::new(false)));
         let r = Probe { step: 0, seen: seen.clone(), ok: ok.clone() };
         let s2 = seen.clone();
-        pump(r, 4096, move |_| {
+        pump(r, &[], move |_| {
             s2.fetch_add(1, Ordering::SeqCst);
         });
         assert!(ok.load(Ordering::SeqCst), "line1 was held back");
@@ -776,39 +796,33 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn pump_never_cuts_a_utf8_char() {
         for ch in ["é", "漢", "😀"] {
             for prefix in 0..4 {
                 let line = format!("{}{}", "a".repeat(prefix), ch.repeat(40_000));
-                for carry in [0, 1, 2, 3, 5, 7, 1000] {
+                for forms in [vec![], vec![ch.repeat(3)], vec![ch.repeat(50)]] {
                     for tail in ["\n", ""] {
                         let input = format!("{line}{tail}");
-                        let got = pieces(input.as_bytes(), carry);
+                        let got = pieces(input.as_bytes(), &forms);
                         let joined = got.concat();
-                        assert!(!joined.contains('\u{fffd}'), "{ch} prefix {prefix} carry {carry}");
-                        assert_eq!(joined, input, "{ch} prefix {prefix} carry {carry}");
+                        assert!(!joined.contains('\u{fffd}'), "{ch} prefix {prefix} {forms:?}");
+                        assert_eq!(joined, input, "{ch} prefix {prefix} {forms:?}");
                     }
                 }
             }
         }
         // bytes that are not UTF-8 at all still come out, one replacement character each
-        assert_eq!(pieces(b"ab\xffcd\n", 4).concat(), "ab\u{fffd}cd\n");
+        assert_eq!(pieces(b"ab\xffcd\n", &[]).concat(), "ab\u{fffd}cd\n");
     }
 
-    // The plan holds back `carry` bytes of a cut chunk, so the piece ends `carry` bytes before the 64 KB cut.
-    // A value that starts one byte before that end is still split between two pieces, and `Log::write`
-    // redacts each piece alone. I9 ("whatever the cuts") cannot hold with disjoint pieces and a length
-    // alone: the pump would have to see the forms, or `Log` would have to carry text across pieces.
-    // Decide that, then drop the marker; the plan's own cases are in the tests above.
+    // A value that starts just before an emit boundary is not split: the cut moves back to where it starts.
     #[test]
-    #[ignore = "test-first: fails by plan design, decide before enabling"]
     fn pump_does_not_split_a_value_at_its_own_emit_boundary() {
         let red = Redactor::new([V.to_string()]);
-        let carry = carry_of(&red);
-        let start = CUT - carry - 1;
+        let widest = red.forms().iter().map(String::len).max().unwrap_or(0);
+        let start = CUT - widest - 1;
         let line = format!("{}{V}{}\n", "a".repeat(start), "b".repeat(500));
-        let got = pieces(line.as_bytes(), carry);
+        let got = pieces(line.as_bytes(), &red.forms());
         let want = format!("{}***{}", "a".repeat(start), "b".repeat(500));
         assert_eq!(shown(&red, &got), want);
     }

@@ -2,8 +2,9 @@
 # Two steps, so Grafana shows unit and integration output under their own step label.
 # tests/executor.rs calls the real docker binary, which a step container does not have (ci refuses docker steps),
 # so the selftest runs it.
-# A step container has --pids-limit 512. The tests of ship, job and ci start mock HTTP servers whose threads never exit,
-# so each group runs in its own process.
+# A step container has --pids-limit 512. The tests of ship, job and ci start mock HTTP servers. Each ci_tests hub ends
+# its accept thread in Hub::drop (server.unblock()), but the 46 older ci tests, about 30 step_secrets tests and their reader
+# threads share one process, so ci_tests::step_secrets:: runs apart as a guard. Each group runs in its own process.
 # integration depends on unit: both share the checkout and its target/, so it reuses the build instead of waiting on
 # cargo's lock.
 # --locked: Cargo.lock is committed, so a dependency never changes under the pipeline; bump it by a reviewed commit.
@@ -13,7 +14,8 @@ commands = [
   "cargo test --locked --lib -- --skip ship_tests:: --skip job_tests:: --skip ci_tests::",
   "cargo test --locked --lib ship_tests::",
   "cargo test --locked --lib job_tests::",
-  "cargo test --locked --lib ci_tests::",
+  "cargo test --locked --lib ci_tests:: -- --skip ci_tests::step_secrets::",
+  "cargo test --locked --lib ci_tests::step_secrets::",
 ]
 timeout = 1800
 

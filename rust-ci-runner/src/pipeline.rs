@@ -76,6 +76,8 @@ pub fn valid_secret_name(s: &str) -> bool {
         "ACTIONS_",
         "RUNNER_",
         "BWS_",
+        "BW_",
+        "BITWARDEN",
         "BASH_",
         "ITEM_",
         "LD_",
@@ -264,6 +266,32 @@ impl Pipeline {
             .filter(|(_, s)| s.docker && !allowed)
             .map(|(name, _)| format!("step {name} needs docker but repo does not allow it"))
             .collect()
+    }
+
+    /// Every requested secret name, sorted, once each.
+    pub fn secret_names(&self) -> Vec<String> {
+        let names: BTreeSet<_> = self.steps.values().flat_map(|s| &s.secrets).collect();
+        names.into_iter().cloned().collect()
+    }
+
+    /// `(step, name)` of every requested name that is not byte-equal to an entry of `allowed`.
+    pub fn unlisted(&self, allowed: &[String]) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        for (step, s) in &self.steps {
+            for name in s.secrets.iter().filter(|n| !allowed.contains(n)) {
+                out.push((step.clone(), name.clone()));
+            }
+        }
+        out
+    }
+
+    /// Secrets and docker access never share a pipeline, whatever the flags.
+    pub fn docker_secret_problems(&self) -> Vec<String> {
+        if self.needs_docker() && self.steps.values().any(|s| !s.secrets.is_empty()) {
+            vec!["a pipeline with secrets cannot have docker steps".to_string()]
+        } else {
+            Vec::new()
+        }
     }
 }
 
@@ -511,7 +539,7 @@ commands = ["x"]
         assert!(parse("[steps.ci2]\nimage = \"x\"\ncommands = [\"y\"]\n").is_ok());
     }
 
-    // 010 T002 (test-first, `#[ignore = "test-first"]`). FR-001 to FR-004, FR-007, FR-009; I4.
+    // 010 T002. FR-001 to FR-004, FR-007, FR-009; I4.
     // Planned: `Pipeline::secret_names(&self) -> Vec<String>` (sorted, each once),
     // `Pipeline::unlisted(&self, &[String]) -> Vec<(String, String)>` (`(step, name)` of every name not
     // byte-equal to an entry), `Pipeline::docker_secret_problems(&self) -> Vec<String>` (empty when fine).
@@ -542,7 +570,6 @@ commands = ["x"]
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn secret_names_returns_each_name_once_sorted() {
         let p = made(&[
             ("b", vec!["ZED_KEY", "ALPHA_KEY"], false),
@@ -556,7 +583,6 @@ commands = ["x"]
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn unlisted_is_empty_when_every_name_is_allowed() {
         let p = made(&[("a", vec!["ONE_KEY", "TWO_KEY"], false), ("b", vec!["ONE_KEY"], false)]);
         assert!(p.unlisted(&allow(&["TWO_KEY", "ONE_KEY"])).is_empty());
@@ -565,7 +591,6 @@ commands = ["x"]
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn unlisted_reports_each_miss_with_its_step() {
         let p = made(&[("a", vec!["ONE_KEY", "TWO_KEY"], false), ("b", vec!["ONE_KEY"], false)]);
         // one allowed, one listed
@@ -583,7 +608,6 @@ commands = ["x"]
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn unlisted_compares_bytes_so_a_case_difference_is_a_miss() {
         let p = made(&[("a", vec!["SITE_API_KEY"], false)]);
         for near in ["site_api_key", "Site_Api_Key", "SITE_API_KEY_", "SITE_API_KE", "SITE_API_KEY "] {
@@ -594,7 +618,6 @@ commands = ["x"]
 
     // I4: empty if and only if the names are a subset; a bigger allowlist never adds a miss.
     #[test]
-    #[ignore = "test-first"]
     fn unlisted_is_empty_iff_names_are_a_subset_and_growing_never_adds() {
         let p = made(&[("a", vec!["ONE_KEY", "TWO_KEY"], false), ("b", vec!["THREE_KEY"], false)]);
         let universe = ["ONE_KEY", "TWO_KEY", "THREE_KEY", "FOUR_KEY"];
@@ -616,7 +639,6 @@ commands = ["x"]
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn docker_secret_problems_flags_secrets_with_any_docker_step() {
         // one step that has both
         assert!(!made(&[("a", vec!["ONE_KEY"], true)]).docker_secret_problems().is_empty());
@@ -636,7 +658,6 @@ commands = ["x"]
     }
 
     #[test]
-    #[ignore = "test-first"]
     fn each_runner_setting_is_refused_in_a_step() {
         for name in [
             "FACTORY_CI_TOKEN",
