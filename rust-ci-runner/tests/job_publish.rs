@@ -1216,9 +1216,8 @@ fn archive_lines_for_missing_empty_symlinked_garbage_and_oversized() {
     w.rm("docker/img/image-amd64.tar");
     std::os::unix::fs::symlink("real.tar", w.built.join("docker/img/image-amd64.tar")).unwrap();
     let o = w.run(|_| {});
-    let (state, text) = w.last();
-    assert_eq!(state, "error", "{}", out_text(&o));
-    assert!(ARCHIVE_LINES.contains(&text.as_str()), "{text}");
+    // T046: the after-build check skips regular files only, so the link fails `layout`.
+    w.ended(&o, "failure", "check failed: layout");
     w.nothing_published();
 
     let w = W::new();
