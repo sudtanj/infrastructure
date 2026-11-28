@@ -2801,4 +2801,27 @@ echo "$SITE_API_KEY" | base64 -w 0
         );
         assert_public(&w);
     }
+
+    /// US1 scenario 1: the entry allows three names, the store holds each once, one step lists all three.
+    #[test]
+    fn three_names_in_one_step_all_reach_it() {
+        let names = [KEY, K1, K2];
+        let vals = [VAL, V1, V2];
+        let store: Vec<(&str, &str)> = names.iter().copied().zip(vals).collect();
+        let w = world(&req(&names), &entry(MAIN, &names), &store);
+        assert_eq!(w.ok(), 0, "{}", w.stderr());
+        assert_eq!(w.bws_calls(), 1);
+        let (call, env) = (step_call(&w, "a"), step_env(&w, "a"));
+        for (n, v) in store {
+            assert!(pair(&call, "-e", n), "{n}: {call:?}");
+            assert!(env.contains(&format!("{n}={v}")), "{n}: {env:?}");
+            assert!(!w.text("docker.calls").contains(v), "{v} in argv");
+        }
+        assert!(
+            w.stdout().ends_with("[runner] pipeline passed\n"),
+            "{}",
+            w.stdout()
+        );
+        assert_public(&w);
+    }
 }
