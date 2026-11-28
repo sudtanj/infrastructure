@@ -1,17 +1,46 @@
 # Quickstart: validate feature 012
 
-Run these after the tasks are done. Contracts: `contracts/publish-step.md`, `contracts/image-project.md`. Rules: `data-model.md`.
+Run these after the tasks are done. Contracts: `contracts/publish-step.md`, `contracts/hub-api.md`, `contracts/image-project.md`. Rules: `data-model.md`.
 
-## 1. Owner setup (once, before the runner digest moves; spec A14)
+## 0. Owner spikes with the real token (T002), status codes only
 
-No agent touches a credential. The owner:
+The owner runs these with the Docker Hub token in a shell variable that is never echoed, and reports only the status codes. Use a throwaway repository name such as `spike-012`; delete it afterwards by hand.
 
-1. Creates a Docker Hub personal access token for account `sudtanj`: scope Read & Write (no delete, no admin), with an expiry.
-2. Creates the public repository `sudtanj/hello-static` on Docker Hub by hand (this also settles the default visibility). A push to a missing repository ends in `registry refused the token`.
-3. Creates a Bitwarden project that holds only this key, reachable only by the machine account behind `BWS_ACCESS_TOKEN_DOCKER`, and adds the secret with key `sudtanj/infrastructure/DOCKERHUB_TOKEN` (key `sudtanj/infrastructure:DOCKERHUB_TOKEN` if Bitwarden refuses `/`, see `FCI_KEY_SEP`). The repository variable `FACTORY_CI_BWS_PROJECT_DOCKER` names that project. Never paste the value anywhere else.
-4. Confirms `FACTORY_CI_TOKEN_DOCKER` covers `sudtanj/infrastructure` with Commit statuses read and write and Contents and Metadata read, and that it and `FACTORY_CI_TOKEN` belong to the same GitHub user (the plan reads statuses by user).
-5. Confirms the Environment `factory-ci-docker` is limited to `main` and has no required reviewers, and that `FACTORY_CI_BLOB_KEY_DOCKER` is set.
-6. Writes down the current value of `gh variable get RUNNER_IMAGE_DIGEST` (the rollback value).
+```
+# login: expect 200
+curl -s -o /tmp/hub.json -w '%{http_code}\n' -X POST https://hub.docker.com/v2/auth/token \
+  -H 'Content-Type: application/json' \
+  -d "{\"identifier\":\"sudtanj\",\"secret\":\"$HUB_TOKEN\"}"
+JWT=$(jq -r .access_token /tmp/hub.json)
+# probe a missing repository: expect 404 (a 401 here means the token cannot read repositories)
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $JWT" https://hub.docker.com/v2/repositories/sudtanj/spike-012/
+# create it public: expect 201 (a 401 or 403 means a Read & Write token cannot create: owner decision)
+curl -s -o /dev/null -w '%{http_code}\n' -X POST https://hub.docker.com/v2/repositories/ \
+  -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
+  -d '{"namespace":"sudtanj","name":"spike-012","is_private":false}'
+# probe again: expect 200 and is_private false
+curl -s -H "Authorization: Bearer $JWT" https://hub.docker.com/v2/repositories/sudtanj/spike-012/ | jq .is_private
+```
+
+If the login answers 401 with a valid token, retry against `POST /v2/users/login` with `{"username":"sudtanj","password":"<token>"}` and report which endpoint works. The crane and mirror spikes of research.md use the same throwaway repository.
+
+## 1. Owner setup (once, before the runner digest moves; spec A14), names only
+
+The two keys already exist. The owner confirms, without printing a value:
+
+1. The project `FACTORY_CI_BWS_PROJECT_DOCKER` names holds exactly the keys `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`, readable by the machine account behind `BWS_ACCESS_TOKEN_DOCKER`. No agent can check this: `bws secret list` returns values, so a names-only read does not exist. The owner runs:
+
+```
+bws secret list "$PROJECT" -o json | jq -r '.[].key' | grep -Ex 'DOCKERHUB_(USERNAME|TOKEN)'
+```
+
+Expected: two lines, once each.
+2. The Docker Hub token has Read & Write scope, no delete and no admin, with an expiry, plus whatever the T002 result says repository creation needs.
+3. `FACTORY_CI_TOKEN_DOCKER` covers `sudtanj/infrastructure` with Commit statuses read and write and Contents and Metadata read, and it and `FACTORY_CI_TOKEN` belong to the same GitHub user (the plan reads statuses by user).
+4. The Environment `factory-ci-docker` is limited to `main` and has no required reviewers, and `FACTORY_CI_BLOB_KEY_DOCKER` is set.
+5. The current value of `gh variable get RUNNER_IMAGE_DIGEST` is written down (the rollback value).
+
+The owner no longer creates the repository: the runner does.
 
 ## 2. Unit and integration tests (selftest)
 
@@ -34,7 +63,7 @@ Expected: `ok`.
 
 ## 5. End-to-end (SC-001, SC-003, SC-006, SC-007)
 
-1. Wait for a tick. It posts `factory-ci/docker/hello-static` on the `main` tip: built, checked, pushed.
+1. Wait for a tick. It posts `factory-ci/docker/hello-static` on the `main` tip: built, checked, repository created public if missing, pushed.
 2. From a machine with no Docker Hub login:
 
 ```
@@ -43,11 +72,12 @@ docker buildx imagetools inspect sudtanj/hello-static:latest
 docker buildx imagetools inspect sudtanj/hello-static:sha-<first 12 hex of the tip>
 ```
 
-Expected: both digests equal, and each lists exactly `linux/amd64` and `linux/arm64`.
+Expected: both digests equal, and each lists exactly `linux/amd64` and `linux/arm64`. The pull works without login only if the repository is public: that is what the runner's creation and probe guarantee.
 3. Pull and run on an amd64 host and on an arm64 host. Each prints the fixed line.
-4. Search the public run log of the item and the commit status text for the token value and for `dckr_pat_`: zero hits.
+4. Search the public run log of the item and the commit status text for the token value and for `dckr_pat_`: zero hits. `sudtanj` shows as `***` in later lines of the job log because the script masks the username; that is expected.
 5. Break the Dockerfile on a branch (remove a digest). The selftest fails on `repo_files::docker_folders_pass_the_static_check`. Merged by mistake, the tick posts `failure` `check failed: from-unpinned` and pushes nothing. Remove `--platform=$BUILDPLATFORM` from the builder: `check failed: emulation`.
 6. Before the first release, check each pinned base: `docker buildx imagetools inspect <ref>@sha256:<digest>` for the Go builder, distroless and `docker:cli` lists both platforms (FR-028).
+7. Set a repository private on Docker Hub by hand and run the next publish of it: the status is `publish refused: repository is private` and nothing changed. Set it back.
 
 ## 6. Post-publish check (SC-007), after every tick that ran a `docker/` change
 
@@ -55,7 +85,7 @@ Expected: both digests equal, and each lists exactly `linux/amd64` and `linux/ar
 
 ## 7. Rollback
 
-1. `gh variable set RUNNER_IMAGE_DIGEST --body <value from step 1.6>`. The next tick runs 0.3.0: `docker/` is not discovered, nothing publishes.
-2. Delete the published tags on Docker Hub by hand if they must go; the runner never deletes any.
-3. Revoke the Docker Hub token and delete the Bitwarden key.
-4. Revert the `allow_docker` line of `.github/factory-ci-repos.toml` in a separate reviewed PR.
+1. `gh variable set RUNNER_IMAGE_DIGEST --body <value from step 1.5>`. The next tick runs 0.3.0: `docker/` is not discovered, nothing publishes.
+2. Delete the published tags, and any repository the runner created, on Docker Hub by hand if they must go; the runner never deletes any.
+3. Revoke the Docker Hub token.
+4. Revert the `allow_docker` and `secrets` lines of `.github/factory-ci-repos.toml` in a separate reviewed PR (with the `secrets` lines gone, the repo-files test returns to "no secrets").

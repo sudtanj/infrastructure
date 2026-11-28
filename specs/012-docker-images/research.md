@@ -12,7 +12,7 @@ Evidence is `file:line` on branch `012-docker-images`. Each decision answers one
 
 **What the frozen script offers.** Lines 46-66 run the runner in prepare mode (`--names-file`); lines 68-101 fetch every name that file lists from the docker Bitwarden project and `export` it into the real run's environment. Feature 010 emptied it: `job.rs:599-624` always writes an empty names file, `plan.rs:310` sets `secrets_ok: false` on every row, and `job.sh:69` refuses a non-empty list when `secrets_ok` is not `true`. All three are Rust, so they change without touching a script or YAML.
 
-**Decision (lead, 2026-11-28).** Use the names-file route, narrowed to one case: prepare lists `DOCKERHUB_TOKEN` only for a `docker/<image>` row on `main` whose check passes; the plan sets `secrets_ok` only for those rows; the script fetches `sudtanj/infrastructure/DOCKERHUB_TOKEN` (`factory-ci-secrets.sh:71`, the entry has `id`), masks it (`fci_mask`) and exports it to the runner; the runner passes it on standard input to its push container. `Engine::command` (`engine.rs:173-186`) clears the environment of every child, so no step container or sidecar inherits it. `NO_JOB_SECRETS` (`job.rs:61`) still refuses a pipeline that lists a secret. The spec records this as a dated clarification and assumption A11; it keeps the owner's intent.
+**Decision (lead, 2026-11-28).** Use the names-file route, narrowed to one case: prepare lists `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` only for a `docker/<image>` row on `main` whose check passes; the plan sets `secrets_ok` only for those rows; the script fetches them as shared names (the entry lists them in `secrets`, D6), masks them (`fci_mask`) and exports them to the runner; the runner uses the token for two Docker Hub API calls from its own memory (D11) and passes it on standard input to its push container. `Engine::command` (`engine.rs:173-186`) clears the environment of every child, so no step container or sidecar inherits it. `NO_JOB_SECRETS` (`job.rs:61`) still refuses a pipeline that lists a secret. The spec records this as a dated clarification and assumption A11; it keeps the owner's intent.
 
 **Rejected.** The runner calls `bws` itself (no token in its environment); a new env or script line (banned); a GitHub secret (Constitution II); the manual `ci` command (it refuses docker steps, `ci.rs:127`).
 
@@ -49,8 +49,8 @@ Evidence is `file:line` on branch `012-docker-images`. Each decision answers one
 
 **Costs and open points.**
 
-- Reading statuses and posting `unchanged` and `invalid` use the docker token for the whole entry (`plan.rs:278`, `candidates` picks the API per entry), while plain rows post `pending` and the final status with the plain token. `walk::own` accepts only statuses by the user it read (`walk.rs:67`). With two different GitHub users every plain row would replan each tick. The owner confirms one user (T025) and the canary watches two ticks (T026). A fix in Rust (accept both users) is possible and rejected for now as scope.
-- If `FACTORY_CI_TOKEN_DOCKER` is unset, `plan_a` drops every `allow_docker` entry (`main.rs:100-120`): the repo stops being planned. T025 confirms the secret.
+- Reading statuses and posting `unchanged` and `invalid` use the docker token for the whole entry (`plan.rs:278`, `candidates` picks the API per entry), while plain rows post `pending` and the final status with the plain token. `walk::own` accepts only statuses by the user it read (`walk.rs:67`). With two different GitHub users every plain row would replan each tick. The owner confirms one user (T028) and the canary watches two ticks (T029). A fix in Rust (accept both users) is possible and rejected for now as scope.
+- If `FACTORY_CI_TOKEN_DOCKER` is unset, `plan_a` drops every `allow_docker` entry (`main.rs:100-120`): the repo stops being planned. T028 confirms the secret.
 - Other branches are not planned at all. FR-006 becomes "the static check as a test".
 
 **Branch validation of `docker/*`.** `tests/repo_files.rs` runs `image::check` over every folder under `docker/` and the selftest runs `cargo test --test '*'` (`factory-ci-selftest.yml:77-79`). Its trigger paths are `rust-ci-runner/**`, `.github/workflows/factory-ci*.yml`, `.github/workflows/factory-monorepo-ci.yml`, `.github/factory-ci-repos.toml` and `.github/scripts/**`: `docker/**` is not listed. A push that changes only `docker/` does not start it, and no YAML edit is allowed. Known limit, recorded in the spec (FR-006), plan (K4) and README. The check on `main` still blocks a publish.
@@ -76,11 +76,32 @@ Evidence is `file:line` on branch `012-docker-images`. Each decision answers one
 
 **Rules (lead decision 3).** Full table in `data-model.md`: instruction allowlist (`FROM ARG ENV WORKDIR COPY RUN USER ENTRYPOINT CMD LABEL EXPOSE`; `ADD`, `ONBUILD` and the rest refused); heredoc bodies skipped only for `RUN` and `COPY`, `<<` refused elsewhere; `COPY --from=` and `RUN --mount=...from=` only an earlier stage name or index; directives matched case-insensitively with optional spaces; every `FROM` pinned or `scratch` or a stage; no `ARG` in `FROM`; `RUN` only in a `--platform=$BUILDPLATFORM` stage; final stage `scratch` or `gcr.io/distroless/*` without `debug`, numeric non-zero `USER`, exec-form `CMD` and `ENTRYPOINT`; credential names and token shapes; secret flags and mounts; pipeline `env`, `secrets`, commands and pinned step `image`. The check is review help, not a barrier (R12).
 
-## D6. Bitwarden key names
+## D6. Bitwarden key names (owner change 2026-11-28)
 
-One key: `DOCKERHUB_TOKEN`. `valid_secret_name` (`pipeline.rs:49-91`) accepts it: letters and `_`, and no reserved prefix matches (`DOCKER_` has an underscore after `DOCKER`). The script's own regex is `^[A-Za-z_][A-Za-z0-9_]*$` (`job.sh:63`). The stored key is `sudtanj/infrastructure/DOCKERHUB_TOKEN` in the project `FACTORY_CI_BWS_PROJECT_DOCKER` names (`FCI_KEY_SEP` default `/`, `factory-ci-secrets.sh:11`). The project holds only this key and is reached only by the machine account behind the docker store token (lead decision 7).
+Two keys, both shared names, already stored by the owner in the project `FACTORY_CI_BWS_PROJECT_DOCKER` names: `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`. `valid_secret_name` (`pipeline.rs:49-91`) accepts both: letters and `_`, no reserved prefix (`DOCKER_` has an underscore after `DOCKER`; the exact reserved name `USER` does not match `DOCKERHUB_USERNAME`). The script's own regex is `^[A-Za-z_][A-Za-z0-9_]*$` (`job.sh:63`).
 
-**No username key.** A username in Bitwarden would be masked by the script (`fci_mask`) and would blank `sudtanj` from every public log. The namespace is the constant `sudtanj` and the login name is the same constant. If the Docker Hub login differs from the namespace, login fails with `registry refused the token`.
+**Shared route, not the repo-own key.** `fci_lookup` (`factory-ci-secrets.sh:69-80`) tries `<repo><SEP><NAME>` only when the row's `repo_id` is set, then the bare key `NAME` only when the row's shared list contains `NAME`. The row field `secrets` is `entry.secrets.join(" ")` (`plan.rs:311`; `job.sh:35,77`). The `sudtanj/infrastructure` entry therefore lists both names. The repo-own key is absent, so the shared key is used.
+
+**010's rule that the entry has no `secrets`.** `tests/repo_files.rs:infrastructure_entry_has_no_secrets` (010 FR-016) changes to allow exactly these two names for this entry and nothing else, and a new assertion requires no `secret_branches`. Reason recorded in the test: the frozen script resolves shared names only from the entry's list, so the two names must be there.
+
+**What the entry's `secrets` unlocks.**
+
+- Manual `ci` path: `ci.rs:224` sets `ref_may_hold_secrets = entry.secrets_allowed_on(ref)`; `watch.rs:39-43` returns false when `secret_branches` is `None`; `ci.rs:225-231` then keeps no step-secret row (`keep` is empty); `ci.rs:385-391` refuses a pipeline that lists a secret. The entry has no `secret_branches`, so nothing is unlocked. A new `ci_tests` case pins it, and the repo-files test keeps `secret_branches` absent.
+- Tick: every row of the repo carries the list in its blob, but the script fetches only names the runner's prepare mode lists, and prepare lists them only for a passing `docker/<image>` row on `main`. `NO_JOB_SECRETS` still refuses a pipeline that lists a secret.
+
+**Value floors.** The script refuses a line under 4 characters (`factory-ci-secrets.sh:103-110`, `job.sh:81`); `sudtanj` has 7. The runner's own floor of 8 characters (`store.rs:175-189`, `usable_secret`) belongs to the `ci` path's store fetch and is not on the tick route: the runner reads the exported variable directly. Decision: the runner does not treat the username as a secret. It is never registered with a redactor, has no floor of its own, is compared with the namespace constant `sudtanj` and used only for the login. A username that differs ends the publish with `publish refused: login is not the namespace` and no value is printed; an empty one with `publish refused: no login name`. Tested in `publish_tests.rs` and `job_publish.rs`. The script does mask it in the Actions log (`fci_mask`, `job.sh:99`), so `sudtanj` shows as `***` in later lines of that job; statuses and the runner's own output are unaffected.
+
+## D11. Creating the repository (owner change 2026-11-28)
+
+**Where.** In the runner process with `ureq`, already a dependency with TLS (`Cargo.toml`). No child process, so the token is in no argv or env of a child; the login body is the only request that carries it. Options compared: a pinned container with `curl` would put the token on stdin as well but adds an image and a shell script; the `crane` container has no Hub API tool. `ureq` is the smallest change and is testable against a `tiny_http` fake (already a dev-dependency).
+
+**Calls.** Login (`POST /v2/auth/token`), probe (`GET /v2/repositories/<ns>/<name>/`), create (`POST /v2/repositories/` with `is_private: false`), probe again. Full mapping in `contracts/hub-api.md`. Status codes map to fixed lines; the only fields read are `access_token` and `is_private`.
+
+**Probe errors are not "bad token" (devops finding 2).** The login is the credential test: only a 401 on it is `registry refused the token`. After a successful login a 404 on the probe means the repository is missing (the create case) and a 401 or 403 on the probe or the creation is a scope problem with its own line.
+
+**Existing private repository.** Fixed line, nothing changed (lead decision 2).
+
+**Not verified, an owner item if it fails.** Whether a Read & Write personal access token can create a repository through the API, and whether `/v2/auth/token` accepts it (fallback `/v2/users/login`). T002 has the owner run the calls and report status codes only. If a broader scope is needed, that is a scope decision for the owner, not a workaround (spec R13).
 
 ## D7. Runner release and digest
 
@@ -124,7 +145,7 @@ An `error` older than 30 minutes and not marked `(retry)` runs once more (`walk.
 
 **Supply chain (lead decision 5).** The Go builder is `mirror.gcr.io/library/golang:<supported>@sha256:<index digest>` with `GOTOOLCHAIN=local`, so the sidecar's pull avoids the anonymous Docker Hub limit and Go downloads no toolchain. The Dockerfile passes the check (`from-unpinned` accepts the digest). `docker/README.md` names the digest refresh routine.
 
-## Spike left to the engineer (T001)
+## Spike left to the owner and the engineer (T002)
 
 Not verifiable on this VM. Use a throwaway Docker Hub repository the owner creates.
 
@@ -132,3 +153,4 @@ Not verifiable on this VM. Use a throwaway Docker Hub repository the owner creat
 2. `crane push <tar> <repo>@sha256:<digest>` is accepted by Docker Hub. If refused, the fallback is a temporary tag per platform image, which breaks FR-017 and needs a spec decision: report to the lead, do not improvise (plan K1).
 3. `crane:debug` carries `sh`, and `crane index append` fills the platform from the config.
 4. `mirror.gcr.io/library/golang@sha256:<index digest>` pulls by digest from the sidecar.
+5. Docker Hub API (owner runs, status codes only, quickstart 0): `POST /v2/auth/token` accepts the Read & Write token as `secret`; `POST /v2/repositories/` with the returned token creates a public repository; a probe of a missing repository answers 404 and not 401. If any answer differs, the fallback endpoint or a broader scope is an owner decision (spec R13).

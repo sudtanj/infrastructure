@@ -6,7 +6,7 @@ The frozen script `.github/scripts/factory-ci-job.sh` reads `F` (lines 60-66). E
 
 | Condition | Content of `F` |
 |---|---|
-| project is `docker/<image>`, branch is `main`, `image::check` returns no id | `DOCKERHUB_TOKEN\n` |
+| project is `docker/<image>`, branch is `main`, `image::check` returns no id | `DOCKERHUB_USERNAME\nDOCKERHUB_TOKEN\n` |
 | anything else, including a failing check | empty |
 
 The prepare run never fails on a check; the real run reports it as `failure`. A pipeline that lists any secret still ends prepare with `NO_JOB_SECRETS` (`job.rs:615-617`) before this table applies.
@@ -14,12 +14,12 @@ The prepare run never fails on a check; the real run reports it as `failure`. A 
 The script then needs, and the plan row provides:
 
 - `secrets_ok == true` (`job.sh:69`). `plan.rs` sets it from `image::publishes(project, branch)` and `false` otherwise.
-- a non-empty `repo_id` so the key `sudtanj/infrastructure/DOCKERHUB_TOKEN` is looked up (`factory-ci-secrets.sh:71`). The entry in `.github/factory-ci-repos.toml` has `id`.
+- the shared names in the row: the row field `secrets` is the entry's `secrets` joined by spaces (`plan.rs:311`), and `fci_lookup` resolves a bare key `NAME` only when the field lists it (`factory-ci-secrets.sh:72-75`, `job.sh:77`). The entry therefore carries `secrets = ["DOCKERHUB_USERNAME", "DOCKERHUB_TOKEN"]`. The repo-own key form `sudtanj/infrastructure/NAME` is tried first and is absent, so the shared key is used. Each key must exist once in the project; a line under 4 characters is refused by the script (`job.sh:81`), the username has 7.
 - the docker store access token in the step environment (`factory-ci-tick.yml:292`) and the project in `FACTORY_CI_BWS_PROJECT` (`factory-ci-tick.yml:296`).
 
-Failures the script reports itself, as fixed commit-status lines: `secret DOCKERHUB_TOKEN not found`, `secret DOCKERHUB_TOKEN is ambiguous`, `secret store rejected the token`, `secret store unreachable`.
+Failures the script reports itself, as fixed commit-status lines: `secret <NAME> not found`, `secret <NAME> is ambiguous`, `secret <NAME> has a line under 4 characters`, `secret store rejected the token`, `secret store unreachable`.
 
-The real run's environment then holds `DOCKERHUB_TOKEN` and nothing of the store token (`job.sh:115`). `Engine::command` clears the environment of every child (`engine.rs:173-186`), so no container the runner starts inherits it.
+The real run's environment then holds `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` and nothing of the store token (`job.sh:115`). `Engine::command` clears the environment of every child (`engine.rs:173-186`), so no container the runner starts inherits it.
 
 ## 2. Publish function
 
@@ -29,12 +29,13 @@ Steps, in this order, each failure a fixed line (data-model.md "Status texts"):
 
 1. `publishes(project, branch)`; else return before any env read, engine call or API call.
 2. `image::check` again on the files now on disk; a failing id gives `failure` `check failed: ...`.
-3. `var(env, "DOCKERHUB_TOKEN")` present and non-empty (read here, kept in memory).
+3. `var(env, "DOCKERHUB_TOKEN")` present and non-empty, and `var(env, "DOCKERHUB_USERNAME")` present (`publish refused: no login name`) and equal to `NAMESPACE` (`publish refused: login is not the namespace`; no value printed). Both are kept in memory; the username is used only for this comparison and the login and is never registered with a redactor.
 4. Both archives of `PLATFORMS` exist in `dir`, each a regular file (`symlink_metadata`), size 1 byte to `ARCHIVE_MAX`.
 5. `archive::read_config` of each archive; user, entrypoint and platform rules of data-model.md "Archive config".
 6. Tip read 1: `api.branches(repo)`, the entry named `main`. Error or no entry gives `tip of main unreadable`, nothing started.
 7. Teardown: `engine.cleanup_run(run_id)` stops and removes the sidecar, every container of the run, the run's networks and its volumes (`engine.rs:240-266`). Then `engine.run_left(run_id)` must be false, else `publish refused: sidecar still running`.
-8. Fresh directory under `RUNNER_TEMP`, mode 0700, new name. Move both archives into it (`rename`; a copy when `rename` fails). It holds nothing else.
+8. `hub::ensure_public` (contracts/hub-api.md): login, probe, create a missing repository as public, verify. Runs in the runner process; its errors end the item with its fixed lines before any publish container starts.
+8b. Fresh directory under `RUNNER_TEMP`, mode 0700, new name. Move both archives into it (`rename`; a copy when `rename` fails). It holds nothing else.
 9. Container A. Then, only when tip 1 equals the commit, tip read 2; error gives `tip of main unreadable` with the `sha-` tag in place; equal runs container B. Otherwise `published sha-<12>, not latest`.
 10. Remove the fresh directory. The caller's final `cleanup_run` removes the publish containers.
 
@@ -80,7 +81,7 @@ The runner takes the last stdout line of A that starts with `INDEX `, runs `publ
 
 ## 3. Redaction
 
-Every `Redactor` that can see the run includes `DOCKERHUB_TOKEN` and the base64 of `sudtanj:<token>` (the form a docker config holds). That covers the `creds` passed to `post` (`job.rs:727`) and the log built in `attempt` (`job.rs:520-530`).
+Every `Redactor` that can see the run includes `DOCKERHUB_TOKEN`, the base64 of `sudtanj:<token>` and the Hub login access token. It does not include `DOCKERHUB_USERNAME`: a username is not confidential, and registering a 7-character value would only blank `sudtanj` from statuses. The script does mask it in the Actions log (the form a docker config holds). That covers the `creds` passed to `post` (`job.rs:727`) and the log built in `attempt` (`job.rs:520-530`).
 
 ## 4. What a user-written step sees
 

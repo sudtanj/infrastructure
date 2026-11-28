@@ -8,7 +8,7 @@ docker/<image>/
   <sources the Dockerfile copies>
 ```
 
-The owner creates the public Docker Hub repository `sudtanj/<image>` by hand before the first publish (spec A5).
+The runner creates the public Docker Hub repository `sudtanj/<image>` itself when it is missing (spec FR-016); the owner does nothing per image.
 
 ## `.factory-ci.toml` (one step, no check step, no secrets)
 
@@ -58,7 +58,7 @@ What the image is, how to pull it (`docker pull sudtanj/<image>:latest`, both ar
 
 ## `docker/README.md`
 
-How to add an image (three files, the owner creates the repository), and the refresh routine: when a base gets a security fix, the owner resolves the new index digest (`docker buildx imagetools inspect`), edits the `FROM` lines and the step image, and merges; the commit rebuilds and republishes. Pins carry their source tag in a comment.
+How to add an image (three files; the runner creates the public repository), and the refresh routine: when a base gets a security fix, the owner resolves the new index digest (`docker buildx imagetools inspect`), edits the `FROM` lines and the step image, and merges; the commit rebuilds and republishes. Pins carry their source tag in a comment.
 
 ## Failure examples (fixtures for tests)
 

@@ -14,12 +14,14 @@ Decided, folded into spec, plan, tasks and contracts:
 4. **Check hardening.** Instruction allowlist, heredoc and `--from` rules, case-insensitive directives, pinned pipeline step images.
 5. **Tags.** `sha-<12 hex>`. Reuse of an existing list compares child digests with the archives and fails on mismatch.
 6. **Supply chain.** Go builder from `mirror.gcr.io/library/golang:<supported>@sha256:<index digest>`, `GOTOOLCHAIN=local`.
-7. **Owner setup.** Public repository pre-created; token, Bitwarden project and Environment as in spec A14.
+7. **Owner setup.** The two keys `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` already sit in the Bitwarden project `FACTORY_CI_BWS_PROJECT_DOCKER` names, as shared names. The owner confirms the names, the token scope, the status token and the Environment (spec A14, T028). The owner no longer creates the repository.
+8. **Shared names (owner change).** The entry lists `secrets = ["DOCKERHUB_USERNAME", "DOCKERHUB_TOKEN"]` so the frozen script's shared route resolves them (`factory-ci-secrets.sh:69-80`; the row's `secrets` field is `entry.secrets.join(" ")`, `plan.rs:311`). 010's repo-files test that the entry has no `secrets` changes to allow exactly these two names. The entry has no `secret_branches`, so the manual `ci` path unlocks nothing (`watch.rs:39-43`, `ci.rs:224-231`, `ci.rs:385-391`); a test pins it. The username is not a secret to the runner: never in a redactor, no length floor, compared with the namespace `sudtanj` and used for the login. The script's floor is 4 characters (`factory-ci-secrets.sh:103-110`), and `sudtanj` has 7; the runner's 8-character floor (`store.rs:175-189`) applies to the `ci` path only and is not on this route. The script does mask the username in the Actions log (`***` for `sudtanj` in later lines of that job); statuses are unaffected.
+9. **Repository creation (owner change).** A missing `sudtanj/<image>` is created public by the runner through the Docker Hub API (`POST /v2/auth/token`, then `POST /v2/repositories/`) with `ureq`, already a dependency; the token stays in runner memory, in no argv or env of a child; an existing private repository stops the item with a fixed line. T002 checks the API accepts a Read & Write token; a broader scope is an owner item.
 
 Still open, none of them blocks starting work:
 
-- **K1, push by digest is unverified.** The publish writes platform images to `repo@sha256:<digest>` so that no extra tag exists. If Docker Hub refuses, the fallback is a temporary tag, which breaks FR-017. T001 checks it with a throwaway repository; a refusal goes back to the lead.
-- **K2, two tokens, one user.** The entry is now mixed: `plan.rs` reads statuses and posts `unchanged` and `invalid` with the docker token, while plain rows post `pending` and the final status with the plain token (`plan.rs:278` for `unchanged` and `invalid`, `plan.rs:455` for `pending`, field `Status.docker`). `walk::own` only trusts statuses made by the API user it read (`walk.rs:67`). If `FACTORY_CI_TOKEN` and `FACTORY_CI_TOKEN_DOCKER` belong to different GitHub users, every plain row of this repo is planned again every tick. T025 has the owner confirm one user; T026 watches two ticks.
+- **K1, push by digest is unverified.** The publish writes platform images to `repo@sha256:<digest>` so that no extra tag exists. If Docker Hub refuses, the fallback is a temporary tag, which breaks FR-017. T002 checks it with a throwaway repository; a refusal goes back to the lead.
+- **K2, two tokens, one user.** The entry is now mixed: `plan.rs` reads statuses and posts `unchanged` and `invalid` with the docker token, while plain rows post `pending` and the final status with the plain token (`plan.rs:278` for `unchanged` and `invalid`, `plan.rs:455` for `pending`, field `Status.docker`). `walk::own` only trusts statuses made by the API user it read (`walk.rs:67`). If `FACTORY_CI_TOKEN` and `FACTORY_CI_TOKEN_DOCKER` belong to different GitHub users, every plain row of this repo is planned again every tick. T028 has the owner confirm one user; T029 watches two ticks.
 - **K3, retry after a written list.** A rebuild is not byte-identical, so a retry that finds the `sha-` list already written fails the digest comparison (`existing tag differs from this build`) instead of finishing `latest`. The next commit publishes. A reproducible build would lift this; it is out of scope.
 - **K4, selftest does not cover `docker/**`.** `factory-ci-selftest.yml` triggers on `rust-ci-runner/**`, workflow, script and watch-list paths only. A push that changes nothing but `docker/` does not start it, and the YAML cannot change. Known limit (spec FR-006). The check on `main` still blocks a publish.
 - **K5, 011 overlap.** `plan.rs`, `job.rs`, `engine.rs`, `projects.rs` are also large diffs on `011-ci-state-queue`. Whichever branch merges second rebases. 012 needs the tick and the `job.sh` names-file contract as on `main`.
@@ -34,9 +36,10 @@ Add `docker/<image>/` folders that the existing tick finds on `main`, builds in 
 2. `image.rs`: the check, run before the build and again inside publish. Allowlist parser; refuses any `RUN` outside a `--platform=$BUILDPLATFORM` stage because arm64 is cross-compiled, never emulated.
 3. `archive.rs`: reads the image config of a `docker save` tarball (user, entrypoint, platform).
 4. `engine.rs`: `capture_in` (a child with the standard input fed) and `run_left`.
-5. `publish.rs`: after the pipeline, tear the sidecar down, verify both archives, read the tip of `main`, push both platform images by digest and write the manifest list in one registry write from a `crane` container that receives the token on standard input, check the list with `verify_index`, tag `latest` only when the commit is still the tip.
+5. `hub.rs`: a Docker Hub API client on `ureq` that logs in and creates a missing public repository (never changes an existing one).
+6. `publish.rs`: after the pipeline, tear the sidecar down, verify both archives, read the tip of `main`, ensure the repository, push both platform images by digest and write the manifest list in one registry write from a `crane` container that receives the token on standard input, check the list with `verify_index`, tag `latest` only when the commit is still the tip.
 
-Toml: `allow_docker = true` on the `sudtanj/infrastructure` entry; `branches` unchanged. Runner `0.3.0` to `0.4.0`; the owner sets `RUNNER_IMAGE_DIGEST` after the release. That variable is the switch and the rollback.
+Toml: `allow_docker = true` and `secrets = ["DOCKERHUB_USERNAME", "DOCKERHUB_TOKEN"]` on the `sudtanj/infrastructure` entry; `branches` unchanged. Runner `0.3.0` to `0.4.0`; the owner sets `RUNNER_IMAGE_DIGEST` after the release. That variable is the switch and the rollback.
 
 ## Technical Context
 
@@ -62,7 +65,7 @@ Toml: `allow_docker = true` on the `sudtanj/infrastructure` entry; `branches` un
 
 | Principle | Result |
 |---|---|
-| I One home | Pass. Automation stays in `rust-ci-runner/` and `.github/`. The layout bullet of "Repository Structure and Constraints" gets `docker/` by a PATCH amendment (T023). |
+| I One home | Pass. Automation stays in `rust-ci-runner/` and `.github/`. The layout bullet of "Repository Structure and Constraints" gets `docker/` by a PATCH amendment (T026). |
 | II Secrets source | Pass. The token is in Bitwarden, fetched by the existing script, in no repo file. No new Actions secret or variable. |
 | III Nothing private in public logs | Pass. Statuses are fixed lines; the token is masked by the script, redacted in the runner, and never in argv or a container environment; crane output goes to `/dev/null`. |
 | IV Simplicity | Pass with the three items in Complexity Tracking. |
@@ -75,6 +78,7 @@ Toml: `allow_docker = true` on the `sudtanj/infrastructure` entry; `branches` un
 |---|---|---|
 | `crane` image const | Pushes two archives by digest and writes the list without a hand-written registry client | A `ureq` registry client is about 300 lines plus digest code |
 | `image.rs` Dockerfile parser with an allowlist | FR-009 to FR-011 and FR-029 need instructions, not text | A line grep fails heredocs, stages and `ADD` |
+| `hub.rs` Docker Hub client | The owner asked for automatic creation of a missing public repository; the runner has `ureq` and a token in memory | A `curl` container needs a pinned image and a shell script and puts the same token on standard input; no gain |
 | `archive.rs` tar header reader | FR-030 checks the image that will be pushed, not the Dockerfile that claims to build it | Trusting the Dockerfile leaves a `main` step free to write any archive |
 
 ## Architecture decision
@@ -99,21 +103,23 @@ All paths relative to the repo root. No path under `.github/workflows/` or `.git
 |---|---|
 | `rust-ci-runner/src/image.rs`, `image_tests.rs` | NEW. Constants, `image_project`, `publishes`, `name_ok`, parser, `check`; tests per rule and bypass. |
 | `rust-ci-runner/src/archive.rs`, `archive_tests.rs` | NEW. `read_config(path)`; tar built in the test. |
-| `rust-ci-runner/src/publish.rs`, `publish_tests.rs` | NEW. `publish`, `verify_index`; stub engine and fake `Api`. |
+| `rust-ci-runner/src/hub.rs`, `hub_tests.rs` | NEW. `ensure_public` over `ureq`; `tiny_http` fake. |
+| `rust-ci-runner/src/publish.rs`, `publish_tests.rs` | NEW. `publish`, `verify_index`; stub engine, fake `Api`, fake Hub. |
 | `rust-ci-runner/src/engine.rs` | `capture_in(args, env, input, limit, container)`; `capture` calls it with no input; `run_left(run_id)`. Tests in its `tests` module. |
-| `rust-ci-runner/src/lib.rs` | `pub mod image; pub mod archive; pub mod publish;` and test modules. |
+| `rust-ci-runner/src/lib.rs` | `pub mod image; pub mod archive; pub mod hub; pub mod publish;` and test modules. |
 | `rust-ci-runner/src/projects.rs`, `projects_tests.rs` | `find`, `discover` for `docker/<name>`; `project_path_ok`. |
 | `rust-ci-runner/src/plan.rs`, `plan_tests.rs`, `secret_names_tests.rs` | Row `allow_docker` and `secrets_ok` from `image::publishes`; tests. `walk.rs` does not change. |
 | `rust-ci-runner/src/job.rs`, `job_tests.rs` | `target()` uses `project_path_ok`; `secret_names` writes the token name; `attempt` runs the check and `publish`; `token_values` adds the token and its docker-auth base64. |
 | `rust-ci-runner/tests/common/mod.rs` | `Fake` answers `branches`; a `STUB_` hook for the crane output and stdin capture. |
 | `rust-ci-runner/tests/job_publish.rs` | NEW. Binary-level publish tests. |
 | `rust-ci-runner/tests/job_prepare.rs`, `job_rules.rs`, `no_vendor.rs` | Update "names file always empty" expectations. |
-| `rust-ci-runner/tests/repo_files.rs` | Static check over every `docker/` folder (FR-006), watch-entry facts, guarded FR-022 path test. |
+| `rust-ci-runner/tests/repo_files.rs` | Static check over every `docker/` folder (FR-006); the entry test that said "no secrets" now allows exactly the two names and requires no `secret_branches`; guarded FR-022 path test. |
+| `rust-ci-runner/src/ci_tests.rs` | One test: an entry with `secrets` and no `secret_branches` gives a `ci` run no step secret on any ref. |
 | `rust-ci-runner/tests/fixtures/image/` | NEW. Passing project and one failing fixture per rule and bypass. |
 | `rust-ci-runner/.factory-ci.toml` | Add `--test job_publish` to the integration command. |
 | `rust-ci-runner/Cargo.toml`, `Cargo.lock` | Version `0.4.0`. |
 | `rust-ci-runner/README.md`, `README.md` | Image projects, publish step, key name, residual risk, rollback. Last task. |
-| `.github/factory-ci-repos.toml` | `sudtanj/infrastructure`: add `allow_docker = true`; `branches` stays. |
+| `.github/factory-ci-repos.toml` | `sudtanj/infrastructure`: add `allow_docker = true` and `secrets = ["DOCKERHUB_USERNAME", "DOCKERHUB_TOKEN"]`; `branches` stays, no `secret_branches`. |
 | `docker/hello-static/{Dockerfile,hello.go,go.mod,README.md,.factory-ci.toml}`, `docker/README.md` | NEW first image and the refresh routine. |
 | `.specify/memory/constitution.md` | PATCH: add `docker/` to the layout bullet. |
 
@@ -128,7 +134,7 @@ All paths relative to the repo root. No path under `.github/workflows/` or `.git
 
 Feature folder for every brief: `specs/012-docker-images/`. Task IDs are in `tasks.md`. Every brief carries: the repo is public, no secret value in any file, tests run only in the runner pipeline, no workflow or script edit, no new crate.
 
-Parallel groups: **A** = S1, S2, S4, S5 (disjoint files). **B** = S6 after S1, S4, S5. **C** = S7 after A and B. **D** = S3, S8, S9, S10 after C. **E** = S12, owner steps and release, after D. S11 (docs) last, after S12 proves the feature.
+Parallel groups: **A** = S1, S2, S4, S5, S5a (disjoint files). **B** = S6 after S1, S4, S5, S5a. **C** = S7 after A and B. **D** = S3, S8, S9, S10 after C. **E** = S12, owner steps and release, after D. S11 (docs) last, after S12 proves the feature.
 
 ### S1. Check module (group A)
 
@@ -148,7 +154,7 @@ Parallel groups: **A** = S1, S2, S4, S5 (disjoint files). **B** = S6 after S1, S
 
 - **Goal**: the first image exists and the entry turns docker on for its rows.
 - **Files**: `.github/factory-ci-repos.toml`, `docker/hello-static/*`, `docker/README.md`.
-- **Acceptance**: the entry keeps `repo`, `id` and `branches = ["main"]`, gains `allow_docker = true`; `watch::parse` accepts it; `hello-static` passes `image::check`; the Dockerfile follows `contracts/image-project.md` with the pins of `pins.md` (index digests; builder `mirror.gcr.io/library/golang:<supported>@sha256:<index>`; `GOTOOLCHAIN=local`; `docker buildx imagetools inspect` lists both platforms for each, recorded in the task); the pipeline builds and saves both platforms and ends `chmod 0644 image-*.tar`; `docker/README.md` names the digest refresh routine.
+- **Acceptance**: the entry keeps `repo`, `id` and `branches = ["main"]`, gains `allow_docker = true` and `secrets = ["DOCKERHUB_USERNAME", "DOCKERHUB_TOKEN"]`; `watch::parse` accepts it (both names pass `valid_secret_name`); `hello-static` passes `image::check`; the Dockerfile follows `contracts/image-project.md` with the pins of `pins.md` (index digests; builder `mirror.gcr.io/library/golang:<supported>@sha256:<index>`; `GOTOOLCHAIN=local`; `docker buildx imagetools inspect` lists both platforms for each, recorded in the task); the pipeline builds and saves both platforms and ends `chmod 0644 image-*.tar`; `docker/README.md` names the digest refresh routine.
 - **Constraints**: safe to merge before the release: the 0.3.0 runner ignores `docker/` and the new flag only changes row routing (rollout step 2).
 
 ### S4. Engine additions (group A)
@@ -165,18 +171,25 @@ Parallel groups: **A** = S1, S2, S4, S5 (disjoint files). **B** = S6 after S1, S
 - **Acceptance**: reads `manifest.json` then the config member it names (both `blobs/sha256/<hex>` and `<hex>.json` forms) from a `docker save` tar by walking 512-byte headers and seeking past data; returns `os`, `architecture`, `user`, entrypoint and cmd; one image entry required; member size cap 1 MB; GNU long-name and PAX headers skipped; a truncated or garbage file, a missing member and a manifest naming a path that is not in the tar return fixed errors, never panic; tests build tars in memory.
 - **Constraints**: no new crate; no allocation proportional to the archive size.
 
+### S5a. Docker Hub API client (group A)
+
+- **Goal**: `hub::ensure_public(base, user, token, namespace, name) -> Result<(), &'static str>` per `contracts/hub-api.md`.
+- **Files**: `hub.rs`, `hub_tests.rs`, `lib.rs`.
+- **Acceptance**: against a `tiny_http` fake: login 401 gives `registry refused the token`; login ok then probe 200 public does nothing more; probe 200 private gives `publish refused: repository is private` and no create call; probe 404 then create 201 then a probe that shows public succeeds; create answered 400 or 409 (a race) is followed by a probe and succeeds when public; probe 401 or 403 with a valid login gives `docker hub api refused repository access` and never `registry refused the token`; create 401 or 403 gives `docker hub api refused repository creation`; create ok but the probe shows private gives `publish refused: repository is private`; any 5xx, a non-JSON body and a timeout give `docker hub api error`; response bodies never reach a returned string; the request bodies carry the token only in the login call; only the `access_token` and `is_private` fields are read; `base` other than `https://` or `http://127.0.0.1` is refused.
+- **Constraints**: `ureq` only, no new crate; 30-second timeout per call; no env or argv for the token; the token and the JWT are never in a `format!` that is returned or logged.
+
 ### S6. Publish step (group B)
 
 - **Goal**: `publish::publish` and `publish::verify_index` per `contracts/publish-step.md`.
 - **Files**: `publish.rs`, `publish_tests.rs`, `lib.rs`.
-- **Acceptance**: with a stub engine and a fake `Api`: not `main` or not an image project returns without an env read, engine call or API call; missing or empty token gives `publish refused: no token`; a missing, symlinked, empty or oversized archive gives the archive lines; an archive whose config has an empty, non-numeric or 0 user, a shell entrypoint or the wrong platform gives its fixed line and starts no container; an unreadable first tip pushes nothing; `run_left` true after teardown gives `publish refused: sidecar still running` and no container starts; teardown (`cleanup_run`) happens before the first publish container and before the token is read from the environment; the publish directory holds exactly the two archives and is mounted `:ro`; container argv holds no token and no `-e` for it, the client env holds none, the token bytes arrive only on standard input of containers A and B; exit 41, 43, 45, other codes and a timeout map as the contract says; a list whose children differ from the archives is `existing tag differs from this build` and container B never runs; `verify_index` cases of `data-model.md`; tip equal on both reads runs B, different gives `not latest`; repeat publish with equal digests ends in the same text.
+- **Acceptance**: with a stub engine, a fake `Api` and a fake Docker Hub: not `main` or not an image project returns without an env read, engine call, API call or Hub call; a missing or empty token gives `publish refused: no token`; an empty username gives `publish refused: no login name`; a username other than `sudtanj` gives `publish refused: login is not the namespace`, prints no value and starts nothing; a missing, symlinked, empty or oversized archive gives the archive lines; an archive whose config has an empty, non-numeric or 0 user, a shell entrypoint or the wrong platform gives its fixed line and starts no container; an unreadable first tip pushes nothing; `run_left` true after teardown gives `publish refused: sidecar still running` and no container starts; teardown (`cleanup_run`) happens before the first publish container and before the first Hub call; `hub::ensure_public` runs after teardown and before container A, and its errors end the item with its fixed lines and start no container; the publish directory holds exactly the two archives and is mounted `:ro`; container argv holds no token and no `-e` for it, the client env holds none, the token bytes arrive only on standard input of containers A and B; the username is in no redactor and not in `creds`; exit 41, 43, 45, other codes and a timeout map as the contract says; a list whose children differ from the archives is `existing tag differs from this build` and container B never runs; `verify_index` cases of `data-model.md`; tip equal on both reads runs B, different gives `not latest`; repeat publish with equal digests ends in the same text.
 - **Constraints**: `Engine::capture_in` for both containers, no `Command::new`; the crane image const is a full digest pin (test asserts `@sha256:` shape); uid and gid from `MetadataExt` of the publish directory; no token in a `format!` that reaches a `Done` text; captured stdout parsed, never logged.
 
 ### S7. Wire the job (group C)
 
 - **Goal**: `job.rs` runs the check, the pipeline and publish, and lists the token name.
 - **Files**: `job.rs`, `job_tests.rs`.
-- **Acceptance**: prepare mode: the names file is `DOCKERHUB_TOKEN\n` only for `publishes` plus a clean check, empty otherwise, `NO_JOB_SECRETS` still first; `attempt` runs the check before `prepare()` (`check failed: <ids>`, no container), runs the pipeline, then `publish` before the final `cleanup_run`; non-image projects behave as before; `token_values` gains the token and the base64 of `sudtanj:<token>`; a failing build step ends `failure` with fixed lines.
+- **Acceptance**: prepare mode: the names file is `DOCKERHUB_USERNAME\nDOCKERHUB_TOKEN\n` only for `publishes` plus a clean check, empty otherwise, `NO_JOB_SECRETS` still first; `attempt` runs the check before `prepare()` (`check failed: <ids>`, no container), runs the pipeline, then `publish` before the final `cleanup_run`; non-image projects behave as before; `token_values` gains the token and the base64 of `sudtanj:<token>`; a failing build step ends `failure` with fixed lines.
 - **Constraints**: do not log or `format!` the env value.
 
 ### S8. Integration tests (group D)
@@ -194,17 +207,17 @@ Parallel groups: **A** = S1, S2, S4, S5 (disjoint files). **B** = S6 after S1, S
 ### S10. Repo-file tests (group D)
 
 - **Files**: `tests/repo_files.rs`.
-- **Acceptance**: every folder under `docker/` has the three files, a kebab name and an empty `image::check` result (this is FR-006); the infra entry has `allow_docker` true, `branches == ["main"]`, no secrets; the FR-022 test runs `git diff --name-only <base>...HEAD` (`<base>` from `FACTORY_CI_BASE` or `origin/main`), fails on a path under `.github/workflows/` or `.github/scripts/`, and prints a skip line, not a pass, when git or the base is missing.
+- **Acceptance**: every folder under `docker/` has the three files, a kebab name and an empty `image::check` result (this is FR-006); the infra entry has `allow_docker` true, `branches == ["main"]`, `secrets` empty or exactly `["DOCKERHUB_USERNAME", "DOCKERHUB_TOKEN"]` (010 FR-016 relaxed for these two names because the script's shared route needs them in the entry; the test records why), no `secret_branches`; the FR-022 test runs `git diff --name-only <base>...HEAD` (`<base>` from `FACTORY_CI_BASE` or `origin/main`), fails on a path under `.github/workflows/` or `.github/scripts/`, and prints a skip line, not a pass, when git or the base is missing.
 - **Constraints**: stays out of the pipeline's integration command (the file's own comment says why).
 
 ### S11. Docs and repository description (last task, after S12)
 
 - **Files**: `README.md`, `rust-ci-runner/README.md`; the description by `gh repo edit sudtanj/infrastructure --description ...`.
-- **Acceptance**: the root README says what `docker/` is and how to add an image, both architectures, the owner steps (repository created by hand, token, key); the runner README documents the publish step, the check ids, `DOCKERHUB_TOKEN` and its key, the post-publish check, the rollback, and states the residual risk plainly: whoever controls a `main` build step can tamper with the host through the privileged sidecar and is effectively a token holder; `main` is owner-merged; the check is review help, not a barrier; a rootless BuildKit is the future fix, out of scope; it also amends the sentence that the tick hands no secret to a step (true for user steps, relaxed for the built-in publish). `gh repo view --json description` shows the description. Prose per `stop-slop`.
+- **Acceptance**: the root README says what `docker/` is and how to add an image, both architectures, the owner steps (the two Bitwarden keys, token scope), that the runner creates a missing public repository; the runner README documents the publish step, the check ids, `DOCKERHUB_TOKEN` and its key, the post-publish check, the rollback, and states the residual risk plainly: whoever controls a `main` build step can tamper with the host through the privileged sidecar and is effectively a token holder; `main` is owner-merged; the check is review help, not a barrier; a rootless BuildKit is the future fix, out of scope; it also amends the sentence that the tick hands no secret to a step (true for user steps, relaxed for the built-in publish). `gh repo view --json description` shows the description. Prose per `stop-slop`.
 
 ### S12. Release and end to end (owner plus engineer, after group D)
 
-- **Steps**: quickstart 1, 4, 5 and the post-publish check. The engineer tags; the owner holds Bitwarden, Docker Hub and variable steps.
+- **Steps**: quickstart 0 (owner spikes, T002), 1, 4, 5 and the post-publish check. The engineer tags; the owner holds Bitwarden, Docker Hub and variable steps.
 - **Acceptance**: SC-001, SC-003, SC-006 and SC-007 evidence in `tasks.md`.
 
 ## Test plan (qa runs this)
@@ -240,6 +253,10 @@ Parallel groups: **A** = S1, S2, S4, S5 (disjoint files). **B** = S6 after S1, S
 | `older_commit_pushes_sha_only`, `unreadable_tip_pushes_nothing`, `second_tip_read_fails_leaves_sha_tag` | FR-018 |
 | `repeat_publish_with_equal_digests_continues`, `existing_list_with_other_digests_errors` | FR-020 |
 | `no_tag_other_than_sha12_and_latest_is_ever_named` over every engine argv and env | FR-017, FR-026 |
+| `missing_repository_is_created_public_before_the_push`, `existing_private_repository_stops_the_item`, `probe_401_is_not_a_bad_token` (fake Hub; call order in the stub log) | FR-016 |
+| `login_name_must_equal_the_namespace_and_is_never_redacted_or_printed` | FR-031 |
+| `hub_requests_carry_the_token_only_in_the_login_body` (fake Hub request log; no argv, no env, no status text) | FR-015, FR-016 |
+| `repo_files::infrastructure_entry_lists_exactly_the_two_dockerhub_names_and_no_secret_branches` and `ci_tests::entry_secrets_without_secret_branches_unlock_nothing` | FR-023, 010 FR-010 |
 | `deleted_folder_makes_no_call`, `unchanged_commit_builds_nothing` (plan level) | FR-019, FR-005 |
 | `user_step_env_never_holds_token` (stub envs file) | FR-015, FR-024 |
 | `plain_rows_stay_in_the_plain_matrix` (plan level, `rust-ci-runner` row on `main` with the entry flag) | FR-023 |
@@ -255,7 +272,7 @@ Parallel groups: **A** = S1, S2, S4, S5 (disjoint files). **B** = S6 after S1, S
 |---|---|---|---|---|
 | Discovery | `docker/` too deep in a truncated tree | `discover` | extra tree read | `discover_truncated_tree_reads_docker` |
 | Rows | entry flag copied to a non-image row | `plan.rs` | only `docker/*` on `main` get it | `plain_rows_stay_in_the_plain_matrix` |
-| Rows | two tokens, two users (K2) | second tick re-plans a plain row | owner check T025, canary T026 | quickstart 4 |
+| Rows | two tokens, two users (K2) | second tick re-plans a plain row | owner check T028, canary T029 | quickstart 4 |
 | Check | Dockerfile unreadable, huge, not UTF-8, hostile syntax | `image::check` | named id, `failure` | S1 tests |
 | Prepare | check fails | `secret_names` | empty names, real run reports `failure` | prepare names table |
 | Token fetch | key missing, ambiguous, store down | script (`job.sh:78-86`) | `error`, the script's fixed line | E2E |
@@ -264,7 +281,12 @@ Parallel groups: **A** = S1, S2, S4, S5 (disjoint files). **B** = S6 after S1, S
 | Archive | missing, symlink, too big, unreadable | `publish` | `error`, no push | publish tests |
 | Archive | root user, shell entrypoint, wrong platform | `archive::read_config` | `error`, no push | `archive_with_root_user_...` |
 | Token | empty in env | `publish` | `error` `publish refused: no token` | publish tests |
-| Registry | 401, 403, repository missing | exit 41 | `error` `registry refused the token` | publish tests |
+| Hub | login rejected (401) | `hub::ensure_public` | `error` `registry refused the token`, nothing created or pushed | `hub_tests.rs` |
+| Hub | probe or create refused (401, 403) with a valid login | `hub::ensure_public` | `error` `docker hub api refused repository access` or `... creation`, an owner scope item (R13) | `probe_401_is_not_a_bad_token` |
+| Hub | repository exists and is private | probe shows `is_private` | `error` `publish refused: repository is private`, nothing changed | `existing_private_repository_stops_the_item` |
+| Hub | API down, 5xx, bad body, timeout | `hub::ensure_public` | `error` `docker hub api error`, one retry after 30 minutes | `hub_tests.rs` |
+| Login | username empty or not `sudtanj` | `publish` | `error` `publish refused: no login name` or `login is not the namespace`, no value printed | `login_name_must_equal_...` |
+| Registry | 401 or 403 on the push after the repository was ensured | exit 41 | `error` `registry refused the token` | publish tests |
 | Registry | network, rate limit | exit 42, 43, timeout | `error` `push failed`, one retry after 30 minutes | publish tests |
 | Index | list malformed or missing a platform | `verify_index` | `error` `image index incomplete`, `latest` untouched | `single_arch_or_bad_index_never_tags` |
 | Reuse | `sha-` list exists with other digests (K3) | exit 45 | `error` `existing tag differs from this build`, no tag moved | `existing_list_with_other_digests_errors` |
@@ -276,18 +298,18 @@ Parallel groups: **A** = S1, S2, S4, S5 (disjoint files). **B** = S6 after S1, S
 
 ## Pre-mortem
 
-1. **`crane` rejects a `docker save` tarball, refuses a push by digest, or `crane:debug` has no `sh`; or a pinned base is not an index so one platform fails.** Prevention: T001 runs the checks on a throwaway repository before any code depends on them; a push-by-digest refusal goes back to the lead (K1); base digests are checked with `imagetools inspect` (FR-028).
+1. **`crane` rejects a `docker save` tarball, refuses a push by digest, or `crane:debug` has no `sh`; or a pinned base is not an index so one platform fails.** Prevention: T002 runs the checks on a throwaway repository before any code depends on them; a push-by-digest refusal goes back to the lead (K1); base digests are checked with `imagetools inspect` (FR-028).
 2. **The token leaks.** Prevention: stdin only; no env, no argv, no mount; `env_clear` in `Engine::command`; the sidecar is gone before the containers start; archives are checked; crane output to `/dev/null`; redactor holds the token and its docker-auth base64; the canary test covers every engine call; non-image and failing-check runs never get the name.
-3. **Turning on `allow_docker` breaks the repo's own CI.** Likely: `FACTORY_CI_TOKEN_DOCKER` missing or unable to write statuses, so `plan_a` drops the repo (`main.rs:100-120`); or two users (K2). Prevention: owner checks in T025 before the digest moves; the canary tick watches two ticks; the toml line is safe to merge early; rollback is the digest variable plus a separate toml revert.
+3. **Turning on `allow_docker` breaks the repo's own CI.** Likely: `FACTORY_CI_TOKEN_DOCKER` missing or unable to write statuses, so `plan_a` drops the repo (`main.rs:100-120`); or two users (K2). Prevention: owner checks in T028 before the digest moves; the canary tick watches two ticks; the toml line is safe to merge early; rollback is the digest variable plus a separate toml revert.
 4. **A hostile or sloppy Dockerfile passes the check.** Prevention: allowlist, heredoc and `--from` rules, directives in any case, pinned step images, archive config check at publish; residual risk stated plainly (R12): the check is review help, `main` is owner-merged.
 5. **The release or pin goes wrong.** A bad `RUNNER_IMAGE_DIGEST` fails the tick guard (`factory-ci-tick.yml:42-44`) and every project stops. Prevention: set it only from the release workflow's printed digest; keep the old digest; canary before any image push.
 
 ## Invariants (qa turns these into property tests)
 
-- I1. `publish` makes zero reads of `DOCKERHUB_TOKEN`, zero engine calls and zero API calls for a non-image project or a ref other than `main`.
+- I1. `publish` makes zero reads of `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`, zero engine calls, zero API calls and zero Hub calls for a non-image project or a ref other than `main`.
 - I2. For every Dockerfile and pipeline, `check` returns sorted unique ids from the fixed set and never panics.
 - I3. A check that returns any id leads to zero push calls, whatever the pipeline did.
-- I4. The token value and the base64 of `sudtanj:<token>` appear in no argv, no environment of the client or of any container, no status text, no log line; they appear only as the standard input of containers A and B.
+- I4. The token value and the base64 of `sudtanj:<token>` appear in no argv, no Hub request except the login body, no environment of the client or of any container, no status text, no log line; they appear only as the standard input of containers A and B.
 - I5. `latest` is tagged only when the tip read in the same publish, twice, equals the commit.
 - I6. The `sha-` tag is written only by `crane index append`; `latest` only by `crane tag` of it; no other tag is ever named (`sha-` plus exactly 12 hex).
 - I7. `secrets_ok` and row `allow_docker` are true only for project `docker/*` on branch `main`, and only when the entry has `allow_docker`.
@@ -303,7 +325,7 @@ Parallel groups: **A** = S1, S2, S4, S5 (disjoint files). **B** = S6 after S1, S
 | Group | Answer |
 |---|---|
 | Inputs | Handled. Folder names 1, 2, 64, 65 characters; Dockerfile empty, 1 MB, NUL, invalid UTF-8, CRLF, BOM, heredocs, comment `FROM`, stage named like an image, hostile directives, `ADD`, `ONBUILD`, `--from` an external image (`image_tests.rs`); tar garbage and truncation (`archive_tests.rs`); a registry answer that is not JSON or has extra entries (`verify_index`). Duplicates: the same row twice is the existing dedupe. |
-| State | Handled. Repository must exist (owner creates it); no data; old runner ignores `docker/`. Crash mid-publish: stale pending plus the digest comparison. Partial failure: list written, `latest` fails (K3). Retry: reuse path with equal digests continues, unequal stops. |
+| State | Handled. A missing repository is created public by the runner, a private one stops the item (FR-016); no data; old runner ignores `docker/`. Crash mid-publish: stale pending plus the digest comparison. Partial failure: list written, `latest` fails (K3). Retry: reuse path with equal digests continues, unequal stops. |
 | Time and concurrency | Handled. Ticks are serialised (`factory-ci-tick.yml:9-11`); tip read twice; each publish container has a 10-minute limit; the pipeline has the 30-minute run deadline. Clock: no new time logic. An older commit pushes `sha-` only. |
 | Resources | Handled. Archives capped at 2 GiB each; publish containers `--memory 1g`, `--pids-limit 256`; the archives are moved, not copied; the directory is removed after publish; existing 10 MB log cap. Smallest machine: the GitHub VM, not the 1 GB planning VM. |
 | Permissions and trust | Handled. The token reaches only the runner process and two publish containers on stdin, only for a passing `docker/*` row on `main`. A user step never gets it. Residual risk R12: a `main` build step controls a privileged sidecar and is effectively a token holder; `main` is owner-merged. |
@@ -313,7 +335,7 @@ Parallel groups: **A** = S1, S2, S4, S5 (disjoint files). **B** = S6 after S1, S
 
 **Rollout, in order.**
 
-1. Owner setup (quickstart 1, spec A14). Record the current digest: `gh variable get RUNNER_IMAGE_DIGEST`.
+1. Owner setup (quickstart 1, spec A14): confirm the two key names, the token scope, the status token and the Environment. Record the current digest: `gh variable get RUNNER_IMAGE_DIGEST`.
 2. Merge the PR once the `factory-ci-selftest` result is green. The tick still runs the 0.3.0 runner: it does not see `docker/`, and `allow_docker` on the entry only moves the row routing, which the old runner treats as before. Check one tick.
 3. Tag `rust-ci-runner-v0.4.0` on the merge commit. Wait for the release workflow and record its digest.
 4. `gh variable set RUNNER_IMAGE_DIGEST --body sha256:<64 hex>`. No YAML edit: the tick reads `vars.RUNNER_IMAGE_DIGEST` (`factory-ci-tick.yml:37,57,133`).
@@ -322,7 +344,7 @@ Parallel groups: **A** = S1, S2, S4, S5 (disjoint files). **B** = S6 after S1, S
 **Rollback.**
 
 - Runner: `gh variable set RUNNER_IMAGE_DIGEST --body <the digest recorded in step 1>`. The next tick runs 0.3.0, discovers no `docker/` project, publishes nothing.
-- Docker Hub: delete the published tags by hand if needed (nothing in the runner deletes them), and revoke the Hub token.
+- Docker Hub: delete the published tags and any repository the runner created by hand if needed (nothing in the runner deletes them), and revoke the Hub token.
 - Toml: revert the `allow_docker` line in a separate reviewed PR.
 - Token: delete the Bitwarden key; every `main` image run then ends in `error` and pushes nothing.
 - No data migration exists.
@@ -334,14 +356,14 @@ Findings from the devops review and where this plan answers each.
 | Finding | Answer |
 |---|---|
 | Branch exposure would put every branch of `rust-ci-runner` and `ci-canary` on the docker job (blocker) | `branches = ["main"]` stays; rows narrowed (S2, I7) |
-| First push to a missing repository gives 401 | Owner pre-creates the public repository (A5, T025, FR-016) |
+| First push to a missing repository gives 401 | The runner creates the public repository first through the Docker Hub API (FR-016, S5a); a 401 or 403 on the probe or creation is a scope line, never "bad token"; T002 checks the scope a Read & Write token has |
 | Token in env or argv of the push | Standard input only (S4, S6, I4) |
 | Docker Hub pull limit for the Go builder | `mirror.gcr.io/library/golang` by digest (A13, T001 checks the mirror serves the digest) |
-| Environment and secrets of the docker path | Owner list in A14 and T025: Environment limited to `main`, `FACTORY_CI_BLOB_KEY_DOCKER` set, status token scope, same user for both tokens (K2) |
-| Post-publish confidence | SC-007 and task T027: after a tick with a docker change, `sha-<12 of the main tip>` exists; no answer counts as unknown |
+| Environment and secrets of the docker path | Owner list in A14 and T028: the two key names present in the docker project, token scope, status token coverage and same user for both tokens (K2), Environment limited to `main`, `FACTORY_CI_BLOB_KEY_DOCKER` set |
+| Post-publish confidence | SC-007 and task T030: after a tick with a docker change, `sha-<12 of the main tip>` exists; no answer counts as unknown |
 | Runner minutes | Each image builds twice inside the 30-minute run deadline; cross-compilation keeps both near native speed; only `docker/` rows use the docker job |
 
-Not verifiable here: the Environment's protection rules, the status token's scope, the user behind each token. T025 lists them for the owner.
+Not verifiable here: the Environment's protection rules, the status token's scope, the user behind each token. T028 lists them for the owner.
 
 ## Security assessment
 
@@ -361,8 +383,9 @@ Findings from the security review and where this plan answers each.
 ## Open risks
 
 - R-A the pipeline can still push any archive that passes the archive check; `main` is the owner's.
-- R-B `docker save`, `crane push` by digest and `crane index append` compatibility is untested until T001 and T027.
+- R-B `docker save`, `crane push` by digest and `crane index append` compatibility is untested until T002 and T030.
 - R-C `FACTORY_CI_TOKEN_DOCKER` scope, Environment protection and the two-user question are owner checks (K2).
+- R-G a Read & Write token may not be allowed to create a repository through the Docker Hub API (spec R13): T002 checks it before any code depends on it; a refusal is an owner decision on scope, and the runner reports `docker hub api refused repository creation` and pushes nothing.
 - R-D overlap with 011 (K5).
 - R-E a Docker ID that differs from the namespace makes login fail with `registry refused the token`.
 - R-F pinned images (`crane:debug`, `docker:cli`, builders) freeze until someone bumps the digest.

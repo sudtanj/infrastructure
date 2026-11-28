@@ -60,6 +60,8 @@ Fixed errors: `archive unreadable`, `image runs as root`, `image has a shell ent
 | `NAMESPACE` | `sudtanj` (also the login name) |
 | `PUBLISH_BRANCH` | `main` |
 | `TOKEN_NAME` | `DOCKERHUB_TOKEN` |
+| `USERNAME_NAME` | `DOCKERHUB_USERNAME` (not a secret to the runner: never in a redactor, no length floor) |
+| `HUB_BASE` | `https://hub.docker.com` (a base other than `https://` or `http://127.0.0.1` is refused; the env override exists for tests only) |
 | `PLATFORMS` | `[("amd64", "image-amd64.tar"), ("arm64", "image-arm64.tar")]`, in the project directory |
 | `ARCHIVE_MAX` | 2 GiB per archive |
 | `TAG_HEX` | 12 |
@@ -87,10 +89,14 @@ A single manifest (a `mediaType` of an image manifest, or no `manifests`) fails.
 ```
 clone -> check ok -> pipeline ok (two builds, two archives) -> publish:
    token present?            -- no --> error "publish refused: no token"
+   login name present and == "sudtanj"?  -- empty --> error "publish refused: no login name"; other --> error "publish refused: login is not the namespace"
    both archives ok?         -- no --> error "publish refused: archive missing" / "archive too large" / "archive unreadable"
    archive config ok?        -- no --> error "publish refused: image runs as root" / "image has a shell entrypoint" / "image platform mismatch"
    tip of main readable?     -- no --> error "tip of main unreadable" (nothing pushed)
    teardown (cleanup_run), run_left?  -- left --> error "publish refused: sidecar still running"
+   Docker Hub (runner memory, no child): login; probe repository;
+      missing -> create public -> probe shows public; public -> nothing; private -> error "publish refused: repository is private"
+      (login rejected -> "registry refused the token"; probe or create 401/403 -> "docker hub api refused repository access" / "... creation"; other -> "docker hub api error")
    move archives into a fresh directory
    container A (token on stdin):
       sha tag exists?        -- yes -> children equal the archives' digests?  no -> error "existing tag differs from this build"
@@ -116,7 +122,9 @@ All fixed, at most 140 characters, no content from the repo.
 | `failure` | `step <n> failed: <reason>` (existing) |
 | `success` | `published latest and sha-<12>` |
 | `success` | `published sha-<12>, not latest` |
-| `error` | `publish refused: no token` |
+| `error` | `publish refused: no token`, `publish refused: no login name`, `publish refused: login is not the namespace` |
+| `error` | `publish refused: repository is private` |
+| `error` | `docker hub api refused repository access`, `docker hub api refused repository creation`, `docker hub api error` |
 | `error` | `publish refused: archive missing`, `publish refused: archive too large`, `publish refused: archive unreadable` |
 | `error` | `publish refused: image runs as root`, `publish refused: image has a shell entrypoint`, `publish refused: image platform mismatch` |
 | `error` | `publish refused: sidecar still running` |
@@ -125,3 +133,16 @@ All fixed, at most 140 characters, no content from the repo.
 | `error` | `image index incomplete` |
 | `error` | `push failed` |
 | `error` | `tip of main unreadable` |
+
+## Hub repository (`rust-ci-runner/src/hub.rs`)
+
+The repository `sudtanj/<image>` on Docker Hub, as the runner sees it.
+
+| Field | Rule |
+|---|---|
+| state | `Missing` (404 on the probe after a successful login), `Public` (200, `is_private` false), `Private` (200, `is_private` true) |
+| namespace | the constant `NAMESPACE` |
+| name | the image folder name, which already passes `image::name_ok` |
+| visibility on create | `is_private: false`; verified by a second probe; the runner never changes an existing repository |
+
+Only the `access_token` field of the login answer and the `is_private` field of the probe answer are read; nothing else from a response is kept, logged or shown.
