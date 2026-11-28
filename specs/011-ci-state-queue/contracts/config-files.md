@@ -3,7 +3,7 @@
 ## `.github/factory-ci-schedule.toml`
 
 ```toml
-# Reviewed on main. Unknown keys are errors. At most 10 entries.
+# Reviewed on main. Unknown keys are errors. At most 3 entries.
 # [[schedule]]
 # repo = "sudtanj/factory-monorepo"   # required, must be in factory-ci-repos.toml with a numeric id
 # branch = "main"                     # required, must match that entry's branches
@@ -46,9 +46,9 @@ stdin: an `FCI1` artifact file. stdout: the tar. The key comes from `FACTORY_CI_
 
 ## Workflow shape (`factory-monorepo-ci.yml`)
 
-- Triggers: `workflow_dispatch` (inputs unchanged), `schedule` with `2,17,32,47 * * * *`.
-- Job `due`: main only, `contents: read`, `packages: read`, timeout 5, no Environment. Output `entries`.
-- Job `ci`: `needs: due`, runs when `entries != '[]'`, matrix `entry` from the output (`-1` is the manual run), `fail-fast: false`, name `ci <entry>`, timeout 190, Environment `factory-ci`, one `docker run`.
+- Triggers: `workflow_dispatch` (inputs unchanged), `schedule` with `7,22,37,52 * * * *`; `due` counts from now minus 7 minutes.
+- Job `due`: main only, `contents: read`, timeout 5, no Environment, no image pull. It downloads `rust-ci-runner-x86_64-linux` from the release, checks its pinned sha256, runs `due`, and writes `entries` only if the output matches `^\[[0-9,]*\]$`.
+- Job `ci`: `needs: due`, runs when `entries != '[]'`, matrix `entry` from the output (`-1` is the manual run), `fail-fast: false`, name `ci <entry>`, timeout 210, Environment `factory-ci`, one `docker run`, which also passes `-e GITHUB_RUN_ATTEMPT -e FACTORY_CI_BUDGET_END -e FACTORY_CI_RUNNER_IMAGE`.
 - No `concurrency` block. No new secret, variable or input.
 - Mounts: socket, work dir, watch list read-only, schedule file read-only.
 
