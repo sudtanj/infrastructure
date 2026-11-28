@@ -67,3 +67,40 @@ Dropped by the owner rule of 2026-11-28: a `cron` line is a workflow edit. The e
 - The 010 plan moved on twice: the second critic round re-baselined 011 on 010's real names (`REQUIRED_KEYS`, `fetch_with`, `Held::take`, `Redactor::forms`, `Log::secret_forms`, `Args`).
 - Critic review of faa835f: tick retired, queue cap and wait cap removed, slot marker, schedule file and `due` removed, tags with `+`, asset regexes with a digit entry, staged 0.4.0 and 0.4.1, constitution 1.2.0.
 - Owner rule of 2026-11-28 ("Amend 011"), corrected the same day (the ban covers `.github/workflows/` and `.github/scripts/` only; the tick reads `vars.RUNNER_IMAGE_DIGEST`): the tick stays; the schedule, the manual pin and the watch keys are out of scope; the vault read, alert file and agent script are in scope; T039 moves the tick by variable; D19 (own attempt and image through `docker inspect`) and the 45-minute numbers (budget 35, wait ends at budget minus 30, deadline budget minus 15) replace the 210-minute ones.
+
+## R-H The write-token route (owner tick decisions, Q1)
+
+**Decision**: the run job writes the claim; the token reaches the runner through the frozen names-file route.
+
+**Evidence** (`origin/main` 8660df5, read only):
+- The plan step's environment (`factory-ci-tick.yml:96-110`) holds `FACTORY_CI_TOKEN(_DOCKER)`, both bws tokens, both blob keys and a few variables. `factory-ci-plan.sh:35-37` runs the plan runner with the bws tokens and blob keys removed. `fci_log_creds` fixes the three exported values by name (`factory-ci-secrets.sh:84-100`; export at `factory-ci-plan.sh:66`). The bws list stays in a shell variable. So no mechanism hands the plan runner a store token.
+- The run job: `factory-ci-job.sh:55-66` (prepare mode lists names under a cleared environment), `:68-71` (names need `secrets_ok`), `:73-93` and `factory-ci-secrets.sh:69-82` (lookup `<repo><SEP><NAME>` with a repo id, or a shared name), `:98-101` (mask, export), `:115-117` (unset the bws token, `exec`). 0.3.0 prepare always writes an empty file (`job.rs:599-619`) and `plan.rs:310` sets `secrets_ok: false`; 012 changes both for image rows only (`wt-infra-012` plan, lines 11 and 135-136). 011 extends both.
+- Engine children inherit seven fixed variables (`engine.rs:21`, `env_clear` at `:175`), so a variable in the runner process does not reach a step unless the runner passes it.
+
+**Rejected**: a write token in the plan job (no route, and the plan job holds only a read token by design); a shared watch `secrets` entry (`watch.rs:209-215` refuses runner keys); a ledger in commit statuses (no atomic create, 1000-status cap).
+
+## R-I Schedule format (Q2)
+
+**Decision**: `every` and `offset`, UTC, epoch-aligned slots, 15 minutes to 31 days.
+
+**Evidence**: cron needs a parser and a decision on daylight saving; the interval form needs one formula and covers hourly, daily and offset-daily needs. GitHub documents about 500 content-generating requests per hour for the store (R-A); one run uses 10 to 20, so 15 minutes is the floor. The tick runs about every 5 minutes, so a 5-minute schedule fires nearly every tick.
+
+## R-J Statuses of a scheduled run (Q3)
+
+**Decision**: a separate context `factory-ci-schedule[/<project>]`, no `pending`, one post on an outcome flip at least one hour apart, 422 ignored.
+
+**Evidence**: the push walk reads exact contexts `factory-ci` and `factory-ci/<folder>` (`projects.rs:22-26`, `walk.rs`) and treats a status on the tip as done (`walk.rs:79-97`); a scheduled `pending` on the push context would overwrite the push result and burn its cap; GitHub allows 1000 statuses per sha and context, and a 15-minute schedule that posted every run would reach it in about 10 days on an unchanged sha.
+
+## R-K Ledger size and atomicity (Q4)
+
+**Decision**: one asset per claim, created atomically by name, changed only by its creator.
+
+**Evidence**: ticks are serial (`factory-ci-tick.yml:9-11`, `verdict` needs every `run` job at `:309-310`), jobs inside a tick are parallel (`max-parallel: 4`, `:123`), one row per (repo, branch, project). Disjoint assets mean no lost update; the duplicate-name refusal (R-A) arbitrates a rerun. Bound: 2 `uploaded` claims per `<h16>`, a 90-day sweep, 300 assets fail closed.
+
+## R-L Merge order with 012 (Q5)
+
+**Decision**: 012 first. 012 holds the `secrets_ok` expression and the prepare names at `plan.rs:307-310` and `job.rs` (`secret_names`, `attempt`, `JOB_DEADLINE`), commits cd36b5f and 6631734 (S2). 011 rebases onto it and extends: `secrets_ok = store_allowed || image_rule`; names are the union of 010, 012 and 011 names; image rows never get store names.
+
+## R-E update
+
+Schedule: not a workflow matter after all. The tick already runs about every 5 minutes, so a toml-declared slot evaluated by `plan` replaces cron lines (R-I). The earlier evidence that GitHub delays and disables scheduled workflows no longer applies: the outside dispatcher runs the tick.

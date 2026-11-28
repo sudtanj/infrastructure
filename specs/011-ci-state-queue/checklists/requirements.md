@@ -1,4 +1,4 @@
-# Specification Quality Checklist: Scheduled runs, a strict queue, saved state and debug artifacts for the ci command
+# Specification Quality Checklist: A scheduled tick run, a strict queue, saved state and debug artifacts
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-11-28
@@ -36,3 +36,4 @@
 - Plan must settle: ticket and renewal mechanism on GitHub (atomic create, server time), the authenticated cipher and the one-line decrypt command, packaging of `bw`, streaming of state and bundles, the `due` and entry-index flags of `ci`, and whether the 45-minute hold budget fits the stale rule. (Amended 2026-11-28: `due` and the entry flag are gone; the 45-minute job stays and the numbers follow it, plan D16.)
 - Check before the plan: FR-050 (cookie values at a key named `value`) may be narrowed if it masks ordinary text in Loki.
 - Not verified: no test or tool was run; line counts and cross-references were checked by reading and by search.
+- Amendment 2026-11-28 (owner tick decisions): spec.md re-read against every item above; all still pass. The new requirements FR-001 to FR-004 and FR-063 to FR-072 each carry a trigger, a response and `[error]` or `[boundary]` tags. No [NEEDS CLARIFICATION] marker was used: the three open owner calls (store repo name derived in code, schedules on `main` only, a project that uses the new keys cannot run through the frozen manual `ci`) each have a stated default in the Clarifications session of the same date.

@@ -27,3 +27,20 @@ Every line is shipped by `log.out("ci", ...)` after redaction. `ci` is a reserve
 | `vault unavailable <reason>` | 0.4.0 for a refused declaration, 0.4.1 for a read failure; reason without names |
 
 Public fault lines are separate (FR-037). Alert rules (`rust-ci-runner/alerts/factory-ci.yaml`) match these exact strings and the fault strings of `FAULTS`.
+
+## Ledger lines (owner tick decisions)
+
+Shipped by the run job as step `ci`, and by `plan` through its heartbeat line where marked. No line holds a repo, branch, project, token or key.
+
+| String | When |
+|---|---|
+| `claim created slot <s> attempt <n>` | the claim create succeeded |
+| `claim exists` | the create was refused, another run owns the slot |
+| `claim passed` / `claim failed` | the label was set at the end |
+| `claim finish failed` | three label writes failed |
+| `claim stale break` | a stale claim led to attempt 1 or closed the slot |
+| `claim deleted on cancel` | SIGTERM or SIGINT removed the own claim |
+| `schedule status skipped <reason>` | no flip, under one hour, or HTTP 422 |
+| `schedule due <n> rows` (plan) | rows planned this tick |
+| `schedule ledger unreadable` (plan) | the ledger read failed, no scheduled row |
+| `schedule ignored <n>` (plan) | schedules ignored by the gate, counts only |

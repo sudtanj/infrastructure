@@ -18,7 +18,7 @@ Releases are `prerelease: true`, `draft: false`, `make_latest: "false"`, at the 
 
 ## Asset names (one regex per kind)
 
-`<runid>` is `GITHUB_RUN_ID` when it is all digits, else a random decimal number. `<attempt>` is read from the runner's own container name `factory-ci-runner-<runid>-<attempt>`, else `GITHUB_RUN_ATTEMPT`, else `1` (plan D19). `<entry>` is always `0`. `<8hex>` is random.
+`<runid>` is `GITHUB_RUN_ID` when it is all digits, else a random decimal number. `<attempt>` is `GITHUB_RUN_ATTEMPT` when all digits, else `1` (plan D19; the tick runner has no container). `<entry>` is always `0`. `<8hex>` is random.
 
 | Kind | Regex | Label |
 |---|---|---|
@@ -66,3 +66,29 @@ State: after the new asset is `uploaded` and its size equals the ciphertext leng
 ## Loki lines
 
 See [loki-lines.md](loki-lines.md).
+
+## Tick path (owner tick decisions)
+
+- Store repo: `<owner>/factory-ci-state`, derived from the watched repo's owner in code, used by both `plan` (read) and `job` (write). `FACTORY_CI_STATE_REPO`, when present, must equal it.
+- `<runid>` in ticket, state and artifact names is the row's `--run-id` (16 hex, `^[0-9a-f]{16}$`) and `<attempt>` is `GITHUB_RUN_ATTEMPT` (digits, else `1`). Read the regex table above with `[0-9a-f]{16}` where it says `[0-9]+` for the run id.
+- The `plan` reads the ledger with `FACTORY_CI_TOKEN` (contents read on the store repo), never with the state token.
+
+## Ledger (claims)
+
+Release tag `ci-sched+<owner>_<name>` (the watched repo), prerelease, never `latest`, created by the run job (a 4xx means re-fetch by tag). One asset per claim:
+
+| Kind | Regex | Label |
+|---|---|---|
+| Claim | `^claim-[0-9a-f]{16}-[0-9]{1,12}-[01]$` | `^[rpfe]\.[0-9]+\.[0-9a-f]{16}$` |
+
+`<h16>` is the first 16 hex characters of SHA-256 over `project`, a NUL byte and `branch`. Body: 1 byte.
+
+| Purpose | Call |
+|---|---|
+| Plan read | `GET /repos/{store}` (`private: true`), `GET .../releases/tags/ci-sched+...` (404 on an existing private store means an empty ledger), `GET .../releases/{id}/assets?per_page=100&page=N`, at most 4 calls per repo and tick, more than 300 assets fails closed; `Date` header is `now` |
+| Claim | `POST` upload `claim-<h16>-<slot>-<n>` with label `r.<epoch>.<runid>`; any 4xx means list and decide (another run owns it) |
+| Finish | `PATCH .../assets/{id}` `{"label":"p.<epoch>.<runid>"}` or `f.`; 3 tries, 1 s apart |
+| Sweep | `DELETE` all but the 2 newest `uploaded` claims of the same `<h16>`, and any claim whose label epoch is over 90 days old; 404 counts as gone |
+| Cancel | `DELETE` the own claim, 5 s, no retry |
+
+Rules: only `uploaded` assets count; stale is label missing or malformed, epoch over 120 s ahead of the reader's `Date`, or `r` with the epoch 3600 s or more behind; a stale `n = 0` is followed by `n = 1`, a stale `n = 1` closes the slot (`e`, one `error` status). No shared document is read, modified and written; the creator is the only writer of its asset. Mutations are at least 1 s apart and the rate-limit pause of the table above applies to the job (renewals exempt).
