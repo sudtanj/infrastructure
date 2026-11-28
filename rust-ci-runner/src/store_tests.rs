@@ -554,7 +554,10 @@ fn held_take_returns_values_by_exact_key() {
         .ok()
         .expect("two names")
         .0;
-    assert_eq!(both.keys().collect::<Vec<_>>(), ["OTHER_KEY", "SITE_API_KEY"]);
+    assert_eq!(
+        both.keys().collect::<Vec<_>>(),
+        ["OTHER_KEY", "SITE_API_KEY"]
+    );
     assert_eq!(both["OTHER_KEY"], "fake-other-value-2222");
     // an empty request is an empty map
     assert!(h.take(&[]).ok().expect("no names").0.is_empty());
@@ -564,15 +567,30 @@ fn held_take_returns_values_by_exact_key() {
 fn held_take_missing_key_is_found_0() {
     let h = held(&[], &["SITE_API_KEY"]);
     let e = h.take(&strs(&["SITE_API_KEY"])).err().expect("missing key");
-    assert!(matches!(e, NamedError::Count { index: 0, found: 0 }), "{e:?}");
+    assert!(
+        matches!(e, NamedError::Count { index: 0, found: 0 }),
+        "{e:?}"
+    );
     assert_eq!(format!("{e}"), "secret #0: expected 1, found 0");
     // a name outside the allowlist is found 0 although the store holds the key
     let h = held(&[("NOT_LISTED", "fake-unlisted-3333")], &["SITE_API_KEY"]);
-    let e = h.take(&strs(&["NOT_LISTED"])).err().expect("not allowlisted");
-    assert!(matches!(e, NamedError::Count { index: 0, found: 0 }), "{e:?}");
+    let e = h
+        .take(&strs(&["NOT_LISTED"]))
+        .err()
+        .expect("not allowlisted");
+    assert!(
+        matches!(e, NamedError::Count { index: 0, found: 0 }),
+        "{e:?}"
+    );
     // the four runner values are never reachable through take (I5)
-    let e = h.take(&strs(&["FACTORY_CI_TOKEN"])).err().expect("runner key");
-    assert!(matches!(e, NamedError::Count { index: 0, found: 0 }), "{e:?}");
+    let e = h
+        .take(&strs(&["FACTORY_CI_TOKEN"]))
+        .err()
+        .expect("runner key");
+    assert!(
+        matches!(e, NamedError::Count { index: 0, found: 0 }),
+        "{e:?}"
+    );
 }
 
 #[test]
@@ -586,7 +604,10 @@ fn held_take_duplicate_key_is_found_2() {
         &["A_KEY", "B_KEY"],
     );
     let e = h.take(&strs(&["B_KEY", "A_KEY"])).err().expect("duplicate");
-    assert!(matches!(e, NamedError::Count { index: 1, found: 2 }), "{e:?}");
+    assert!(
+        matches!(e, NamedError::Count { index: 1, found: 2 }),
+        "{e:?}"
+    );
     assert_eq!(format!("{e}"), "secret #1: expected 1, found 2");
     let text = format!("{e} {e:?}");
     assert!(!text.contains("fake-"), "{text}");
@@ -600,7 +621,10 @@ fn held_take_duplicate_key_is_found_2() {
         &["A_KEY"],
     );
     let e = h.take(&strs(&["A_KEY"])).err().expect("triplicate");
-    assert!(matches!(e, NamedError::Count { index: 0, found: 3 }), "{e:?}");
+    assert!(
+        matches!(e, NamedError::Count { index: 0, found: 3 }),
+        "{e:?}"
+    );
 }
 
 #[test]
@@ -638,7 +662,10 @@ fn held_take_refuses_empty_blank_and_each_control_character() {
         "abcd\u{2029}efgh",
     ] {
         let e = one(v).err().unwrap_or_else(|| panic!("{v:?} was accepted"));
-        assert!(matches!(e, NamedError::Unusable { index: 0 }), "{v:?}: {e:?}");
+        assert!(
+            matches!(e, NamedError::Unusable { index: 0 }),
+            "{v:?}: {e:?}"
+        );
         assert_eq!(format!("{e}"), "secret #0: unusable value", "{v:?}");
     }
     // a value that is not a string is unusable too
@@ -682,7 +709,10 @@ fn held_take_line_boundary() {
         "good-line\n\n\nab\n\nlast-line",
     ] {
         let e = one(v).err().unwrap_or_else(|| panic!("{v:?} was accepted"));
-        assert!(matches!(e, NamedError::Unusable { index: 0 }), "{v:?}: {e:?}");
+        assert!(
+            matches!(e, NamedError::Unusable { index: 0 }),
+            "{v:?}: {e:?}"
+        );
     }
     // a single line of 4 characters passes
     assert_eq!(one("abcd").ok().unwrap()["SITE_API_KEY"], "abcd");
@@ -692,7 +722,10 @@ fn held_take_line_boundary() {
 fn held_take_refuses_surrounding_whitespace_on_a_single_line() {
     for v in [" abcd", "abcd ", "abcd\n", "abcd\r\n", "  abcd  ", "\nabcd"] {
         let e = one(v).err().unwrap_or_else(|| panic!("{v:?} was accepted"));
-        assert!(matches!(e, NamedError::Unusable { index: 0 }), "{v:?}: {e:?}");
+        assert!(
+            matches!(e, NamedError::Unusable { index: 0 }),
+            "{v:?}: {e:?}"
+        );
     }
     assert_eq!(one("abcd efgh").ok().unwrap()["SITE_API_KEY"], "abcd efgh");
 }
@@ -730,10 +763,17 @@ fn held_take_validates_only_the_names_taken() {
         ],
         &["GOOD_KEY", "BAD_KEY", "DUP_KEY", "MISSING_KEY"],
     );
-    let got = h.take(&strs(&["GOOD_KEY"])).ok().expect("only the good key").0;
+    let got = h
+        .take(&strs(&["GOOD_KEY"]))
+        .ok()
+        .expect("only the good key")
+        .0;
     assert_eq!(got.keys().collect::<Vec<_>>(), ["GOOD_KEY"]);
     // asking for the bad one fails the whole call, with the position of the bad name
-    let e = h.take(&strs(&["GOOD_KEY", "BAD_KEY"])).err().expect("bad value");
+    let e = h
+        .take(&strs(&["GOOD_KEY", "BAD_KEY"]))
+        .err()
+        .expect("bad value");
     assert!(matches!(e, NamedError::Unusable { index: 1 }), "{e:?}");
     // and fetch_with does not fail on such a list either
     let sb = Sandbox::new();
@@ -763,8 +803,14 @@ fn held_take_looks_up_a_repeated_name_once() {
         .0;
     assert_eq!(got.len(), 1);
     assert_eq!(got["SITE_API_KEY"], "fake-site-value-1111");
-    let e = h.take(&strs(&["DUP_KEY", "DUP_KEY"])).err().expect("duplicate key");
-    assert!(matches!(e, NamedError::Count { index: 0, found: 2 }), "{e:?}");
+    let e = h
+        .take(&strs(&["DUP_KEY", "DUP_KEY"]))
+        .err()
+        .expect("duplicate key");
+    assert!(
+        matches!(e, NamedError::Count { index: 0, found: 2 }),
+        "{e:?}"
+    );
 }
 
 #[test]
@@ -783,11 +829,23 @@ fn fetch_with_keeps_only_allowlisted_rows_and_still_needs_the_four_runner_keys()
     assert_eq!(got.secrets.log_token, GOOD[3].1);
     assert_eq!(sb.calls(), 1, "one bws call");
     assert_eq!(sb.argv(1), "secret\nlist\n-o\njson\n");
-    let ok = got.held.take(&strs(&["SITE_API_KEY"])).ok().expect("allowlisted").0;
+    let ok = got
+        .held
+        .take(&strs(&["SITE_API_KEY"]))
+        .ok()
+        .expect("allowlisted")
+        .0;
     assert_eq!(ok["SITE_API_KEY"], "fake-site-value-1111");
     // a row that is not on the allowlist was dropped
-    let e = got.held.take(&strs(&["NOT_LISTED"])).err().expect("dropped row");
-    assert!(matches!(e, NamedError::Count { index: 0, found: 0 }), "{e:?}");
+    let e = got
+        .held
+        .take(&strs(&["NOT_LISTED"]))
+        .err()
+        .expect("dropped row");
+    assert!(
+        matches!(e, NamedError::Count { index: 0, found: 0 }),
+        "{e:?}"
+    );
     // the four runner keys stay required, with the errors of `fetch`
     for k in KEYS {
         let without: Vec<_> = rows.iter().filter(|(n, _)| *n != k).cloned().collect();
@@ -822,10 +880,21 @@ fn fetch_with_empty_allowlist_equals_fetch() {
     assert_eq!(ea, eb);
     assert_eq!((sa.calls(), sb.calls()), (1, 1));
     // nothing is held
-    let e = b.held.take(&strs(&["ANY_KEY"])).err().expect("empty allowlist");
-    assert!(matches!(e, NamedError::Count { index: 0, found: 0 }), "{e:?}");
+    let e = b
+        .held
+        .take(&strs(&["ANY_KEY"]))
+        .err()
+        .expect("empty allowlist");
+    assert!(
+        matches!(e, NamedError::Count { index: 0, found: 0 }),
+        "{e:?}"
+    );
     // the same errors and the same number of calls for the same failures
-    let missing: Vec<_> = GOOD.iter().filter(|(n, _)| *n != KEYS[2]).cloned().collect();
+    let missing: Vec<_> = GOOD
+        .iter()
+        .filter(|(n, _)| *n != KEYS[2])
+        .cloned()
+        .collect();
     let cases = [
         (list(&missing), "cat \"$d/out\""),
         ("not json".to_string(), "cat \"$d/out\""),

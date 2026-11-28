@@ -70,7 +70,11 @@ fn infrastructure_entry_has_no_secrets() {
         .iter()
         .filter(|e| e.repo.eq_ignore_ascii_case("sudtanj/infrastructure"))
     {
-        assert!(e.secrets.is_empty(), "sudtanj/infrastructure lists {:?}", e.secrets);
+        assert!(
+            e.secrets.is_empty(),
+            "sudtanj/infrastructure lists {:?}",
+            e.secrets
+        );
     }
 }
 
@@ -90,8 +94,16 @@ fn locked_version(lock: &str) -> String {
         .iter()
         .filter(|p| p["name"].as_str() == Some("rust-ci-runner"))
         .collect();
-    assert_eq!(mine.len(), 1, "Cargo.lock has {} rust-ci-runner entries", mine.len());
-    mine[0]["version"].as_str().expect("version is a string").to_string()
+    assert_eq!(
+        mine.len(),
+        1,
+        "Cargo.lock has {} rust-ci-runner entries",
+        mine.len()
+    );
+    mine[0]["version"]
+        .as_str()
+        .expect("version is a string")
+        .to_string()
 }
 
 #[test]
@@ -104,7 +116,10 @@ fn cargo_toml_and_lock_versions_match() {
     assert_eq!(m, l, "Cargo.toml says {m}, Cargo.lock says {l}");
     let parts: Vec<&str> = m.split('.').collect();
     assert!(
-        parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())),
+        parts.len() == 3
+            && parts
+                .iter()
+                .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())),
         "{m} is not X.Y.Z"
     );
 }
@@ -114,7 +129,10 @@ fn the_version_check_reads_the_right_entry() {
     let lock = "[[package]]\nname = \"other\"\nversion = \"9.9.9\"\n\n\
                 [[package]]\nname = \"rust-ci-runner\"\nversion = \"0.3.0\"\n";
     assert_eq!(locked_version(lock), "0.3.0");
-    assert_eq!(package_version("[package]\nname = \"x\"\nversion = \"1.2.3\"\n"), "1.2.3");
+    assert_eq!(
+        package_version("[package]\nname = \"x\"\nversion = \"1.2.3\"\n"),
+        "1.2.3"
+    );
 }
 
 // T027 (FR-017) adds the README text. Until then the sentence is still there: test-first.

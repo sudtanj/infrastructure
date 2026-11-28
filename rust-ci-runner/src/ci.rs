@@ -227,16 +227,11 @@ fn job(
         return fail("BWS_ACCESS_TOKEN is not set");
     }
     let server = env("FACTORY_CI_BWS_SERVER_URL").filter(|v| !v.is_empty());
-    let fetched = match store::fetch_with(
-        &s.bws,
-        token,
-        server.as_deref(),
-        s.limits.bws,
-        &a.allowed,
-    ) {
-        Ok(v) => v,
-        Err(e) => return fail(&e.to_string()),
-    };
+    let fetched =
+        match store::fetch_with(&s.bws, token, server.as_deref(), s.limits.bws, &a.allowed) {
+            Ok(v) => v,
+            Err(e) => return fail(&e.to_string()),
+        };
     let sec = fetched.secrets;
     a.held = fetched.held;
     let settings = |k: &str| -> Option<String> {

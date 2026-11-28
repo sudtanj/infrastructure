@@ -269,7 +269,10 @@ mod tests {
         let inner = &json[1..json.len() - 1];
         assert!(inner.contains("\\n"));
         let out = added(&[m]).apply(&json);
-        assert!(!out.contains("line-one") && !out.contains("line-two"), "{out}");
+        assert!(
+            !out.contains("line-one") && !out.contains("line-two"),
+            "{out}"
+        );
     }
 
     #[test]

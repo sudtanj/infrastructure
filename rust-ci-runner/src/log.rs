@@ -742,13 +742,23 @@ pub mod tests {
         log.out("s", "stdout", "after canary-Zq81-value-key");
         log.event("s", "started");
         let got = pushed(&rec);
-        assert_eq!(got[0].2, "before canary-Zq81-value-key", "earlier text is not rewritten");
+        assert_eq!(
+            got[0].2, "before canary-Zq81-value-key",
+            "earlier text is not rewritten"
+        );
         assert_eq!(got[1].2, "after ***");
         assert_eq!(got[2].2, "started");
-        assert_eq!(buf.text(), "[s] before canary-Zq81-value-key\n[s] after ***\n[s] started\n");
+        assert_eq!(
+            buf.text(),
+            "[s] before canary-Zq81-value-key\n[s] after ***\n[s] started\n"
+        );
         // a second batch adds to the first
         log.add_secrets(strs(&["second-fake-value-77"]));
-        log.out("s", "stdout", "canary-Zq81-value-key and second-fake-value-77");
+        log.out(
+            "s",
+            "stdout",
+            "canary-Zq81-value-key and second-fake-value-77",
+        );
         assert_eq!(pushed(&rec)[3].2, "*** and ***");
     }
 
@@ -769,7 +779,10 @@ pub mod tests {
         log.add_secrets(strs(&["third-fake-value-88"]));
         log.out("a", "stdout", "still over");
         log.out("a", "stdout", "canary-Zq81-value-key");
-        assert_eq!(buf.text().matches("log cut off at the size limit").count(), 1);
+        assert_eq!(
+            buf.text().matches("log cut off at the size limit").count(),
+            1
+        );
         let marks = pushed(&rec)
             .iter()
             .filter(|p| p.2.contains("log cut off at the size limit"))
@@ -780,7 +793,9 @@ pub mod tests {
 
     #[test]
     fn a_secret_named_pass_cannot_mangle_a_public_line() {
-        for secret in ["pass", "started", "failed", "success", "pipeline", "in", "s"] {
+        for secret in [
+            "pass", "started", "failed", "success", "pipeline", "in", "s",
+        ] {
             // known when the log is built, and added after
             for late in [false, true] {
                 let (log, out, err, rec) = if late {
@@ -807,7 +822,11 @@ pub mod tests {
                 }
                 assert_eq!(err.text(), "");
                 // the shipped copy is redacted, as before
-                let shipped: String = pushed(&rec).iter().map(|p| p.2.clone()).collect::<Vec<_>>().join("|");
+                let shipped: String = pushed(&rec)
+                    .iter()
+                    .map(|p| p.2.clone())
+                    .collect::<Vec<_>>()
+                    .join("|");
                 assert!(shipped.contains("***"), "secret {secret:?}: {shipped}");
             }
         }

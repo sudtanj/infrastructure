@@ -2203,7 +2203,10 @@ mod step_secrets {
         assert_eq!(w.bws_calls(), 1);
         let one = step_call(&w, "one");
         assert!(pair(&one, "-e", KEY), "{one:?}");
-        assert!(!one.iter().any(|a| a.contains(VAL)), "value in argv: {one:?}");
+        assert!(
+            !one.iter().any(|a| a.contains(VAL)),
+            "value in argv: {one:?}"
+        );
         let two = step_call(&w, "two");
         assert!(!two.iter().any(|a| a == KEY || a.contains(VAL)), "{two:?}");
         assert!(step_env(&w, "one").contains(&format!("{KEY}={VAL}")));
@@ -2269,13 +2272,19 @@ mod step_secrets {
         let mut w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, v)]);
         w.docker_body = print_secret();
         assert_eq!(w.ok(), 0, "{}", w.stderr());
-        assert!(w.text("docker.envs").contains("body-line-1234"), "delivered whole");
+        assert!(
+            w.text("docker.envs").contains("body-line-1234"),
+            "delivered whole"
+        );
         let bodies = w.hub.bodies();
         for part in ["BEGIN FAKE", "body-line-1234", "END FAKE"] {
             assert!(!bodies.contains(part), "{part} in Loki");
         }
         let lines = lines(&w, "a", "stdout");
-        assert!(lines.iter().filter(|l| *l == "***").count() >= 3, "{lines:?}");
+        assert!(
+            lines.iter().filter(|l| *l == "***").count() >= 3,
+            "{lines:?}"
+        );
     }
 
     #[test]
@@ -2300,7 +2309,11 @@ mod step_secrets {
         let w = world(&req(&["OTHER_KEY"]), &entry(MAIN, &[KEY]), &store);
         assert_eq!(w.ok(), 1);
         refused(&w, "step secret not allowed");
-        assert!(w.docker().iter().all(|c| c[0] == "version"), "{:?}", w.docker());
+        assert!(
+            w.docker().iter().all(|c| c[0] == "version"),
+            "{:?}",
+            w.docker()
+        );
         // the name goes to Loki, never to a public line; no value anywhere
         assert!(w.hub.bodies().contains("OTHER_KEY"), "the name is in Loki");
         assert!(!format!("{}{}", w.stdout(), w.stderr()).contains("OTHER_KEY"));
@@ -2348,10 +2361,16 @@ mod step_secrets {
         for n in RUNNER_NAMES {
             let w = world(&req(&[KEY]), &entry(MAIN, &[n]), &[(KEY, VAL)]);
             assert_eq!(w.ok(), 1, "{n}");
-            assert_eq!(w.stderr(), "[runner] repository or ref not in the watch list\n");
+            assert_eq!(
+                w.stderr(),
+                "[runner] repository or ref not in the watch list\n"
+            );
             assert_eq!(w.bws_calls(), 0, "{n}");
             assert_eq!(w.docker().len() + w.gits().len(), 0, "{n}");
-            assert!(w.hub.pushes().is_empty() && w.hub.api_calls().is_empty(), "{n}");
+            assert!(
+                w.hub.pushes().is_empty() && w.hub.api_calls().is_empty(),
+                "{n}"
+            );
         }
     }
 
@@ -2372,7 +2391,10 @@ mod step_secrets {
         a.push("--allow-docker".to_string());
         assert_eq!(w.go(&a), 1);
         refused(&w, "docker steps are refused");
-        assert!(!w.docker().iter().any(|c| c.contains(&PIN.to_string())), "no sidecar");
+        assert!(
+            !w.docker().iter().any(|c| c.contains(&PIN.to_string())),
+            "no sidecar"
+        );
         // the docker rule comes before the allowlist
         let w = world(&docker_and_secrets(), &entry(MAIN, &[]), &[]);
         assert_eq!(w.ok(), 1);
@@ -2424,7 +2446,10 @@ mod step_secrets {
         // another ref is not in `branches`: the watch gate, before the store
         let w = world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, VAL)]);
         assert_eq!(w.go(&set(w.args(), "--ref", Some("dev"))), 1);
-        assert_eq!(w.stderr(), "[runner] repository or ref not in the watch list\n");
+        assert_eq!(
+            w.stderr(),
+            "[runner] repository or ref not in the watch list\n"
+        );
         assert_eq!(w.bws_calls(), 0);
     }
 
@@ -2435,7 +2460,10 @@ mod step_secrets {
         assert_eq!(w.ok(), 0, "{}", w.stderr());
         let w = world(&pipe(&["a"]), &entry("", &[KEY]), &[(KEY, VAL)]);
         assert_eq!(w.ok(), 0, "{}", w.stderr());
-        assert!(!w.text("docker.calls").contains(KEY), "an unrequested name is not passed on");
+        assert!(
+            !w.text("docker.calls").contains(KEY),
+            "an unrequested name is not passed on"
+        );
     }
 
     #[test]
@@ -2468,12 +2496,27 @@ mod step_secrets {
         let bad = format!("secret {KEY}: unusable value");
         let rows: Vec<(&str, Vec<&str>, &str, &str)> = vec![
             ("missing", vec![], none.as_str(), ""),
-            ("duplicate", vec!["fake-dup-1111", "fake-dup-2222"], twice.as_str(), "fake-dup-1111"),
+            (
+                "duplicate",
+                vec!["fake-dup-1111", "fake-dup-2222"],
+                twice.as_str(),
+                "fake-dup-1111",
+            ),
             ("empty", vec![""], bad.as_str(), ""),
             ("blank", vec!["   "], bad.as_str(), ""),
             ("NUL", vec!["fake\0nul-7777"], bad.as_str(), "nul-7777"),
-            ("3-character line", vec!["good-line-1111\nabc"], bad.as_str(), "good-line-1111"),
-            ("trailing newline", vec!["fake-trail-5555\n"], bad.as_str(), "fake-trail-5555"),
+            (
+                "3-character line",
+                vec!["good-line-1111\nabc"],
+                bad.as_str(),
+                "good-line-1111",
+            ),
+            (
+                "trailing newline",
+                vec!["fake-trail-5555\n"],
+                bad.as_str(),
+                "fake-trail-5555",
+            ),
             ("over 32 KiB", vec![big.as_str()], bad.as_str(), ""),
         ];
         for (label, vals, want, leak) in rows {
@@ -2570,9 +2613,15 @@ mod step_secrets {
             }
         }
         let lines = lines(&w, "a", "stdout");
-        assert!(lines.contains(&"line prefix-***-suffix".to_string()), "{lines:?}");
+        assert!(
+            lines.contains(&"line prefix-***-suffix".to_string()),
+            "{lines:?}"
+        );
         // plain, both base64 lines, percent and hex: five short lines that hold `***`
-        let short = lines.iter().filter(|l| l.contains("***") && l.len() <= 12).count();
+        let short = lines
+            .iter()
+            .filter(|l| l.contains("***") && l.len() <= 12)
+            .count();
         assert!(short >= 5, "{short} short masked lines in {lines:?}");
         assert_public(&w);
     }
@@ -2607,11 +2656,18 @@ mod step_secrets {
         let big = "a".repeat(32769);
         let store = [(KEY, VAL), ("OTHER_KEY", "fake-other-value-9")];
         let worlds: Vec<(&str, W)> = vec![
-            ("not allowed", world(&req(&["OTHER_KEY"]), &entry(MAIN, &[KEY]), &store)),
+            (
+                "not allowed",
+                world(&req(&["OTHER_KEY"]), &entry(MAIN, &[KEY]), &store),
+            ),
             ("missing", world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[])),
             (
                 "duplicate",
-                world(&req(&[KEY]), &entry(MAIN, &[KEY]), &[(KEY, "fake-d1-1111"), (KEY, "fake-d2-2222")]),
+                world(
+                    &req(&[KEY]),
+                    &entry(MAIN, &[KEY]),
+                    &[(KEY, "fake-d1-1111"), (KEY, "fake-d2-2222")],
+                ),
             ),
             (
                 "unusable",

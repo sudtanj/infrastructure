@@ -127,7 +127,15 @@ fn phase_a_makes_no_write_and_never_names_a_store() {
 
 #[test]
 fn bw_and_bitwarden_names_are_refused_in_an_entry_and_a_pipeline() {
-    for n in ["BW_X", "BW_", "bw_x", "BITWARDEN", "bitwarden_x", "Bitwarden", "BITWARDENX"] {
+    for n in [
+        "BW_X",
+        "BW_",
+        "bw_x",
+        "BITWARDEN",
+        "bitwarden_x",
+        "Bitwarden",
+        "BITWARDENX",
+    ] {
         let p = parse(&entry(&format!("secrets = [{n:?}]"))).unwrap_err();
         assert!(p.iter().any(|l| l.contains(n)), "{n} in an entry: {p:?}");
         let t = format!("[steps.a]\nimage = \"x\"\ncommands = [\"y\"]\nsecrets = [{n:?}]\n");

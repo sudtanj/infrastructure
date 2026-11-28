@@ -103,7 +103,11 @@ fn cut_point(buf: &[u8], forms: &[String]) -> usize {
     }) {
         cut = p;
     }
-    if cut == 0 { whole } else { cut }
+    if cut == 0 {
+        whole
+    } else {
+        cut
+    }
 }
 
 pub(crate) fn read_capped(r: impl Read, cap: u64) -> String {
@@ -652,7 +656,9 @@ mod tests {
 
     fn pieces(input: &[u8], forms: &[String]) -> Vec<String> {
         let mut got = Vec::new();
-        pump(Cursor::new(input.to_vec()), forms, |p| got.push(p.to_string()));
+        pump(Cursor::new(input.to_vec()), forms, |p| {
+            got.push(p.to_string())
+        });
         got
     }
 
@@ -662,7 +668,6 @@ mod tests {
             .map(|p| red.apply(p.trim_end_matches('\n')))
             .collect()
     }
-
 
     /// A reader that returns at most `step` bytes per call.
     struct Drip<'a> {
@@ -701,7 +706,10 @@ mod tests {
         // the same with a reader that gives a few bytes at a time
         let line = format!("{}{V}{}\n", "a".repeat(CUT - 10), "b".repeat(200));
         let mut got = Vec::new();
-        let r = Drip { data: line.as_bytes(), step: 7 };
+        let r = Drip {
+            data: line.as_bytes(),
+            step: 7,
+        };
         pump(r, &forms, |p| got.push(p.to_string()));
         let want = format!("{}***{}", "a".repeat(CUT - 10), "b".repeat(200));
         assert_eq!(shown(&red, &got), want);
@@ -709,7 +717,9 @@ mod tests {
 
     #[test]
     fn pump_masks_a_32_kib_value_across_the_cut() {
-        let v: String = (0..32768).map(|i| (b'a' + (i % 26) as u8) as char).collect();
+        let v: String = (0..32768)
+            .map(|i| (b'a' + (i % 26) as u8) as char)
+            .collect();
         let red = Redactor::new([v.clone()]);
         let forms = red.forms();
         for start in [CUT - 32767, CUT - 16384, CUT - 1] {
@@ -753,11 +763,18 @@ mod tests {
             assert_eq!(pieces(b"\n\n", &forms).concat(), "\n\n", "{forms:?}");
             // a long stream without a newline, cut at 64 KB several times
             let long: Vec<u8> = (0..3 * CUT + 17).map(|i| b'a' + (i % 26) as u8).collect();
-            assert_eq!(pieces(&long, &forms).concat().as_bytes(), &long[..], "{forms:?}");
+            assert_eq!(
+                pieces(&long, &forms).concat().as_bytes(),
+                &long[..],
+                "{forms:?}"
+            );
         }
         // no forms is what `pump` does today: pieces of at most 64 KB, a newline ends a piece
         let line = format!("{}\n", "a".repeat(70_000));
-        let sizes: Vec<usize> = pieces(line.as_bytes(), &[]).iter().map(String::len).collect();
+        let sizes: Vec<usize> = pieces(line.as_bytes(), &[])
+            .iter()
+            .map(String::len)
+            .collect();
         assert_eq!(sizes, [CUT, 70_001 - CUT]);
         assert_eq!(pieces(b"one\ntwo\nthree", &[]), ["one\n", "two\n", "three"]);
     }
@@ -778,13 +795,21 @@ mod tests {
                     return Ok(6);
                 }
                 if self.step == 2 {
-                    self.ok.store(self.seen.load(Ordering::SeqCst) >= 1, Ordering::SeqCst);
+                    self.ok
+                        .store(self.seen.load(Ordering::SeqCst) >= 1, Ordering::SeqCst);
                 }
                 Ok(0)
             }
         }
-        let (seen, ok) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicBool::new(false)));
-        let r = Probe { step: 0, seen: seen.clone(), ok: ok.clone() };
+        let (seen, ok) = (
+            Arc::new(AtomicUsize::new(0)),
+            Arc::new(AtomicBool::new(false)),
+        );
+        let r = Probe {
+            step: 0,
+            seen: seen.clone(),
+            ok: ok.clone(),
+        };
         let s2 = seen.clone();
         pump(r, &[], move |_| {
             s2.fetch_add(1, Ordering::SeqCst);
@@ -803,7 +828,10 @@ mod tests {
                         let input = format!("{line}{tail}");
                         let got = pieces(input.as_bytes(), &forms);
                         let joined = got.concat();
-                        assert!(!joined.contains('\u{fffd}'), "{ch} prefix {prefix} {forms:?}");
+                        assert!(
+                            !joined.contains('\u{fffd}'),
+                            "{ch} prefix {prefix} {forms:?}"
+                        );
                         assert_eq!(joined, input, "{ch} prefix {prefix} {forms:?}");
                     }
                 }

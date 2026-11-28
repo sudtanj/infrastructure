@@ -40,7 +40,10 @@ impl WatchEntry {
         match &self.secret_branches {
             Some(b) => b.iter().any(|g| glob_match(g, git_ref)),
             None => {
-                !self.branches.iter().any(|g| g.chars().all(|c| matches!(c, '*' | '?')))
+                !self
+                    .branches
+                    .iter()
+                    .any(|g| g.chars().all(|c| matches!(c, '*' | '?')))
                     && self.matches_branch(git_ref)
             }
         }

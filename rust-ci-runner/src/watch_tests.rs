@@ -411,8 +411,14 @@ fn secrets_allowed_on_follows_secret_branches_when_set() {
     // matching and not matching, with `branches` left at its default
     assert!(gate("secret_branches = [\"main\"]", "main"));
     assert!(!gate("secret_branches = [\"main\"]", "dev"));
-    assert!(gate("secret_branches = [\"main\", \"release/*\"]", "release/2"));
-    assert!(!gate("secret_branches = [\"main\", \"release/*\"]", "feature"));
+    assert!(gate(
+        "secret_branches = [\"main\", \"release/*\"]",
+        "release/2"
+    ));
+    assert!(!gate(
+        "secret_branches = [\"main\", \"release/*\"]",
+        "feature"
+    ));
     // set but empty matches nothing
     assert!(!gate("secret_branches = []", "main"));
     // with `branches` explicit too, the two lists agree on `main` and differ on `dev`
@@ -426,5 +432,8 @@ fn secrets_allowed_on_secret_branches_star_opens_it_on_purpose() {
     for r in ["main", "dev", "release/1", "feat/x/y"] {
         assert!(gate("secret_branches = [\"*\"]", r), "{r}");
     }
-    assert!(gate("branches = [\"main\"]\nsecret_branches = [\"*\"]", "main"));
+    assert!(gate(
+        "branches = [\"main\"]\nsecret_branches = [\"*\"]",
+        "main"
+    ));
 }

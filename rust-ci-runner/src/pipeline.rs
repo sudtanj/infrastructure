@@ -579,26 +579,41 @@ commands = ["x"]
         assert_eq!(p.secret_names(), ["ALPHA_KEY", "MID_KEY", "ZED_KEY"]);
         assert!(made(&[("a", vec![], false)]).secret_names().is_empty());
         // a name repeated inside one step is still one name
-        assert_eq!(made(&[("a", vec!["X_KEY", "X_KEY"], false)]).secret_names(), ["X_KEY"]);
+        assert_eq!(
+            made(&[("a", vec!["X_KEY", "X_KEY"], false)]).secret_names(),
+            ["X_KEY"]
+        );
     }
 
     #[test]
     fn unlisted_is_empty_when_every_name_is_allowed() {
-        let p = made(&[("a", vec!["ONE_KEY", "TWO_KEY"], false), ("b", vec!["ONE_KEY"], false)]);
+        let p = made(&[
+            ("a", vec!["ONE_KEY", "TWO_KEY"], false),
+            ("b", vec!["ONE_KEY"], false),
+        ]);
         assert!(p.unlisted(&allow(&["TWO_KEY", "ONE_KEY"])).is_empty());
-        assert!(p.unlisted(&allow(&["ONE_KEY", "TWO_KEY", "EXTRA_KEY"])).is_empty());
+        assert!(p
+            .unlisted(&allow(&["ONE_KEY", "TWO_KEY", "EXTRA_KEY"]))
+            .is_empty());
         assert!(made(&[("a", vec![], false)]).unlisted(&[]).is_empty());
     }
 
     #[test]
     fn unlisted_reports_each_miss_with_its_step() {
-        let p = made(&[("a", vec!["ONE_KEY", "TWO_KEY"], false), ("b", vec!["ONE_KEY"], false)]);
+        let p = made(&[
+            ("a", vec!["ONE_KEY", "TWO_KEY"], false),
+            ("b", vec!["ONE_KEY"], false),
+        ]);
         // one allowed, one listed
         assert_eq!(p.unlisted(&allow(&["ONE_KEY"])), [pair("a", "TWO_KEY")]);
         // empty allowlist: every (step, name) pair
         assert_eq!(
             sorted(p.unlisted(&[])),
-            [pair("a", "ONE_KEY"), pair("a", "TWO_KEY"), pair("b", "ONE_KEY")]
+            [
+                pair("a", "ONE_KEY"),
+                pair("a", "TWO_KEY"),
+                pair("b", "ONE_KEY")
+            ]
         );
         // each miss
         assert_eq!(
@@ -610,8 +625,18 @@ commands = ["x"]
     #[test]
     fn unlisted_compares_bytes_so_a_case_difference_is_a_miss() {
         let p = made(&[("a", vec!["SITE_API_KEY"], false)]);
-        for near in ["site_api_key", "Site_Api_Key", "SITE_API_KEY_", "SITE_API_KE", "SITE_API_KEY "] {
-            assert_eq!(p.unlisted(&allow(&[near])), [pair("a", "SITE_API_KEY")], "{near}");
+        for near in [
+            "site_api_key",
+            "Site_Api_Key",
+            "SITE_API_KEY_",
+            "SITE_API_KE",
+            "SITE_API_KEY ",
+        ] {
+            assert_eq!(
+                p.unlisted(&allow(&[near])),
+                [pair("a", "SITE_API_KEY")],
+                "{near}"
+            );
         }
         assert!(p.unlisted(&allow(&["SITE_API_KEY"])).is_empty());
     }
@@ -619,7 +644,10 @@ commands = ["x"]
     // I4: empty if and only if the names are a subset; a bigger allowlist never adds a miss.
     #[test]
     fn unlisted_is_empty_iff_names_are_a_subset_and_growing_never_adds() {
-        let p = made(&[("a", vec!["ONE_KEY", "TWO_KEY"], false), ("b", vec!["THREE_KEY"], false)]);
+        let p = made(&[
+            ("a", vec!["ONE_KEY", "TWO_KEY"], false),
+            ("b", vec!["THREE_KEY"], false),
+        ]);
         let universe = ["ONE_KEY", "TWO_KEY", "THREE_KEY", "FOUR_KEY"];
         for mask in 0u32..16 {
             let sub: Vec<&str> = (0..4)
@@ -633,7 +661,10 @@ commands = ["x"]
             for extra in universe {
                 let mut bigger = sub.clone();
                 bigger.push(extra);
-                assert!(p.unlisted(&allow(&bigger)).len() <= miss.len(), "{sub:?} + {extra}");
+                assert!(
+                    p.unlisted(&allow(&bigger)).len() <= miss.len(),
+                    "{sub:?} + {extra}"
+                );
             }
         }
     }
@@ -641,16 +672,24 @@ commands = ["x"]
     #[test]
     fn docker_secret_problems_flags_secrets_with_any_docker_step() {
         // one step that has both
-        assert!(!made(&[("a", vec!["ONE_KEY"], true)]).docker_secret_problems().is_empty());
+        assert!(!made(&[("a", vec!["ONE_KEY"], true)])
+            .docker_secret_problems()
+            .is_empty());
         // two separate steps
         let two = made(&[("a", vec!["ONE_KEY"], false), ("b", vec![], true)]);
         assert!(!two.docker_secret_problems().is_empty());
         let two = made(&[("a", vec![], true), ("b", vec!["ONE_KEY"], false)]);
         assert!(!two.docker_secret_problems().is_empty());
         // docker alone, secrets alone, neither
-        assert!(made(&[("a", vec![], true), ("b", vec![], false)]).docker_secret_problems().is_empty());
-        assert!(made(&[("a", vec!["ONE_KEY"], false)]).docker_secret_problems().is_empty());
-        assert!(made(&[("a", vec![], false)]).docker_secret_problems().is_empty());
+        assert!(made(&[("a", vec![], true), ("b", vec![], false)])
+            .docker_secret_problems()
+            .is_empty());
+        assert!(made(&[("a", vec!["ONE_KEY"], false)])
+            .docker_secret_problems()
+            .is_empty());
+        assert!(made(&[("a", vec![], false)])
+            .docker_secret_problems()
+            .is_empty());
         // it takes no flag: the existing docker rule still has its own answer
         let p = made(&[("a", vec!["ONE_KEY"], true)]);
         assert!(p.docker_problems(true).is_empty());
@@ -673,9 +712,7 @@ commands = ["x"]
             "BITWARDENX",
         ] {
             assert!(!valid_secret_name(name), "{name} must be reserved");
-            let t = format!(
-                "[steps.a]\nimage = \"x\"\ncommands = [\"y\"]\nsecrets = [{name:?}]\n"
-            );
+            let t = format!("[steps.a]\nimage = \"x\"\ncommands = [\"y\"]\nsecrets = [{name:?}]\n");
             let v = bad(&t);
             assert!(has(&v, name), "{name} not named in {v:?}");
         }
