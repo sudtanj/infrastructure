@@ -593,7 +593,17 @@ fn attempt(
     let log = mk_log(creds.iter().cloned().chain(vals.clone()).collect());
     let run = run_env(&o.t.run_id, &o.t.sha, o.prev.as_deref(), &o.branch, "push");
     let end = pipeline_deadline().min(deadline);
-    let out = run_pipeline(engine, &o.t.run_id, &dir, &p, run, secrets, &log, &dind, end);
+    let out = run_pipeline(
+        engine,
+        &o.t.run_id,
+        &dir,
+        &p,
+        run,
+        secrets,
+        &log,
+        &dind,
+        end,
+    );
     // A failed step of an image row is `error`, so the next tick retries it (FR-007).
     let fail = if image::image_project(&o.t.project) {
         "error"

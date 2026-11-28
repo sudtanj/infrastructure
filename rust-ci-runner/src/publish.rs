@@ -297,7 +297,9 @@ fn go(
     let limit = left(deadline)?.min(CONTAINER_LIMIT);
     let out = run(("publish", SCRIPT_A), (scratch.0.as_path(), true), limit)?;
     let list = out.lines().rev().find_map(|l| l.strip_prefix("INDEX "));
-    list.map(verify_index).unwrap_or(Err(INCOMPLETE)).map_err(err)?;
+    list.map(verify_index)
+        .unwrap_or(Err(INCOMPLETE))
+        .map_err(err)?;
 
     let not_latest = format!("published {tag}, not latest");
     if first != t.sha {
