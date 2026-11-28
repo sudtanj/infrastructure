@@ -43,7 +43,7 @@ Each entry gives the decision, the evidence and what was rejected. Evidence was 
 - The Dockerfile already pins `bws` with `ADD --checksum` and uses a throwaway `unzip` stage; the same pattern fits. The bundle is architecture-independent, so no per-architecture stage.
 - Size: +70 MB estimated for Node and libraries, against 143 MB for the standalone binary. The PR records the real number from the selftest build.
 
-**Wipe**: login with `BW_CLIENTID` and `BW_CLIENTSECRET` (`bw login --apikey`), `bw unlock --passwordenv BW_PASSWORD --raw`, `BW_SESSION` for `bw list items`, then `bw logout`, remove `BITWARDENCLI_APPDATA_DIR`, verify it is gone. `bw list items` plus an exact-name filter in process keeps item names out of argv. Command names and flags are from Bitwarden's CLI help as I know it; the fake `bw` of T010 fixes the contract and quickstart section 2 proves it with the real CLI.
+**Wipe**: login with `BW_CLIENTID` and `BW_CLIENTSECRET` (`bw login --apikey`), `bw unlock --passwordenv BW_PASSWORD --raw`, `BW_SESSION` for `bw list items`, then `bw logout`, remove `BITWARDENCLI_APPDATA_DIR`, verify it is gone. `bw list items` plus an exact-name filter in process keeps item names out of argv. Command names and flags are from Bitwarden's CLI help as I know it; the fake `bw` of T032 fixes the contract and quickstart section 2 proves it with the real CLI.
 
 **Rejected**: the glibc standalone binary (size, shim), `npm install -g @bitwarden/cli` (unpinned transitive dependencies at build time), the Bitwarden web API directly (reimplements vault decryption).
 

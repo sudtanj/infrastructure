@@ -45,10 +45,14 @@ stdin: an `FCI1` artifact file. stdout: the tar. The key comes from `FACTORY_CI_
 ## Workflow shape
 
 - Triggers: `workflow_dispatch` (inputs unchanged) and up to 3 `schedule` cron lines.
-- One job `ci`: main only, `needs` nothing, timeout 210, Environment `factory-ci` (or `factory-ci-schedule` for scheduled starts, see the plan's owner decisions), name `ci <entry>`, one `docker run` that also passes `-e GITHUB_RUN_ATTEMPT -e FACTORY_CI_RUNNER_IMAGE`.
+- One job `ci`: main only, `needs` nothing, timeout 210, Environment `factory-ci` (or `factory-ci-schedule` for scheduled starts, see the plan's owner decisions), name `ci <entry>`, one `docker run` that also passes `-e GITHUB_RUN_ATTEMPT -e FACTORY_CI_RUNNER_IMAGE`, where the second takes its value from `RUNNER_IMAGE`.
 - No `concurrency` block, no `due` job, no schedule file, no new secret, variable or input.
 - Mounts: socket, work dir, watch list read-only.
 
 ## Public lines (closed lists)
 
 stdout adds `[runner] waiting for the queue`. stderr adds nine lines: `queue wait expired`, `queue renewal failed`, `state not allowed`, `state store not configured`, `state restore failed`, `state save failed`, `vault item not allowed`, `vault unavailable`, `artifact upload refused`. No repo, branch, project, state, release, asset, item, field or secret name, and no count, position or age, appears in any public line.
+
+## Landing order of the workflow
+
+T023 lands the workflow with zero `cron` lines and no `schedule:` key, so merging it starts nothing. T030 adds the first `cron` line, its `case` branch and the `schedule:` key, and the header of `.github/factory-ci-repos.toml`. The header comment of the workflow explains why the concurrency group is gone, and the shell test checks it.

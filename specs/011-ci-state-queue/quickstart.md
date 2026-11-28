@@ -26,6 +26,7 @@ Run against the store repo with the real state token, in a scratch release `ci-q
 | Rate headers | one call, inspect `x-ratelimit-*` | present |
 | Delete | `DELETE` the assets | 204, a second delete 404 |
 | Trace scan | capture one real Playwright login-failure trace from the 002 fixture (HTML reporter off), run the scan with the typed password seeded as a known value | refused; with a clean value, passes |
+| Trace after restored state | capture a trace taken after a login with a restored state file | refused unless the 002 scrub removed the cookies; a refusal is by design (the README says logged-in traces may be refused) |
 | `bw` (0.4.1) | the dedicated account, collection ids set, `list items` | only allowlisted items appear |
 | Environment | the Environment that holds the token has no required reviewer and no branch rule that excludes scheduled runs | confirmed; else see the owner decision in plan.md |
 
@@ -35,7 +36,7 @@ If any line fails, stop. A failing label update, id order, 200-trial run or race
 
 Loki query: `{service_name="factory-ci", repo="sudtanj/factory-monorepo"}`, filter on step `ci`; the lines are those of the loki-lines contract.
 
-1. No-secret canary (T030): `factory-monorepo-ci` with `repo=sudtanj/infrastructure`, `project=rust-ci-runner` ends `[runner] pipeline passed`, with no queue or state line anywhere.
+1. No-secret canary (T026): `factory-monorepo-ci` with `repo=sudtanj/infrastructure`, `project=rust-ci-runner` ends `[runner] pipeline passed`, with no queue or state line anywhere.
 2. Run the Playwright project by hand. Expect: `restore none`, a pass, one state asset (`state saved`).
 3. Run again. Expect `restore ok` and no login.
 4. Start four runs of the project at once. Expect them one after another, `[runner] waiting for the queue` once in each waiting log, no `overlap` line, no `queue wait expired`.
