@@ -40,7 +40,7 @@ pub fn folder_name_ok(name: &str) -> bool {
 /// The shapes a job may name: `.`, a top-level folder, or `docker/<name>` with a valid image name.
 pub fn project_path_ok(path: &str) -> bool {
     path == "."
-        || folder_name_ok(path)
+        || (path != "docker" && folder_name_ok(path))
         || path
             .strip_prefix("docker/")
             .is_some_and(crate::image::name_ok)

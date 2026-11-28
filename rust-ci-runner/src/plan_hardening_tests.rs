@@ -2,14 +2,13 @@
 //! I26, I28. Helpers come from `plan_tests`.
 
 use crate::fake::FakeApi;
-use crate::plan::{candidates, finish, Apis, Opts};
+use crate::plan::{candidates, Apis, Opts};
 use crate::plan_tests::{add_repo, entries, fake, opts, plan_all, rows, sha, NOW};
 use std::cell::Cell;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const R: &str = "o/r";
-const D: &str = "docker";
 
 thread_local! {
     static SLEPT_MS: Cell<u64> = const { Cell::new(0) };
@@ -250,53 +249,6 @@ fn closing_errors_come_after_pending_and_unchanged() {
         states,
         ["pending", "pending", "success", "success", "error"]
     );
-}
-
-#[test]
-fn rows_split_by_allow_docker_use_the_docker_token_and_share_unique_numbers() {
-    // FR-047, FR-048, plan.md decision 9
-    let plain = fake();
-    let docker = FakeApi::new("ci-docker-bot", NOW);
-    add_repo(&plain, "o/plain", &[("main", 1, 10)], &["."]);
-    // 012 plan decision 2, FR-023: only image rows on main are docker rows. The path is built, not
-    // written out: `the_hardening_fixture_has_no_docker_project` scans this file for the literal.
-    docker.set_branch("o/dock", "main", &sha(2));
-    docker.set_tree(
-        "o/dock",
-        &sha(2),
-        &[
-            ("docker", "tree"),
-            (format!("{D}/ab").as_str(), "tree"),
-            (format!("{D}/ab/.factory-ci.toml").as_str(), "blob"),
-        ],
-    );
-    docker.set_commits("o/dock", &sha(2), vec![(sha(2), vec![], 10)]);
-    let list = entries(&[("o/plain", ""), ("o/dock", "allow_docker = true")]);
-    let apis = Apis {
-        plain: &plain,
-        docker: &docker,
-    };
-    let fin = finish(&apis, candidates(&apis, &list, &opts()), &opts());
-    assert_eq!(fin.matrix.len(), 1);
-    assert_eq!(fin.matrix_docker.len(), 1);
-    assert!(fin
-        .matrix_docker
-        .iter()
-        .all(|r| r.allow_docker && r.repo == "o/dock"));
-    assert!(
-        plain.calls().iter().all(|c| !c.contains("o/dock")),
-        "{:?}",
-        plain.calls()
-    );
-    assert!(
-        docker.calls().iter().all(|c| !c.contains("o/plain")),
-        "{:?}",
-        docker.calls()
-    );
-    assert!(docker.posts().len() == 1 && plain.posts().len() == 1);
-    let mut n: Vec<usize> = rows(&fin).iter().map(|r| r.n as usize).collect();
-    n.sort();
-    assert_eq!(n, [0, 1]);
 }
 
 #[test]

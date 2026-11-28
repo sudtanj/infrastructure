@@ -471,9 +471,10 @@ fn require_pinned(env: Env, name: &str) -> Result<String, String> {
 pub(crate) fn project_dir(ws: &Path, project: &str) -> Result<PathBuf, String> {
     let dir = ws.join(project);
     let real = std::fs::symlink_metadata(&dir).is_ok_and(|m| m.is_dir());
+    // Equal to `<canonical ws>/<project>`: a link in an intermediate component (`docker`) moves it.
     let dir = std::fs::canonicalize(&dir)
         .ok()
-        .filter(|d| real && std::fs::canonicalize(ws).is_ok_and(|w| d.starts_with(w)));
+        .filter(|d| real && std::fs::canonicalize(ws).is_ok_and(|w| *d == w.join(project)));
     dir.ok_or_else(|| "project directory is missing or not a plain directory".to_string())
 }
 

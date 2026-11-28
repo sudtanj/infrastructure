@@ -530,3 +530,17 @@ fn run_quiet_logs_fails_when_a_passing_run_dropped_lines() {
     let fx = sb.fixture(&[(".factory-ci.toml", &pipeline(&[("a", "")]))]);
     assert_eq!(quiet_run(&sb, &fx, 1, 500), Ok(false));
 }
+
+#[test]
+fn project_dir_refuses_a_symlinked_intermediate_directory() {
+    // 012 add-on: `docker` is a link to a folder inside the checkout, `docker/hello` is a plain directory
+    // whose canonical path stays inside it, but not at `<ws>/docker/hello`
+    let ws = std::env::temp_dir().join(format!("fci-pdir-{}", crate::util::random_id()));
+    std::fs::create_dir_all(ws.join("real/hello")).unwrap();
+    std::fs::create_dir_all(ws.join("plain")).unwrap();
+    std::os::unix::fs::symlink(ws.join("real"), ws.join("docker")).unwrap();
+    assert!(crate::job::project_dir(&ws, "docker/hello").is_err());
+    assert!(crate::job::project_dir(&ws, "plain").is_ok());
+    assert!(crate::job::project_dir(&ws, ".").is_ok());
+    let _ = std::fs::remove_dir_all(&ws);
+}

@@ -386,6 +386,7 @@ fn project_path_ok_accepts_the_three_shapes_and_nothing_else() {
         "a/b/c",
         "docker/Hello",
         "docker/a",
+        "docker",
         "docker/",
         "docker//x",
         "docker/x/y",
