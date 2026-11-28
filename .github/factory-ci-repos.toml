@@ -17,4 +17,5 @@ branches = ["main"]
 [[watch]]
 repo = "sudtanj/factory-monorepo"
 id = 1473152830
-branches = ["main"]
+# Temporary, feature 002 merge gate (factory-monorepo specs/002-browser-tests, T003/T016); revert after Merge 2 (T120).
+branches = ["main", "002-browser-tests*"]
