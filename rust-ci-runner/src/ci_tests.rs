@@ -2338,7 +2338,7 @@ mod step_secrets {
         let store = [(KEY, VAL), ("OTHER_KEY", "fake-other-value-9")];
         let w = world(&req(&["OTHER_KEY"]), &entry(MAIN, &[KEY]), &store);
         assert_eq!(w.ok(), 1);
-        refused(&w, "step secret unavailable");
+        refused(&w, "step secret not allowed");
         assert!(
             w.docker().iter().all(|c| c[0] == "version"),
             "{:?}",
@@ -2359,11 +2359,11 @@ mod step_secrets {
         let watch = format!("[[watch]]\nrepo = \"o/r\"\nid = 42\n{MAIN}");
         let w = world(&req(&[KEY]), &watch, &[(KEY, VAL)]);
         assert_eq!(w.ok(), 1);
-        refused(&w, "step secret unavailable");
+        refused(&w, "step secret not allowed");
         // an empty list is the same
         let w = world(&req(&[KEY]), &entry(MAIN, &[]), &[(KEY, VAL)]);
         assert_eq!(w.ok(), 1);
-        refused(&w, "step secret unavailable");
+        refused(&w, "step secret not allowed");
     }
 
     #[test]
@@ -2371,7 +2371,7 @@ mod step_secrets {
         let store = [(KEY, VAL), ("site_api_key", "fake-lower-value-3")];
         let w = world(&req(&["site_api_key"]), &entry(MAIN, &[KEY]), &store);
         assert_eq!(w.ok(), 1);
-        refused(&w, "step secret unavailable");
+        refused(&w, "step secret not allowed");
         assert!(!w.hub.bodies().contains("fake-lower-value-3"));
     }
 
@@ -2501,7 +2501,7 @@ mod step_secrets {
         // unlisted name and a refused ref: the allowlist comes first
         let w = world(&req(&["OTHER_KEY"]), &entry("", &[KEY]), &[(KEY, VAL)]);
         assert_eq!(w.ok(), 1);
-        refused(&w, "step secret unavailable");
+        refused(&w, "step secret not allowed");
         // refused ref and a missing value: the gate comes before the lookup
         let w = world(&req(&[KEY]), &entry("", &[KEY]), &[]);
         assert_eq!(w.ok(), 1);
